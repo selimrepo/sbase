@@ -1,9 +1,9 @@
-FROM gradle:8.14-jdk21 AS build
+FROM gradle:8.14-jdk17 AS build
 WORKDIR /workspace
 COPY --chown=gradle:gradle . .
 RUN gradle --no-daemon clean bootJar
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:17-jre
 WORKDIR /app
 RUN useradd --system --uid 10001 --create-home appuser
 COPY --from=build /workspace/build/libs/*.jar /app/sbase.jar
