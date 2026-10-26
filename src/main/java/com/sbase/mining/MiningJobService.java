@@ -1,5 +1,6 @@
 package com.sbase.mining;
 
+import com.sbase.doris.DorisClient;
 import com.sbase.doris.DorisDatasetWriter;
 import org.apache.spark.ml.clustering.KMeans;
 import org.apache.spark.ml.clustering.KMeansModel;
@@ -10,34 +11,46 @@ import org.apache.spark.sql.SparkSession;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 
-import static org.apache.spark.sql.functions.col;
-
 @Service
 public class MiningJobService {
     private final MiningJobRepository repository;
     private final SparkSession spark;
+    private final DorisClient doris;
     private final DorisDatasetWriter dorisWriter;
     private final Executor executor;
 
-    public MiningJobService(MiningJobRepository repository, SparkSession spark,
+    public MiningJobService(MiningJobRepository repository, SparkSession spark, DorisClient doris,
                             DorisDatasetWriter dorisWriter,
                             @Qualifier("miningExecutor") Executor executor) {
         this.repository = repository;
         this.spark = spark;
+        this.doris = doris;
         this.dorisWriter = dorisWriter;
         this.executor = executor;
     }
 
     @Transactional
     public MiningJob submit(MiningJobRequest request) {
-        MiningJobEntity entity = repository.save(new MiningJobEntity(
+        MiningJobEntity entity = repository.saveAndFlush(new MiningJobEntity(
                 UUID.randomUUID(), request.operation(), request.sourceTable(), request.outputTable()));
-        executor.execute(() -> execute(entity.getId(), request));
+        UUID id = entity.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    executor.execute(() -> execute(id, request));
+                } catch (RuntimeException ex) {
+                    markFailed(id, "Mining queue rejected the job: " + ex.getMessage());
+                }
+            }
+        });
         return MiningJob.from(entity);
     }
 
@@ -51,11 +64,10 @@ public class MiningJobService {
             markRunning(id);
             Dataset<Row> source = spark.read()
                     .format("jdbc")
-                    .option("url", System.getenv().getOrDefault("DORIS_JDBC_URL",
-                            "jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true"))
+                    .option("url", doris.jdbcUrl())
                     .option("dbtable", request.sourceTable())
-                    .option("user", System.getenv().getOrDefault("DORIS_USERNAME", "root"))
-                    .option("password", System.getenv().getOrDefault("DORIS_PASSWORD", ""))
+                    .option("user", doris.username())
+                    .option("password", doris.password())
                     .option("driver", "com.mysql.cj.jdbc.Driver")
                     .load();
 
