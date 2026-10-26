@@ -7,8 +7,26 @@ spring:
     name: sbase
   lifecycle:
     timeout-per-shutdown-phase: 30s
-  jackson:
-    default-property-inclusion: non_null
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/sbase}
+    username: ${SPRING_DATASOURCE_USERNAME:sbase}
+    password: ${SPRING_DATASOURCE_PASSWORD:sbase}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 15
+      minimum-idle: 2
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        format_sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
 
 management:
   endpoints:
@@ -26,10 +44,10 @@ sbase:
     app-name: sbase-data-mining-hub
     shuffle-partitions: 8
   doris:
-    jdbc-url: ${DORIS_JDBC_URL:jdbc:mysql://localhost:9030/analytics?useSSL=false}
+    jdbc-url: ${DORIS_JDBC_URL:jdbc:mysql://localhost:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true}
     username: ${DORIS_USERNAME:root}
     password: ${DORIS_PASSWORD:}
-    driver-class-name: org.apache.doris.jdbc.Driver
+    driver-class-name: com.mysql.cj.jdbc.Driver
   jobs:
     max-concurrent: 2
     retention-hours: 168
