@@ -1,4 +1,23 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sbase-postgres
+    environment:
+      POSTGRES_DB: sbase
+      POSTGRES_USER: sbase
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sbase -d sbase"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [sbase-net]
+    restart: unless-stopped
+
   sbase:
     build:
       context: .
@@ -9,12 +28,17 @@ services:
       - "8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
+      SPRING_DATASOURCE_USERNAME: sbase
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
       SPARK_MASTER: spark://spark-master:7077
       DORIS_JDBC_URL: jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
-      DORIS_USERNAME: root
+      DORIS_USERNAME: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
       JAVA_TOOL_OPTIONS: -Xms512m -Xmx2g
     depends_on:
+      postgres:
+        condition: service_healthy
       spark-master:
         condition: service_started
       doris-fe:
@@ -93,6 +117,7 @@ networks:
         - subnet: 172.30.0.0/24
 
 volumes:
+  postgres-data:
   doris-fe-meta:
   doris-fe-log:
   doris-be-storage:
