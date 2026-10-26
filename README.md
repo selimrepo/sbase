@@ -77,3 +77,42 @@ Spark defaults to `local[*]` outside Compose. In Compose the application connect
 ## Next modules
 
 Dataset catalog and ingestion connectors, Mahout algorithm adapters, experiment tracking, model registry/versioning, feature engineering, durable distributed job scheduling, access control, and dashboard/BI APIs.
+
+
+## Dataset catalog
+
+Register Doris or other analytical datasets in the PostgreSQL metadata catalog:
+
+```http
+POST /api/datasets
+Content-Type: application/json
+
+{
+  "name": "Customer features",
+  "namespace": "analytics",
+  "tableName": "customer_features",
+  "description": "Curated customer feature table",
+  "sourceType": "DORIS",
+  "schemaJson": "[{\"name\":\"age\",\"type\":\"double\"}]"
+}
+```
+
+Use `GET /api/datasets`, `GET /api/datasets/{id}`, `PUT /api/datasets/{id}` and `DELETE /api/datasets/{id}` to manage catalog entries. Dataset namespace and table name are immutable after registration to avoid silently changing the physical source reference.
+
+## Pipeline definitions
+
+Pipeline definitions are versioned metadata documents stored in PostgreSQL. The current API validates and persists a JSON object with a non-empty `steps` array; each step must declare a string `type`.
+
+```http
+POST /api/pipelines
+Content-Type: application/json
+
+{
+  "name": "Customer feature preparation",
+  "description": "Initial pipeline definition",
+  "enabled": true,
+  "definitionJson": "{\"steps\":[{\"type\":\"read-doris\"},{\"type\":\"select\"}]}"
+}
+```
+
+Manage definitions with `GET /api/pipelines`, `GET /api/pipelines/{id}`, `PUT /api/pipelines/{id}` and `DELETE /api/pipelines/{id}`. Every update increments the definition version. **Execution is not yet wired to Spark**: the current stage delivers the catalog and versioned pipeline-definition foundation, not a visual ETL designer or production scheduler.
