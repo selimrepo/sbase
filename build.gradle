@@ -9,7 +9,7 @@ version = '0.1.0-SNAPSHOT'
 description = 'Advanced data science and data mining hub'
 
 java {
-    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+    toolchain { languageVersion = JavaLanguageVersion.of(17) }
 }
 
 repositories { mavenCentral() }
