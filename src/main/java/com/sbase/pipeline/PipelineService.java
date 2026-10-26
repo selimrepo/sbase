@@ -18,7 +18,7 @@ public class PipelineService {
     @Transactional
     public PipelineEntity create(PipelineRequest request) {
         validateDefinition(request.definitionJson());
-        return repository.save(new PipelineEntity(request.name(), request.description(), request.definitionJson()));
+        return repository.save(new PipelineEntity(request.name(), request.description(), request.definitionJson(), request.enabled()));
     }
     @Transactional(readOnly = true)
     public List<PipelineEntity> list() { return repository.findAllByOrderByUpdatedAtDesc(); }
