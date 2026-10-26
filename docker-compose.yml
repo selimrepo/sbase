@@ -1,0 +1,99 @@
+services:
+  sbase:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sbase:latest
+    container_name: sbase
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPARK_MASTER: spark://spark-master:7077
+      DORIS_JDBC_URL: jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
+      DORIS_USERNAME: root
+      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
+      JAVA_TOOL_OPTIONS: -Xms512m -Xmx2g
+    depends_on:
+      spark-master:
+        condition: service_started
+      doris-fe:
+        condition: service_healthy
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  spark-master:
+    image: apache/spark:3.5.6
+    container_name: sbase-spark-master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master"]
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  spark-worker:
+    image: apache/spark:3.5.6
+    container_name: sbase-spark-worker
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    depends_on: [spark-master]
+    environment:
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: 2
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  doris-fe:
+    image: apache/doris:doris-fe-3.0.7
+    container_name: sbase-doris-fe
+    hostname: doris-fe
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010
+      FE_ID: 1
+    ports:
+      - "8030:8030"
+      - "9030:9030"
+    volumes:
+      - doris-fe-meta:/opt/apache-doris/fe/doris-meta
+      - doris-fe-log:/opt/apache-doris/fe/log
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+  doris-be:
+    image: apache/doris:doris-be-3.0.7
+    container_name: sbase-doris-be
+    hostname: doris-be
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010
+      BE_ADDR: 172.30.0.11:9050
+    depends_on:
+      doris-fe:
+        condition: service_started
+    volumes:
+      - doris-be-storage:/opt/apache-doris/be/storage
+      - doris-be-log:/opt/apache-doris/be/log
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.11
+    restart: unless-stopped
+
+networks:
+  sbase-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  doris-fe-meta:
+  doris-fe-log:
+  doris-be-storage:
+  doris-be-log:
