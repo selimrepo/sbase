@@ -17,9 +17,9 @@ public class PipelineEntity {
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
 
     protected PipelineEntity() { }
-    public PipelineEntity(String name, String description, String definitionJson) {
+    public PipelineEntity(String name, String description, String definitionJson, boolean enabled) {
         this.id = UUID.randomUUID(); this.name = name; this.description = description;
-        this.definitionJson = definitionJson; this.version = 1; this.enabled = true;
+        this.definitionJson = definitionJson; this.version = 1; this.enabled = enabled;
         this.createdAt = Instant.now(); this.updatedAt = this.createdAt;
     }
     public void update(String name, String description, String definitionJson, boolean enabled) {
