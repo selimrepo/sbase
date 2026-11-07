@@ -16,7 +16,7 @@ repositories { mavenCentral() }
 
 ext {
     sparkVersion = '3.5.6'
-    mahoutVersion = '14.1'
+    mahoutVersion = '0.13.0'
 }
 
 dependencies {
