@@ -125,8 +125,6 @@ services:
     depends_on:
       doris-fe:
         condition: service_healthy
-    sysctls:
-      vm.max_map_count: 2000000
     volumes:
       - doris-be-storage:/opt/apache-doris/be/storage
       - doris-be-log:/opt/apache-doris/be/log
