@@ -13,7 +13,7 @@ public class PermissionService {
   return auth.getName();
  }
  public boolean has(String subject,String permission){
-  return !db.query("SELECT 1 FROM sbase_user_roles ur JOIN sbase_role_permissions rp ON rp.role_id=ur.role_id WHERE ur.subject=? AND rp.permission=? LIMIT 1",rs->rs.next(),subject,permission);
+  return db.query("SELECT 1 FROM sbase_user_roles ur JOIN sbase_role_permissions rp ON rp.role_id=ur.role_id WHERE ur.subject=? AND rp.permission=? LIMIT 1",rs->rs.next(),subject,permission);
  }
  public void require(Authentication auth,String permission){
   String sub=subject(auth);
