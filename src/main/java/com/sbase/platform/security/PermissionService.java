@@ -1,6 +1,7 @@
 package com.sbase.platform.security;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -17,7 +18,7 @@ public class PermissionService {
 
  private final JdbcTemplate db;
 
- public PermissionService(JdbcTemplate db) {
+ public PermissionService(@Qualifier("jdbcTemplate") JdbcTemplate db) {
   this.db = db;
  }
 
