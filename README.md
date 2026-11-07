@@ -1,118 +1,56 @@
-# SBase — Advanced Data Science & Data Mining Hub
+# SBase — Data Science & Data Mining Hub
 
-SBase is a Spring Boot platform for data engineering, distributed data mining, machine learning and analytical serving.
-
-## Architecture
-
-- **PostgreSQL + Spring Data JPA** — transactional metadata: users, datasets, experiments, model registry, job state, permissions and audit data.
-- **Apache Spark** — distributed SQL, ETL, DataFrames, MLlib and batch/stream processing.
-- **Apache Mahout** — additional scalable linear algebra and machine-learning algorithms, exposed through algorithm adapters.
-- **Apache Doris** — analytical warehouse for facts, aggregates, feature tables and BI queries.
-
-PostgreSQL is the system of record. Doris is the analytical store. Do not use Doris for JPA entities or transactional job metadata.
-
-## Requirements
-
-Docker Engine and Docker Compose plugin. Allocate at least 8 GB RAM for the complete local stack; Spark workers and Doris need additional memory for meaningful workloads.
+Spring Boot + PostgreSQL/JPA metadata + Spark + Mahout + Apache Doris.
 
 ## Run
-
 ```bash
 cp .env.example .env
 docker compose up --build -d
-docker compose ps
-docker compose logs -f sbase
 ```
 
-Services:
-- SBase API: http://localhost:8080
-- Actuator health: http://localhost:8080/actuator/health
-- Spark master UI: http://localhost:8081
-- Doris FE web UI: http://localhost:8030
-- PostgreSQL: localhost:5432
-- Doris MySQL protocol: localhost:9030
+## Core APIs
+- Mining jobs: `/api/mining/jobs`
+- Dataset catalog: `/api/datasets`
+- Pipeline definitions: `/api/pipelines`
+- Mahout algorithms: `GET /api/algorithms/mahout`, `POST /api/algorithms/mahout/score` (cosine and Euclidean adapters)
+- Platform metadata: `/api/platform/experiments`, `/api/platform/models`, `/api/platform/models/{id}/versions`, `/api/platform/features`, `/api/platform/schedules`, `/api/platform/dashboards?owner=...`
+- BI inventory: `GET /api/platform/bi/summary`
 
-On first Doris startup, register the backend if it is not automatically registered:
+## Capability foundations
+Migration V3 adds ingestion connector/run metadata, experiment tracking, registered models and immutable numbered model versions, feature-set definitions, persistent schedule definitions, role/permission/subject mapping tables, dashboard and widget metadata. `IngestionConnector` is the extension SPI for Doris/JDBC/object-store/stream connectors. Mahout adapters use Mahout vectors for cosine similarity and expose Euclidean distance alongside it.
 
-```sql
-SHOW BACKENDS;
-ALTER SYSTEM ADD BACKEND "doris-be:9050";
-CREATE DATABASE IF NOT EXISTS analytics;
-```
+## Execution and security services
 
-## Mining API
+- Ingestion execution: `POST /api/platform/ingestion/{jdbc|doris|kafka}/runs`; connector types are discovered at `GET /api/platform/ingestion/connectors`. JDBC/Doris use bounded batch inserts; Kafka consumption is bounded by `maxRecords` and `pollTimeoutMs`.
+- Spark feature materialization: `POST /api/platform/features/materialize` with Parquet input/output URIs and allow-listed operations (`copy`, `cast_double`, `log1p`, `normalize_zscore`, `bucket`).
+- S3-compatible artifact storage: `S3ArtifactStore` supports S3/MinIO endpoint overrides, bucket, region and credentials through environment variables.
+- Distributed schedule polling: PostgreSQL `FOR UPDATE SKIP LOCKED` claims due jobs with expiring leases, retry counters and exponential backoff.
+- JWT resource-server validation: configure `JWT_ISSUER_URI`; role and permission claims are mapped to Spring Security authorities. Database role-permission checks are available through `PermissionService`.
+- Doris BI datasource: a dedicated JDBC datasource and allow-listed table query service are configured with `DORIS_ALLOWED_TABLES`.
 
-Submit an asynchronous mining job:
+## Production limitations
+These are persisted capability foundations and metadata APIs, not a finished managed platform. The connector SPI still needs concrete source adapters and run orchestration. Schedules are stored but require a distributed lease/dispatch worker before execution. Feature definitions are not yet materialized or served online. Model artifact URIs require an external object store and lifecycle policy. Role tables are not yet wired into JWT/OIDC authorization; secure the API behind an authenticated gateway and enforce dataset-level permissions before multi-user production. Dashboard metadata is stored; arbitrary SQL execution is intentionally not exposed. BI summary currently reports PostgreSQL metadata counts, not Doris query analytics.
+
+Run `gradle clean test bootJar` before deployment. CI must pass before treating this branch as production-ready.
+
+
+### Automatic data mining
+
+Submit an asynchronous automatic analysis through the existing mining-job API:
 
 ```http
 POST /api/mining/jobs
 Content-Type: application/json
 
 {
+  "operation": "auto",
   "sourceTable": "analytics.customer_features",
   "outputTable": "analytics.customer_clusters",
-  "operation": "kmeans",
-  "k": 4,
+  "k": 3,
   "maxIterations": 30
 }
 ```
 
-Poll `GET /api/mining/jobs/{id}`. Job metadata is persisted in PostgreSQL through Spring Data JPA.
+The `auto` operation profiles the source using Spark and persists the resulting report in the mining job's `resultSummary`. It detects numeric, categorical and temporal columns; calculates null rates, approximate cardinality, numeric summaries and IQR outlier fences; extracts frequent categorical values; reports strong pairwise numeric correlations; and generates data-quality/modeling recommendations. When there are at least two numeric columns and ten rows, it also fits a deterministic-seed K-means model and appends cluster predictions to the configured Doris output table. Poll `GET /api/mining/jobs/{id}` for QUEUED/RUNNING/SUCCEEDED/FAILED state and the report.
 
-Initial Spark operations include descriptive statistics, data profiling and K-means clustering. Model output publishing to Doris is implemented using Spark JDBC writes; create the target Doris table with a schema matching the DataFrame before publishing.
-
-## Configuration
-
-See `.env.example`. Spring Boot uses the standard `spring.datasource.*` PostgreSQL configuration. Doris has its own independent JDBC URL and credentials under `sbase.doris.*`; it is accessed through a dedicated client and does not replace or interfere with the JPA datasource.
-
-## Development
-
-```bash
-gradle clean test
-gradle bootRun
-```
-
-Spark defaults to `local[*]` outside Compose. In Compose the application connects to the Spark standalone master.
-
-## Next modules
-
-Dataset catalog and ingestion connectors, Mahout algorithm adapters, experiment tracking, model registry/versioning, feature engineering, durable distributed job scheduling, access control, and dashboard/BI APIs.
-
-
-## Dataset catalog
-
-Register Doris or other analytical datasets in the PostgreSQL metadata catalog:
-
-```http
-POST /api/datasets
-Content-Type: application/json
-
-{
-  "name": "Customer features",
-  "namespace": "analytics",
-  "tableName": "customer_features",
-  "description": "Curated customer feature table",
-  "sourceType": "DORIS",
-  "schemaJson": "[{\"name\":\"age\",\"type\":\"double\"}]"
-}
-```
-
-Use `GET /api/datasets`, `GET /api/datasets/{id}`, `PUT /api/datasets/{id}` and `DELETE /api/datasets/{id}` to manage catalog entries. Dataset namespace and table name are immutable after registration to avoid silently changing the physical source reference.
-
-## Pipeline definitions
-
-Pipeline definitions are versioned metadata documents stored in PostgreSQL. The current API validates and persists a JSON object with a non-empty `steps` array; each step must declare a string `type`.
-
-```http
-POST /api/pipelines
-Content-Type: application/json
-
-{
-  "name": "Customer feature preparation",
-  "description": "Initial pipeline definition",
-  "enabled": true,
-  "definitionJson": "{\"steps\":[{\"type\":\"read-doris\"},{\"type\":\"select\"}]}"
-}
-```
-
-Manage definitions with `GET /api/pipelines`, `GET /api/pipelines/{id}`, `PUT /api/pipelines/{id}` and `DELETE /api/pipelines/{id}`. Every update increments the definition version. **Execution is not yet wired to Spark**: the current stage delivers the catalog and versioned pipeline-definition foundation, not a visual ETL designer or production scheduler.
+This is unsupervised exploratory mining, not automatic target discovery or a claim of a validated predictive model. Validate generated clusters and recommendations against domain knowledge before operational use.

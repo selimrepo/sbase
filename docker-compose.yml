@@ -47,7 +47,7 @@ services:
       spark-master:
         condition: service_started
       doris-fe:
-        condition: service_healthy
+        condition: service_started
     networks: [sbase-net]
     restart: unless-stopped
 
