@@ -43,23 +43,25 @@ jobs:
           DORIS_PASSWORD: ""
         run: docker compose -f docker-compose.yml up --build -d
 
-      - name: Wait for application health
-        env:
-          POSTGRES_PASSWORD: ci-sbase-password
-          DORIS_USERNAME: root
-          DORIS_PASSWORD: ""
+      - name: Wait for application liveness
         run: |
           set -eu
-          for attempt in $(seq 1 120); do
-            if curl --fail --silent http://localhost:8080/actuator/health; then
+          max_attempts=36
+          for attempt in $(seq 1 "$max_attempts"); do
+            if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 \
+              http://localhost:8080/actuator/health/liveness; then
               echo
-              echo "SBase actuator health check passed."
+              echo "SBase application liveness check passed."
               exit 0
             fi
-            echo "Waiting for SBase startup ($attempt/120)..."
+            echo "Waiting for SBase startup ($attempt/$max_attempts)..."
+            if [ "$((attempt % 6))" -eq 0 ]; then
+              docker compose -f docker-compose.yml ps
+              docker compose -f docker-compose.yml logs --no-color --tail=40 sbase
+            fi
             sleep 5
           done
-          echo "SBase did not become healthy within 10 minutes."
+          echo "SBase did not become live within 3 minutes."
           docker compose -f docker-compose.yml ps
           docker compose -f docker-compose.yml logs --no-color --tail=200
           exit 1
