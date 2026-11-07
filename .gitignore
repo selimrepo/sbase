@@ -7,3 +7,5 @@ out/
 .DS_Store
 data/
 logs/
+frontend/node_modules/
+frontend/dist/

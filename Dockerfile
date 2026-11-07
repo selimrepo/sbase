@@ -1,6 +1,14 @@
+FROM node:22-alpine AS frontend
+WORKDIR /frontend
+COPY frontend/package.json ./package.json
+RUN npm install --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
 FROM gradle:8.14-jdk17 AS build
 WORKDIR /workspace
 COPY --chown=gradle:gradle . .
+COPY --from=frontend /frontend/dist /workspace/src/main/resources/static
 RUN gradle --no-daemon clean bootJar \
  && mkdir -p /opt/spark-jars \
  && unzip -j build/libs/*.jar 'BOOT-INF/lib/mysql-connector-j-*.jar' -d /opt/spark-jars
