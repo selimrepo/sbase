@@ -37,7 +37,15 @@ jobs:
           docker compose -f docker-compose.yml config --quiet
 
       - name: Configure host kernel for Doris BE
-        run: sudo sysctl -w vm.max_map_count=2000000
+        run: |
+          sudo sysctl -w vm.max_map_count=2000000
+          # Doris BE refuses to start when host swap is enabled.
+          sudo swapoff -a
+          if [ "$(awk 'NR > 1 { total += $3 } END { print total + 0 }' /proc/swaps)" -ne 0 ]; then
+            echo "Swap is still enabled; Doris BE requires swap to be disabled."
+            cat /proc/swaps
+            exit 1
+          fi
 
       - name: Build and start complete stack
         env:
