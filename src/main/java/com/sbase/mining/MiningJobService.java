@@ -25,14 +25,16 @@ public class MiningJobService {
     private final DorisClient doris;
     private final DorisDatasetWriter dorisWriter;
     private final Executor executor;
+    private final AutomaticMiningService automaticMining;
 
     public MiningJobService(MiningJobRepository repository, SparkSession spark, DorisClient doris,
-                            DorisDatasetWriter dorisWriter,
+                            DorisDatasetWriter dorisWriter, AutomaticMiningService automaticMining,
                             @Qualifier("miningExecutor") Executor executor) {
         this.repository = repository;
         this.spark = spark;
         this.doris = doris;
         this.dorisWriter = dorisWriter;
+        this.automaticMining = automaticMining;
         this.executor = executor;
     }
 
@@ -74,6 +76,7 @@ public class MiningJobService {
             String summary = switch (request.operation()) {
                 case "describe" -> source.describe().toJSON().collectAsList().toString();
                 case "profile" -> source.summary().toJSON().collectAsList().toString();
+                case "auto" -> automaticMining.analyze(source, request.outputTable());
                 case "kmeans" -> runKMeans(source, request);
                 default -> throw new IllegalArgumentException("Unsupported operation: " + request.operation());
             };
