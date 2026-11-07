@@ -36,6 +36,9 @@ jobs:
           docker compose version
           docker compose -f docker-compose.yml config --quiet
 
+      - name: Configure host kernel for Doris BE
+        run: sudo sysctl -w vm.max_map_count=2000000
+
       - name: Build and start complete stack
         env:
           POSTGRES_PASSWORD: ci-sbase-password
