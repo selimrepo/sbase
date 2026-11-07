@@ -1,15 +1,59 @@
 package com.sbase.platform.bi;
-import org.springframework.beans.factory.annotation.Value;
+
+import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.annotation.*;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+
 import javax.sql.DataSource;
+
 @Configuration
 public class DorisDataSourceConfig {
- @Bean(name="dorisDataSource") 
- DataSource dorisDataSource(@Value("${sbase.doris.jdbc-url}") String url,@Value("${sbase.doris.username}") String user,@Value("${sbase.doris.password}") String pass,@Value("${sbase.doris.driver-class-name}") String driver){
-  var ds=new DriverManagerDataSource();ds.setDriverClassName(driver);ds.setUrl(url);ds.setUsername(user);ds.setPassword(pass);return ds;
- }
- @Bean(name="dorisJdbcTemplate") JdbcTemplate dorisJdbcTemplate(@Qualifier("dorisDataSource") DataSource ds){return new JdbcTemplate(ds);}
+
+    /**
+     * The application's primary database. Keeping this bean explicit is
+     * important: defining the Doris DataSource makes Spring Boot's default
+     * DataSource auto-configuration back off. JPA and Flyway must use Postgres.
+     */
+    @Bean(name = "dataSource")
+    @Primary
+    HikariDataSource primaryDataSource(
+            @Value("${spring.datasource.url}") String url,
+            @Value("${spring.datasource.username}") String user,
+            @Value("${spring.datasource.password}") String pass,
+            @Value("${spring.datasource.hikari.maximum-pool-size:15}") int maxPoolSize,
+            @Value("${spring.datasource.hikari.minimum-idle:2}") int minIdle) {
+        HikariDataSource ds = new HikariDataSource();
+        ds.setJdbcUrl(url);
+        ds.setUsername(user);
+        ds.setPassword(pass);
+        ds.setDriverClassName("org.postgresql.Driver");
+        ds.setMaximumPoolSize(maxPoolSize);
+        ds.setMinimumIdle(minIdle);
+        ds.setPoolName("sbase-postgres");
+        return ds;
+    }
+
+    @Bean(name = "dorisDataSource")
+    DataSource dorisDataSource(
+            @Value("${sbase.doris.jdbc-url}") String url,
+            @Value("${sbase.doris.username}") String user,
+            @Value("${sbase.doris.password}") String pass,
+            @Value("${sbase.doris.driver-class-name}") String driver) {
+        DriverManagerDataSource ds = new DriverManagerDataSource();
+        ds.setDriverClassName(driver);
+        ds.setUrl(url);
+        ds.setUsername(user);
+        ds.setPassword(pass);
+        return ds;
+    }
+
+    @Bean(name = "dorisJdbcTemplate")
+    JdbcTemplate dorisJdbcTemplate(@Qualifier("dorisDataSource") DataSource ds) {
+        return new JdbcTemplate(ds);
+    }
 }
