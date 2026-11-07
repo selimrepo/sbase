@@ -1,7 +1,7 @@
 package com.sbase.platform.feature;
 import jakarta.validation.Valid;import jakarta.validation.constraints.*;
 import org.apache.spark.sql.Dataset;import org.apache.spark.sql.Row;
-import org.springframework.http.HttpStatus;import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.*;
 import java.util.*;
 @RestController @RequestMapping("/api/platform/features")
 public class FeatureEngineeringController {
@@ -9,7 +9,7 @@ public class FeatureEngineeringController {
  public FeatureEngineeringController(SparkFeatureEngineeringService service,com.sbase.platform.security.PermissionService permissions){this.service=service;this.permissions=permissions;}
  public record MaterializeRequest(@NotBlank String inputUri,@NotBlank String outputUri,@NotEmpty List<@Valid Operation> operations){}
  public record Operation(@NotBlank String operation,@NotBlank String source,@NotBlank String output,int buckets){}
- @PostMapping("/materialize") @ResponseStatus(HttpStatus.ACCEPTED)
+ @PostMapping("/materialize")
  public Map<String,Object> materialize(@Valid @RequestBody MaterializeRequest r,org.springframework.security.core.Authentication auth){
   permissions.require(auth,"features:write");
   var ops=r.operations().stream().map(o->new SparkFeatureEngineeringService.FeatureOperation(o.operation(),o.source(),o.output(),o.buckets())).toList();
