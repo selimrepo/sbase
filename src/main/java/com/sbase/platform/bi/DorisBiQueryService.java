@@ -1,6 +1,7 @@
 package com.sbase.platform.bi;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import java.util.*;
@@ -11,7 +12,7 @@ public class DorisBiQueryService {
  private final JdbcTemplate doris;
  private static final Pattern SAFE=Pattern.compile("(?is)^\\s*select\\s+.+?\\s+from\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)\\b.*$");
  private final Set<String> allowed;
- public DorisBiQueryService(@Value("${sbase.doris.allowed-tables:}") String tables,org.springframework.beans.factory.annotation.Qualifier("dorisJdbcTemplate") JdbcTemplate doris){
+ public DorisBiQueryService(@Value("${sbase.doris.allowed-tables:}") String tables,@Qualifier("dorisJdbcTemplate") JdbcTemplate doris){
   this.doris=doris;this.allowed=new HashSet<>();for(String t:tables.split(","))if(!t.isBlank())allowed.add(t.trim().toLowerCase(Locale.ROOT));
  }
  public List<Map<String,Object>> query(String sql){
