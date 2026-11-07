@@ -6,7 +6,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import javax.sql.DataSource;
 @Configuration
 public class DorisDataSourceConfig {
- @Bean(name="dorisDataSource") @org.springframework.context.annotation.Primary(false)
+ @Bean(name="dorisDataSource") 
  DataSource dorisDataSource(@Value("${sbase.doris.jdbc-url}") String url,@Value("${sbase.doris.username}") String user,@Value("${sbase.doris.password}") String pass,@Value("${sbase.doris.driver-class-name}") String driver){
   var ds=new DriverManagerDataSource();ds.setDriverClassName(driver);ds.setUrl(url);ds.setUsername(user);ds.setPassword(pass);return ds;
  }
