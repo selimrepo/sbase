@@ -50,7 +50,7 @@ public class AutomaticMiningService {
   }
   Map<String,Object> correlations=new LinkedHashMap<>();
   List<String> selected=numeric.stream().limit(20).toList();
-  for(int i=0;i<selected.size();i++)for(int j=i+1;j<selected.size();j++){
+  for(int i=0;rows>=2&&i<selected.size();i++)for(int j=i+1;j<selected.size();j++){
    String a=selected.get(i),b=selected.get(j);
    double corr=input.stat().corr(a,b);
    if(Double.isFinite(corr)&&Math.abs(corr)>=0.5)correlations.put(a+"__"+b,corr);
