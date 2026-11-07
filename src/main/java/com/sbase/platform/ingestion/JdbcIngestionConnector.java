@@ -18,7 +18,9 @@ public class JdbcIngestionConnector implements IngestionConnector {
       Statement st=source.createStatement();ResultSet rs=st.executeQuery(query)){
    ResultSetMetaData md=rs.getMetaData();int n=md.getColumnCount();
    String placeholders=String.join(",",Collections.nCopies(n,"?"));
-   String columns=java.util.stream.IntStream.rangeClosed(1,n).mapToObj(i->quote(md,i)).reduce((a,b)->a+","+b).orElseThrow();
+   StringJoiner columnNames=new StringJoiner(",");
+   for(int i=1;i<=n;i++) columnNames.add(quote(md,i));
+   String columns=columnNames.toString();
    String insert="INSERT INTO "+safeIdentifier(target)+" ("+columns+") VALUES ("+placeholders+")";
    try(Connection dest=DriverManager.getConnection(required(o,"targetJdbcUrl"),o.getOrDefault("targetUsername",""),o.getOrDefault("targetPassword",""));
        PreparedStatement ps=dest.prepareStatement(insert)){
