@@ -32,3 +32,25 @@ Migration V3 adds ingestion connector/run metadata, experiment tracking, registe
 These are persisted capability foundations and metadata APIs, not a finished managed platform. The connector SPI still needs concrete source adapters and run orchestration. Schedules are stored but require a distributed lease/dispatch worker before execution. Feature definitions are not yet materialized or served online. Model artifact URIs require an external object store and lifecycle policy. Role tables are not yet wired into JWT/OIDC authorization; secure the API behind an authenticated gateway and enforce dataset-level permissions before multi-user production. Dashboard metadata is stored; arbitrary SQL execution is intentionally not exposed. BI summary currently reports PostgreSQL metadata counts, not Doris query analytics.
 
 Run `gradle clean test bootJar` before deployment. CI must pass before treating this branch as production-ready.
+
+
+### Automatic data mining
+
+Submit an asynchronous automatic analysis through the existing mining-job API:
+
+```http
+POST /api/mining/jobs
+Content-Type: application/json
+
+{
+  "operation": "auto",
+  "sourceTable": "analytics.customer_features",
+  "outputTable": "analytics.customer_clusters",
+  "k": 3,
+  "maxIterations": 30
+}
+```
+
+The `auto` operation profiles the source using Spark and persists the resulting report in the mining job's `resultSummary`. It detects numeric, categorical and temporal columns; calculates null rates, approximate cardinality, numeric summaries and IQR outlier fences; extracts frequent categorical values; reports strong pairwise numeric correlations; and generates data-quality/modeling recommendations. When there are at least two numeric columns and ten rows, it also fits a deterministic-seed K-means model and appends cluster predictions to the configured Doris output table. Poll `GET /api/mining/jobs/{id}` for QUEUED/RUNNING/SUCCEEDED/FAILED state and the report.
+
+This is unsupervised exploratory mining, not automatic target discovery or a claim of a validated predictive model. Validate generated clusters and recommendations against domain knowledge before operational use.
