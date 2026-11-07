@@ -3,13 +3,14 @@ package com.sbase.platform.feature;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.functions;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Lazy;
 import java.util.*;
 import static org.apache.spark.sql.functions.*;
 
 @Service
 public class SparkFeatureEngineeringService {
  private final SparkSession spark;
- public SparkFeatureEngineeringService(SparkSession spark){this.spark=spark;}
+ public SparkFeatureEngineeringService(@Lazy SparkSession spark){this.spark=spark;}
  public Dataset<Row> transform(String inputUri,List<FeatureOperation> operations){
   Dataset<Row> frame=spark.read().parquet(inputUri);
   for(FeatureOperation op:operations){
