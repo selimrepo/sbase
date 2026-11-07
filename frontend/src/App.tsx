@@ -4,7 +4,8 @@ import {Activity,AlertCircle,Bell,Boxes,BrainCircuit,ChevronDown,Clock3,Database
 import {useQuery} from '@tanstack/react-query'
 import {get} from './api'
 import {Home,Datasets,Pipelines,Mining,Experiments,Features,Schedules,System} from './pages'
-const groups=[{name:'WORKSPACE',items:[['/','Overview',LayoutDashboard],['/datasets','Data catalog',Database],['/pipelines','Pipeline studio',Workflow]]},{name:'INTELLIGENCE',items:[['/mining','Mining jobs',BrainCircuit],['/experiments','Experiments',FlaskConical],['/features','Feature store',Layers3]]},{name:'OPERATIONS',items:[['/schedules','Schedules',Clock3],['/system','System health',Gauge]]}] as const
+type NavItem=readonly [string,string,typeof LayoutDashboard]
+const groups:{name:string;items:NavItem[]}[]=[{name:'WORKSPACE',items:[['/','Overview',LayoutDashboard],['/datasets','Data catalog',Database],['/pipelines','Pipeline studio',Workflow]]},{name:'INTELLIGENCE',items:[['/mining','Mining jobs',BrainCircuit],['/experiments','Experiments',FlaskConical],['/features','Feature store',Layers3]]},{name:'OPERATIONS',items:[['/schedules','Schedules',Clock3],['/system','System health',Gauge]]}]
 const titles:Record<string,string>={'/':'Overview','/datasets':'Data catalog','/pipelines':'Pipeline studio','/mining':'Mining jobs','/experiments':'Experiments','/features':'Feature store','/schedules':'Schedules','/system':'System health'}
 export default function App(){
  const loc=useLocation(),[mobile,setMobile]=useState(false),[tokenOpen,setTokenOpen]=useState(false),[token,setToken]=useState(localStorage.getItem('sbase.accessToken')||''),[searchOpen,setSearchOpen]=useState(false)
