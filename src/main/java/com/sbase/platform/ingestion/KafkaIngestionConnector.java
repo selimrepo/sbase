@@ -29,9 +29,9 @@ public class KafkaIngestionConnector implements IngestionConnector {
     ConsumerRecords<String,String> records=consumer.poll(Duration.ofMillis(500));
     if(records.isEmpty())continue;
     read+=records.count();
-    // Commit only after the consumer has successfully handed the batch to the configured downstream.
-    // This adapter returns raw record count; the ingestion runner owns durable sink writes and commit policy.
-    consumer.commitSync();
+    // The adapter has no durable sink, so offsets intentionally remain uncommitted.
+    // No sink write is configured in this connector yet. Do not commit offsets,
+    // otherwise records would be acknowledged and permanently discarded.
    }
   }
   return new ConnectorResult(read,0,"Kafka records consumed; durable sink integration must be supplied by the ingestion runner");
