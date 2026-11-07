@@ -47,7 +47,7 @@ services:
       spark-master:
         condition: service_started
       doris-fe:
-        condition: service_started
+        condition: service_healthy
     networks: [sbase-net]
     restart: unless-stopped
 
@@ -105,7 +105,9 @@ services:
       BE_ADDR: 172.30.0.11:9050
     depends_on:
       doris-fe:
-        condition: service_started
+        condition: service_healthy
+    sysctls:
+      vm.max_map_count: 2000000
     volumes:
       - doris-be-storage:/opt/apache-doris/be/storage
       - doris-be-log:/opt/apache-doris/be/log
