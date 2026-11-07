@@ -13,6 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package.json
+      - name: Build React workspace
+        run: |
+          npm install --no-audit --no-fund --prefix frontend
+          npm run build --prefix frontend
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -29,38 +38,32 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
       - name: Verify Docker Compose
         run: |
           docker version
           docker compose version
           docker compose -f docker-compose.yml config --quiet
-
       - name: Configure host kernel for Doris BE
         run: |
           sudo sysctl -w vm.max_map_count=2000000
-          # Doris BE refuses to start when host swap is enabled.
           sudo swapoff -a
           if [ "$(awk 'NR > 1 { total += $3 } END { print total + 0 }' /proc/swaps)" -ne 0 ]; then
             echo "Swap is still enabled; Doris BE requires swap to be disabled."
             cat /proc/swaps
             exit 1
           fi
-
       - name: Build and start complete stack
         env:
           POSTGRES_PASSWORD: ci-sbase-password
           DORIS_USERNAME: root
           DORIS_PASSWORD: ""
         run: docker compose -f docker-compose.yml up --build -d
-
       - name: Wait for application liveness
         run: |
           set -eu
           max_attempts=36
           for attempt in $(seq 1 "$max_attempts"); do
-            if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 \
-              http://localhost:8080/actuator/health/liveness; then
+            if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness; then
               echo
               echo "SBase application liveness check passed."
               exit 0
@@ -76,15 +79,12 @@ jobs:
           docker compose -f docker-compose.yml ps
           docker compose -f docker-compose.yml logs --no-color --tail=200
           exit 1
-
       - name: Show container status
         if: always()
         run: docker compose -f docker-compose.yml ps
-
       - name: Collect logs on failure
         if: failure()
         run: docker compose -f docker-compose.yml logs --no-color --tail=300
-
       - name: Stop stack and remove volumes
         if: always()
         run: docker compose -f docker-compose.yml down --volumes --remove-orphans

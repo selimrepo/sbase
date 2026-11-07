@@ -8,6 +8,20 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
+Open the React workspace at `http://localhost:8080`. For frontend development, run `npm install --prefix frontend` and `npm run dev --prefix frontend`; Vite proxies `/api` and `/actuator` to Spring Boot on port 8080. Configure a JWT bearer token from the workspace profile control when the API is protected by the configured identity provider.
+
+## React data science workspace
+
+The responsive React + TypeScript workspace includes:
+- Overview with live metadata inventory, API health, dataset activity and quick actions.
+- Dataset catalog with source registration for Doris, PostgreSQL, S3, Parquet and CSV metadata.
+- Pipeline studio for versioned JSON workflow definitions.
+- Mining job submission and browser-session run monitoring (the backend exposes job lookup by ID, not a global listing endpoint).
+- Experiment registry, feature-set inventory, schedule inspection and system diagnostics.
+- JWT bearer-token configuration, keyboard quick navigation (`Ctrl/Cmd + K`), responsive navigation and dark analytics workspace styling.
+
+The frontend is built by the Node stage in the Dockerfile and copied into Spring Boot's static resources, so the production container serves one application on port 8080. The build workflow compiles the React application before running Gradle tests and packaging.
+
 ## Core APIs
 - Mining jobs: `/api/mining/jobs`
 - Dataset catalog: `/api/datasets`
@@ -20,7 +34,6 @@ docker compose up --build -d
 Migration V3 adds ingestion connector/run metadata, experiment tracking, registered models and immutable numbered model versions, feature-set definitions, persistent schedule definitions, role/permission/subject mapping tables, dashboard and widget metadata. `IngestionConnector` is the extension SPI for Doris/JDBC/object-store/stream connectors. Mahout adapters use Mahout vectors for cosine similarity and expose Euclidean distance alongside it.
 
 ## Execution and security services
-
 - Ingestion execution: `POST /api/platform/ingestion/{jdbc|doris|kafka}/runs`; connector types are discovered at `GET /api/platform/ingestion/connectors`. JDBC/Doris use bounded batch inserts. The Kafka connector currently refuses to consume until a durable sink is configured, preventing acknowledged data loss.
 - Spark feature materialization: `POST /api/platform/features/materialize` with Parquet input/output URIs and allow-listed operations (`copy`, `cast_double`, `log1p`, `normalize_zscore`, `bucket`).
 - S3-compatible artifact storage: `S3ArtifactStore` supports S3/MinIO endpoint overrides, bucket, region and credentials through environment variables.
@@ -32,7 +45,6 @@ Migration V3 adds ingestion connector/run metadata, experiment tracking, registe
 These are persisted capability foundations and metadata APIs, not a finished managed platform. The connector SPI still needs concrete source adapters and run orchestration. Schedules are stored and claimed with distributed leases, but the pipeline execution engine is not implemented yet; the worker records a retryable failure instead of falsely reporting a no-op as successful. Feature definitions are not yet materialized or served online. Model artifact URIs require an external object store and lifecycle policy. Role tables are not yet wired into JWT/OIDC authorization; secure the API behind an authenticated gateway and enforce dataset-level permissions before multi-user production. Dashboard metadata is stored per authenticated JWT subject; arbitrary SQL execution is intentionally not exposed. BI summary currently reports PostgreSQL metadata counts, not Doris query analytics.
 
 Run `gradle clean test bootJar` before deployment. CI must pass before treating this branch as production-ready.
-
 
 ### Automatic data mining
 
