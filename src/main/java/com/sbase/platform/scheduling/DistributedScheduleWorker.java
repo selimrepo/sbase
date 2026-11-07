@@ -13,8 +13,7 @@ public class DistributedScheduleWorker {
  private final JdbcTemplate db; private final String node=UUID.randomUUID().toString();
  public DistributedScheduleWorker(JdbcTemplate db){this.db=db;}
  @Scheduled(fixedDelayString="${sbase.scheduler.poll-ms:5000}")
- public void poll(){claim().forEach(id->CompletableFuture.runAsync(()->execute(id)));}
- @Transactional
+ @Transactional public void poll(){claim().forEach(id->CompletableFuture.runAsync(()->execute(id)));}
  public List<UUID> claim(){
   return db.query("WITH due AS (SELECT id FROM scheduled_jobs WHERE enabled=true AND next_run_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at FOR UPDATE SKIP LOCKED LIMIT 10) UPDATE scheduled_jobs s SET lease_owner=?,lease_until=now()+interval '2 minutes',attempt_count=attempt_count+1,updated_at=now() FROM due WHERE s.id=due.id RETURNING s.id",(rs,n)->UUID.fromString(rs.getString(1)),node);
  }
