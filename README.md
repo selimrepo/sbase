@@ -21,7 +21,7 @@ Migration V3 adds ingestion connector/run metadata, experiment tracking, registe
 
 ## Execution and security services
 
-- Ingestion execution: `POST /api/platform/ingestion/{jdbc|doris|kafka}/runs`; connector types are discovered at `GET /api/platform/ingestion/connectors`. JDBC/Doris use bounded batch inserts; Kafka consumption is bounded by `maxRecords` and `pollTimeoutMs`.
+- Ingestion execution: `POST /api/platform/ingestion/{jdbc|doris|kafka}/runs`; connector types are discovered at `GET /api/platform/ingestion/connectors`. JDBC/Doris use bounded batch inserts. The Kafka connector currently refuses to consume until a durable sink is configured, preventing acknowledged data loss.
 - Spark feature materialization: `POST /api/platform/features/materialize` with Parquet input/output URIs and allow-listed operations (`copy`, `cast_double`, `log1p`, `normalize_zscore`, `bucket`).
 - S3-compatible artifact storage: `S3ArtifactStore` supports S3/MinIO endpoint overrides, bucket, region and credentials through environment variables.
 - Distributed schedule polling: PostgreSQL `FOR UPDATE SKIP LOCKED` claims due jobs with expiring leases, retry counters and exponential backoff.
@@ -29,7 +29,7 @@ Migration V3 adds ingestion connector/run metadata, experiment tracking, registe
 - Doris BI datasource: a dedicated JDBC datasource and allow-listed table query service are configured with `DORIS_ALLOWED_TABLES`.
 
 ## Production limitations
-These are persisted capability foundations and metadata APIs, not a finished managed platform. The connector SPI still needs concrete source adapters and run orchestration. Schedules are stored but require a distributed lease/dispatch worker before execution. Feature definitions are not yet materialized or served online. Model artifact URIs require an external object store and lifecycle policy. Role tables are not yet wired into JWT/OIDC authorization; secure the API behind an authenticated gateway and enforce dataset-level permissions before multi-user production. Dashboard metadata is stored; arbitrary SQL execution is intentionally not exposed. BI summary currently reports PostgreSQL metadata counts, not Doris query analytics.
+These are persisted capability foundations and metadata APIs, not a finished managed platform. The connector SPI still needs concrete source adapters and run orchestration. Schedules are stored and claimed with distributed leases, but the pipeline execution engine is not implemented yet; the worker records a retryable failure instead of falsely reporting a no-op as successful. Feature definitions are not yet materialized or served online. Model artifact URIs require an external object store and lifecycle policy. Role tables are not yet wired into JWT/OIDC authorization; secure the API behind an authenticated gateway and enforce dataset-level permissions before multi-user production. Dashboard metadata is stored per authenticated JWT subject; arbitrary SQL execution is intentionally not exposed. BI summary currently reports PostgreSQL metadata counts, not Doris query analytics.
 
 Run `gradle clean test bootJar` before deployment. CI must pass before treating this branch as production-ready.
 

@@ -38,6 +38,12 @@ public class DorisDataSourceConfig {
         return ds;
     }
 
+    @Bean(name = "jdbcTemplate")
+    @Primary
+    JdbcTemplate jdbcTemplate(@Qualifier("dataSource") DataSource ds) {
+        return new JdbcTemplate(ds);
+    }
+
     @Bean(name = "dorisDataSource")
     DataSource dorisDataSource(
             @Value("${sbase.doris.jdbc-url}") String url,

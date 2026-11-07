@@ -28,6 +28,8 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: ${JWT_ISSUER_URI:http://localhost:8081/realms/sbase}
+          # Avoid OIDC discovery during application startup; the JWK endpoint is contacted only when validating a token.
+          jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
   flyway:
     enabled: true
     locations: classpath:db/migration

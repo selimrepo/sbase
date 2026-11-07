@@ -20,7 +20,7 @@ public class PlatformSecurityConfig {
    .requestMatchers("/actuator/health/**","/actuator/info").permitAll()
    .requestMatchers("/api/platform/bi/**").hasAnyAuthority("PERM_bi:read","PERM_bi:query","ROLE_ADMIN")
    .requestMatchers("/api/platform/schedules/**","/api/platform/features/**","/api/platform/ingestion/**").authenticated()
-   .requestMatchers("/api/platform/**","/api/algorithms/**").authenticated()
+   .requestMatchers("/api/**").authenticated()
    .anyRequest().permitAll())
    .oauth2ResourceServer(o -> o.jwt(j -> j.jwtAuthenticationConverter(jwtAuthenticationConverter())));
   return http.build();
