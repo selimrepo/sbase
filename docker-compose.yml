@@ -48,6 +48,8 @@ services:
         condition: service_started
       doris-fe:
         condition: service_healthy
+      doris-init:
+        condition: service_completed_successfully
     networks: [sbase-net]
     restart: unless-stopped
 
@@ -95,6 +97,23 @@ services:
       retries: 30
       start_period: 60s
     restart: unless-stopped
+
+  doris-init:
+    image: mysql:8.4
+    container_name: sbase-doris-init
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SELECT 1" >/dev/null 2>&1; do
+          echo "Waiting for Doris SQL endpoint..."
+          sleep 5
+        done
+        mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
+    networks: [sbase-net]
+    restart: "no"
 
   doris-be:
     image: apache/doris:doris-be-2.1.7
