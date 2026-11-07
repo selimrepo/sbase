@@ -73,7 +73,7 @@ services:
     restart: unless-stopped
 
   doris-fe:
-    image: apache/doris:doris-fe-3.0.7
+    image: apache/doris:doris-fe-2.1.7
     container_name: sbase-doris-fe
     hostname: doris-fe
     environment:
@@ -97,7 +97,7 @@ services:
     restart: unless-stopped
 
   doris-be:
-    image: apache/doris:doris-be-3.0.7
+    image: apache/doris:doris-be-2.1.7
     container_name: sbase-doris-be
     hostname: doris-be
     environment:
