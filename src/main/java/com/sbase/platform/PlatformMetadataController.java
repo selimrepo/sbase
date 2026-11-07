@@ -1,7 +1,7 @@
 package com.sbase.platform;
-import jakarta.validation.Valid;import jakarta.validation.constraints.*;import org.springframework.jdbc.core.JdbcTemplate;import org.springframework.http.HttpStatus;import org.springframework.web.bind.annotation.*;import java.time.Instant;import java.util.*;
+import jakarta.validation.Valid;import jakarta.validation.constraints.*;import org.springframework.jdbc.core.JdbcTemplate;import org.springframework.beans.factory.annotation.Qualifier;import org.springframework.http.HttpStatus;import org.springframework.web.bind.annotation.*;import java.time.Instant;import java.util.*;
 @RestController @RequestMapping("/api/platform") public class PlatformMetadataController {
- private final JdbcTemplate db;public PlatformMetadataController(JdbcTemplate db){this.db=db;}
+ private final JdbcTemplate db;public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db){this.db=db;}
  public record Experiment(@NotBlank @Size(max=160) String name,String description,UUID datasetId,@NotBlank String parametersJson){}
  public record Model(@NotBlank @Size(max=160) String name,String description){}
  public record ModelVersion(@NotBlank String artifactUri,@NotBlank String framework,@NotBlank String parametersJson,@NotBlank String metricsJson,UUID experimentId){}
