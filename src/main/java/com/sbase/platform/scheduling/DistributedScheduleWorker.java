@@ -1,6 +1,7 @@
 package com.sbase.platform.scheduling;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,7 +12,7 @@ import java.util.concurrent.*;
 @Component
 public class DistributedScheduleWorker {
  private final JdbcTemplate db; private final String node=UUID.randomUUID().toString();
- public DistributedScheduleWorker(JdbcTemplate db){this.db=db;}
+ public DistributedScheduleWorker(@Qualifier("jdbcTemplate") JdbcTemplate db){this.db=db;}
  @Scheduled(fixedDelayString="${sbase.scheduler.poll-ms:5000}")
  @Transactional public void poll(){claim().forEach(id->CompletableFuture.runAsync(()->execute(id)));}
  public List<UUID> claim(){
