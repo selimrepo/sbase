@@ -10,7 +10,7 @@ import java.util.*;
 
 @Component
 public class PipelineDefinitionValidator {
-    private static final Set<String> TYPES = Set.of("doris_read", "filter", "select", "with_column", "aggregate", "doris_write", "join", "feature_store_write");
+    private static final Set<String> TYPES = Set.of("doris_read", "filter", "select", "with_column", "aggregate", "doris_write", "join", "union", "feature_store_write");
     private static final Set<String> OPERATORS = Set.of("eq", "ne", "gt", "gte", "lt", "lte", "contains", "is_null", "not_null", "in");
     private static final Set<String> COLUMN_OPS = Set.of("cast_double", "lower", "upper", "trim", "abs", "log1p");
     private static final String IDENTIFIER = "[A-Za-z_][A-Za-z0-9_]*";
@@ -72,6 +72,10 @@ public class PipelineDefinitionValidator {
                 if (step.hasNonNull("eventTimeColumn")) identifier(text(step, "eventTimeColumn"));
                 if (step.path("featureVersion").asInt(1) < 1) throw invalid("featureVersion must be positive");
             }
+            case "union" -> {
+                String mode = step.path("mode").asText("all");
+                if (!Set.of("all", "distinct").contains(mode)) throw invalid("Union mode must be all or distinct");
+            }
             case "join" -> {
                 identifier(text(step, "leftKey"));
                 identifier(text(step, "rightKey"));
@@ -103,11 +107,11 @@ public class PipelineDefinitionValidator {
         }
         JsonNode deps = step.path("dependsOn");
         if (!deps.isMissingNode()) {
-            if (!deps.isArray() || deps.size() > ("join".equals(type) ? 2 : 1))
+            if (!deps.isArray() || deps.size() > (Set.of("join", "union").contains(type) ? 2 : 1))
                 throw invalid("dependsOn must contain at most two steps; only join accepts two inputs");
-            if ("join".equals(type) && deps.size() != 2)
+            if (Set.of("join", "union").contains(type) && deps.size() != 2)
                 throw invalid("Join requires exactly two dependencies");
-            if (!"join".equals(type) && deps.size() == 2)
+            if (!Set.of("join", "union").contains(type) && deps.size() == 2)
                 throw invalid("Only join steps may have two dependencies");
             for (JsonNode dep : deps) identifier(dep.asText());
         }
