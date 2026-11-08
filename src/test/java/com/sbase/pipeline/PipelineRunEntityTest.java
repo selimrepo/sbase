@@ -29,4 +29,23 @@ class PipelineRunEntityTest {
         assertEquals("Doris unavailable", run.getErrorMessage());
         assertNotNull(run.getFinishedAt());
     }
+
+    @Test
+    void retriesWithPersistableBackoffStateUntilAttemptLimit() {
+        PipelineRunEntity run = new PipelineRunEntity(UUID.randomUUID(), 1, "{}");
+        run.setMaxAttempts(3);
+        run.start();
+        assertTrue(run.scheduleRetry("temporary Doris outage", java.time.Instant.now().plusSeconds(10)));
+        assertEquals("RETRY_WAIT", run.getStatus());
+        assertEquals(1, run.getAttemptCount());
+        assertNotNull(run.getNextAttemptAt());
+        run.start();
+        assertTrue(run.scheduleRetry("temporary Doris outage", java.time.Instant.now().plusSeconds(20)));
+        run.start();
+        assertFalse(run.scheduleRetry("final failure", java.time.Instant.now().plusSeconds(40)));
+        assertEquals("FAILED", run.getStatus());
+        assertEquals(3, run.getAttemptCount());
+        assertNull(run.getNextAttemptAt());
+    }
+
 }
