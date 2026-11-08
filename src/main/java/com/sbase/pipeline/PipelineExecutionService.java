@@ -108,7 +108,7 @@ public class PipelineExecutionService {
                 step.path("dependsOn").forEach(d -> dependencies.add(d.asText()));
                 List<Dataset<Row>> inputs = dependencies.stream().map(outputs::get).toList();
                 Dataset<Row> input = inputs.isEmpty() ? current : inputs.get(0);
-                Dataset<Row> result = apply(type, step, input, inputs, runId);
+                Dataset<Row> result = apply(type, step, input, inputs, runId, run.getIdempotencyKey());
                 if (result != null) {
                     outputs.put(id, result);
                     current = result;
@@ -120,13 +120,14 @@ public class PipelineExecutionService {
             summary.put("steps", stepResults);
             summary.put("recordsProcessed", processed);
             summary.put("pipelineVersion", run.getPipelineVersion());
+            summary.put("idempotencyKey", run.getIdempotencyKey());
             markSucceeded(runId, mapper.writeValueAsString(summary), processed);
         } catch (Exception ex) {
             markFailed(runId, rootMessage(ex));
         }
     }
 
-    private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs, UUID runId) {
+    private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs, UUID runId, String idempotencyKey) {
         return switch (type) {
             case "doris_read" -> readDoris(step.path("table").asText());
             case "filter" -> filter(input, step);
@@ -135,7 +136,7 @@ public class PipelineExecutionService {
             case "aggregate" -> aggregate(input, step);
             case "join" -> join(inputs, step);
             case "feature_store_write" -> { writeOnlineFeatures(requireInput(input), step, runId); yield input; }
-            case "doris_write" -> { writeDoris(requireInput(input), step, runId); yield input; }
+            case "doris_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
         };
     }
@@ -237,7 +238,7 @@ public class PipelineExecutionService {
         return df.groupBy(groups.toArray(Column[]::new)).agg(metrics.get(0), metrics.subList(1, metrics.size()).toArray(Column[]::new));
     }
 
-    private void writeDoris(Dataset<Row> df, JsonNode step, UUID runId) {
+    private void writeDoris(Dataset<Row> df, JsonNode step, UUID runId, String idempotencyKey) {
         String table = step.path("table").asText();
         requireAllowed(table);
         String mode = step.path("mode").asText("append");
@@ -250,7 +251,7 @@ public class PipelineExecutionService {
         Dataset<Row> stable = df.dropDuplicates(keyColumns);
         // Doris UNIQUE KEY tables provide duplicate-key replacement on retried JDBC inserts.
         // The run UUID remains stable across retries and is included in the Spark job group for traceability.
-        sparkProvider.getObject().sparkContext().setJobGroup("pipeline-" + runId, "Idempotent Doris write " + runId, true);
+        sparkProvider.getObject().sparkContext().setJobGroup("pipeline-" + idempotencyKey, "Idempotent Doris write " + idempotencyKey, true);
         try {
             stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
                     .option("user", doris.username()).option("password", doris.password())
