@@ -112,7 +112,7 @@ services:
     command:
       - |
         attempt=0
-        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -B -e "SHOW BACKENDS" 2>/dev/null | awk -F '\t' 'tolower($11) == "true" { alive=1 } END { exit !alive }'; do
+        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -B -e "SHOW BACKENDS" 2>/dev/null | awk -F '\t' 'tolower($9) == "true" { alive=1 } END { exit !alive }'; do
           attempt=$$((attempt+1))
           if [ "$$attempt" -ge 60 ]; then
             echo "Doris backend did not register as Alive=true with the frontend."
