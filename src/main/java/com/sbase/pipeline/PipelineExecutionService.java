@@ -123,7 +123,7 @@ public class PipelineExecutionService {
             summary.put("idempotencyKey", run.getIdempotencyKey());
             markSucceeded(runId, mapper.writeValueAsString(summary), processed);
         } catch (Exception ex) {
-            markFailed(runId, rootMessage(ex));
+            markFailed(runId, rootMessage(ex), isRetryable(ex));
         }
     }
 
@@ -398,7 +398,33 @@ public class PipelineExecutionService {
         runs.findById(id).ifPresent(run -> { if ("RUNNING".equals(run.getStatus())) { run.succeed(result, records); runs.save(run); } });
     }
     private void markFailed(UUID id, String error) {
-        runs.findById(id).ifPresent(run -> { if ("QUEUED".equals(run.getStatus()) || "RUNNING".equals(run.getStatus())) { run.scheduleRetry(error, Instant.now().plus(retryDelay(run.getAttemptCount()))); runs.save(run); } });
+        markFailed(id, error, true);
+    }
+
+    private void markFailed(UUID id, String error, boolean retryable) {
+        runs.findById(id).ifPresent(run -> {
+            if ("QUEUED".equals(run.getStatus()) || "RUNNING".equals(run.getStatus())) {
+                if (retryable) run.scheduleRetry(error, Instant.now().plus(retryDelay(run.getAttemptCount())));
+                else run.fail(error);
+                runs.save(run);
+            }
+        });
+    }
+
+    static boolean isRetryable(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.sql.SQLTransientException
+                    || cause instanceof java.sql.SQLRecoverableException
+                    || cause instanceof java.io.IOException
+                    || cause instanceof java.util.concurrent.TimeoutException
+                    || cause instanceof java.util.concurrent.RejectedExecutionException)
+                return true;
+            if (cause instanceof java.sql.SQLException sql && sql.getSQLState() != null
+                    && sql.getSQLState().length() >= 2
+                    && Set.of("08", "40", "53", "57").contains(sql.getSQLState().substring(0, 2)))
+                return true;
+        }
+        return false;
     }
 
     @Transactional
