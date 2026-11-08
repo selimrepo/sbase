@@ -159,7 +159,12 @@ public class PipelineExecutionService {
             default -> throw new IllegalArgumentException("Unsupported join type");
         };
         Column condition = col("left_source." + leftKey).equalTo(col("right_source." + rightKey));
-        return left.join(right, condition, joinType);
+        Set<String> leftNames = new HashSet<>(Arrays.asList(left.columns()));
+        List<Column> projection = new ArrayList<>();
+        for (String name : left.columns()) projection.add(col("left_source." + name).alias(name));
+        for (String name : right.columns())
+            projection.add(col("right_source." + name).alias(leftNames.contains(name) ? "right_" + name : name));
+        return left.join(right, condition, joinType).select(projection.toArray(Column[]::new));
     }
 
     private Dataset<Row> filter(Dataset<Row> input, JsonNode step) {
