@@ -222,20 +222,49 @@ public class PipelineExecutionService {
     private void writeDoris(Dataset<Row> df, JsonNode step, UUID runId) {
         String table = step.path("table").asText();
         requireAllowed(table);
-        String mode = step.path("mode").asText("overwrite");
+        String mode = step.path("mode").asText("append");
         JsonNode keys = step.path("idempotencyColumns");
         if (!keys.isArray() || keys.isEmpty())
             throw new IllegalArgumentException("Doris writes require idempotencyColumns; configure the target as a Doris UNIQUE KEY table using these columns");
         String[] keyColumns = new String[keys.size()];
         for (int i = 0; i < keys.size(); i++) { keyColumns[i] = keys.get(i).asText(); PipelineDefinitionValidator.identifier(keyColumns[i]); }
+        verifyDorisUniqueKey(table, keyColumns);
         Dataset<Row> stable = df.dropDuplicates(keyColumns);
         // Doris UNIQUE KEY tables provide duplicate-key replacement on retried JDBC inserts.
         // The run UUID remains stable across retries and is included in the Spark job group for traceability.
         sparkProvider.getObject().sparkContext().setJobGroup("pipeline-" + runId, "Idempotent Doris write " + runId, true);
-        stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
-                .option("user", doris.username()).option("password", doris.password())
-                .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "5000")
-                .mode("append").save();
+        try {
+            stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
+                    .option("user", doris.username()).option("password", doris.password())
+                    .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "5000")
+                    .mode("append").save();
+        } finally {
+            sparkProvider.getObject().sparkContext().clearJobGroup();
+        }
+    }
+
+
+    private void verifyDorisUniqueKey(String table, String[] keyColumns) {
+        try (java.sql.Connection connection = doris.openConnection();
+             java.sql.Statement statement = connection.createStatement();
+             java.sql.ResultSet result = statement.executeQuery("SHOW CREATE TABLE " + table)) {
+            if (!result.next()) throw new IllegalStateException("Doris target table does not exist: " + table);
+            String ddl = result.getString(2).toUpperCase(Locale.ROOT).replace("`", "");
+            int keyStart = ddl.indexOf("UNIQUE KEY");
+            if (keyStart < 0) throw new IllegalArgumentException(
+                "Idempotent append requires a Doris UNIQUE KEY target table: " + table);
+            int open = ddl.indexOf('(', keyStart);
+            int close = ddl.indexOf(')', open);
+            if (open < 0 || close < 0) throw new IllegalStateException("Cannot inspect Doris UNIQUE KEY definition");
+            String declaredKeys = ddl.substring(open + 1, close);
+            for (String key : keyColumns) {
+                if (!Arrays.stream(declaredKeys.split(","))
+                        .map(String::trim).anyMatch(column -> column.equals(key.toUpperCase(Locale.ROOT))))
+                    throw new IllegalArgumentException("Idempotency column is not part of Doris UNIQUE KEY: " + key);
+            }
+        } catch (java.sql.SQLException ex) {
+            throw new IllegalStateException("Cannot verify Doris idempotency constraints for " + table, ex);
+        }
     }
 
     private Object literal(JsonNode value) {
