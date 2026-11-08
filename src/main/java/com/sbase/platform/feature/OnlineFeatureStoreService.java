@@ -59,9 +59,9 @@ public class OnlineFeatureStoreService {
     }
 
     @Transactional(readOnly = true)
-    public int count(String featureSet) {
+    public long count(String featureSet) {
         return jdbc.queryForObject("SELECT count(*) FROM online_feature_values WHERE feature_set=?",
-            Integer.class, featureSet);
+            Long.class, featureSet);
     }
 
     private static void validate(String featureSet, String entityKey, int version, Map<String, Object> values) {
