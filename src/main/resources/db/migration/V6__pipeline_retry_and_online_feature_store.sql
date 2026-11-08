@@ -1,3 +1,7 @@
+ALTER TABLE pipeline_runs DROP CONSTRAINT IF EXISTS pipeline_runs_status_check;
+ALTER TABLE pipeline_runs ADD CONSTRAINT pipeline_runs_status_check
+    CHECK (status IN ('QUEUED','RUNNING','RETRY_WAIT','SUCCEEDED','FAILED','CANCELLED'));
+
 ALTER TABLE pipeline_runs
     ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 4,
