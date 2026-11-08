@@ -2,6 +2,9 @@ package com.sbase.platform;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import com.sbase.pipeline.PipelineEntity;
+import com.sbase.pipeline.PipelineRepository;
 import jakarta.validation.constraints.Size;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
@@ -17,9 +20,11 @@ import java.util.*;
 @RequestMapping("/api/platform")
 public class PlatformMetadataController {
     private final JdbcTemplate db;
+    private final PipelineRepository pipelines;
 
-    public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db) {
+    public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db, PipelineRepository pipelines) {
         this.db = db;
+        this.pipelines = pipelines;
     }
 
     public record Experiment(@NotBlank @Size(max=160) String name, String description, UUID datasetId,
@@ -30,7 +35,7 @@ public class PlatformMetadataController {
     public record FeatureSet(@NotBlank @Size(max=160) String name, String description, UUID datasetId,
                              @NotBlank String entityKey, @NotBlank String schemaJson,
                              @NotBlank String transformationJson) { }
-    public record Schedule(@NotBlank @Size(max=160) String name, UUID pipelineId,
+    public record Schedule(@NotBlank @Size(max=160) String name, @NotNull UUID pipelineId,
                            @NotBlank @Size(max=120) String cronExpression) { }
     public record Dashboard(@NotBlank @Size(max=160) String name, String description, String layoutJson) { }
 
@@ -90,6 +95,8 @@ public class PlatformMetadataController {
     @PostMapping("/schedules")
     @ResponseStatus(HttpStatus.CREATED)
     public Map<String,Object> schedule(@Valid @RequestBody Schedule r) {
+        PipelineEntity pipeline=pipelines.findById(r.pipelineId()).orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline not found"));
+        if(!pipeline.isEnabled()) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT, "Scheduled pipeline is disabled");
         var cron=org.springframework.scheduling.support.CronExpression.parse(r.cronExpression());
         var next=cron.next(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
         if(next==null) throw new IllegalArgumentException("Cron expression has no next execution time");
