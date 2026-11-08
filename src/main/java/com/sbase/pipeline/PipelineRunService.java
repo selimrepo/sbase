@@ -70,7 +70,8 @@ public class PipelineRunService {
             var result=engine.execute(run.getDefinitionSnapshot());
             markSucceeded(id,result);
         } catch(Exception ex) {
-            markFailed(id,ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage(),"[]");
+            String steps=ex instanceof PipelineExecutionEngine.PipelineStepException failure?failure.stepResultsJson():"[]";
+            markFailed(id,ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage(),steps);
         }
     }
     private void markRunning(UUID id) { runs.findById(id).ifPresent(run->{run.start();runs.save(run);}); }
