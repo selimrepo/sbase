@@ -91,15 +91,24 @@ jobs:
       - name: Exercise Doris SQL endpoint outage and recovery
         run: |
           set -eu
-          # Doris FE owns the MySQL protocol endpoint on port 9030. Stopping only
-          # the BE leaves FE accepting JDBC connections, so it cannot satisfy a
-          # connection-refused assertion.
+          # The FE owns the MySQL protocol endpoint (9030). Verify the published
+          # host port actually closes after the container is stopped; checking
+          # DriverManager alone can be fooled by a still-open Docker proxy socket.
           docker compose -f docker-compose.yml stop doris-fe
+          endpoint_closed=false
+          for attempt in $(seq 1 12); do
+            if ! timeout 2 bash -c '</dev/tcp/127.0.0.1/9030' 2>/dev/null; then
+              endpoint_closed=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$endpoint_closed" != true ]; then
+            echo "Doris FE SQL port 9030 remained reachable after stopping the FE."
+            exit 1
+          fi
           curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness
-          SBASE_DORIS_TEST_JDBC_URL='jdbc:mysql://127.0.0.1:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true' \
-          SBASE_DORIS_TEST_USERNAME=root SBASE_DORIS_TEST_PASSWORD='' \
-            gradle --no-daemon test --tests '*SparkDorisResilienceTest.jdbcEndpointIsUnavailableDuringDorisFrontendOutage'
-          echo "Doris SQL endpoint outage was detected while SBase remained live."
+          echo "Doris SQL endpoint is unreachable while SBase remains live."
           docker compose -f docker-compose.yml start doris-fe
           for attempt in $(seq 1 36); do
             state="$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-fe 2>/dev/null || true)"
