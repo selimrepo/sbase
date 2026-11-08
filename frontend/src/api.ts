@@ -10,3 +10,4 @@ export const date=(v?:string)=>v?new Intl.DateTimeFormat(undefined,{dateStyle:'m
 export type Dataset={id:string;name:string;namespace:string;tableName:string;description?:string;sourceType:string;schemaJson?:string;createdAt:string;updatedAt?:string}
 export type Pipeline={id:string;name:string;description?:string;version:number;enabled:boolean;definitionJson?:string;updatedAt:string}
 export type Job={id:string;operation:string;sourceTable:string;outputTable:string;status:string;submittedAt:string;resultSummary?:string;error?:string}
+export type PipelineRun={id:string;pipelineId:string;pipelineVersion:number;triggerType:string;scheduleId?:string;status:string;submittedAt:string;startedAt?:string;finishedAt?:string;recordsRead:number;recordsWritten:number;outputLocation?:string;stepResultsJson:string;resultSummary?:string;errorMessage?:string}
