@@ -71,33 +71,43 @@ class SparkDorisResilienceTest {
     private static void awaitAliveBackend(String url, String user, String password) throws Exception {
         long deadline = System.nanoTime() + java.time.Duration.ofMinutes(3).toNanos();
         SQLException lastFailure = null;
+        int consecutiveHealthyObservations = 0;
         while (System.nanoTime() < deadline) {
             try (var connection = DriverManager.getConnection(url, user, password);
                  var statement = connection.createStatement();
                  ResultSet backends = statement.executeQuery("SHOW BACKENDS")) {
                 ResultSetMetaData metadata = backends.getMetaData();
                 int aliveColumn = -1;
+                int decommissionedColumn = -1;
                 for (int column = 1; column <= metadata.getColumnCount(); column++) {
-                    if ("Alive".equalsIgnoreCase(metadata.getColumnLabel(column))) {
-                        aliveColumn = column;
+                    String label = metadata.getColumnLabel(column);
+                    if ("Alive".equalsIgnoreCase(label)) aliveColumn = column;
+                    if ("SystemDecommissioned".equalsIgnoreCase(label)) decommissionedColumn = column;
+                }
+                if (aliveColumn < 0 || decommissionedColumn < 0) {
+                    throw new SQLException("SHOW BACKENDS must expose Alive and SystemDecommissioned columns");
+                }
+                boolean schedulableBackendFound = false;
+                while (backends.next()) {
+                    boolean alive = Boolean.parseBoolean(backends.getString(aliveColumn));
+                    boolean decommissioned = Boolean.parseBoolean(backends.getString(decommissionedColumn));
+                    if (alive && !decommissioned) {
+                        schedulableBackendFound = true;
                         break;
                     }
                 }
-                if (aliveColumn < 0) {
-                    throw new SQLException("SHOW BACKENDS did not expose an Alive column");
-                }
-                while (backends.next()) {
-                    if (Boolean.parseBoolean(backends.getString(aliveColumn))) {
-                        return;
-                    }
-                }
+                consecutiveHealthyObservations = schedulableBackendFound
+                    ? consecutiveHealthyObservations + 1 : 0;
                 lastFailure = null;
+                if (consecutiveHealthyObservations >= 3) return;
             } catch (SQLException exception) {
+                consecutiveHealthyObservations = 0;
                 lastFailure = exception;
             }
-            Thread.sleep(2_000);
+            Thread.sleep(5_000);
         }
-        throw new IllegalStateException("Doris FE recovered, but no backend became Alive within 3 minutes",
+        throw new IllegalStateException(
+            "Doris FE recovered, but no schedulable Alive backend remained available for 3 consecutive checks within 3 minutes",
             lastFailure);
     }
 }
