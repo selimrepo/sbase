@@ -106,11 +106,19 @@ services:
     depends_on:
       doris-fe:
         condition: service_healthy
+      doris-be:
+        condition: service_healthy
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SELECT 1" >/dev/null 2>&1; do
-          echo "Waiting for Doris SQL endpoint..."
+        attempt=0
+        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -e "SHOW BACKENDS" 2>/dev/null | grep -qi "true"; do
+          attempt=$((attempt+1))
+          if [ "$attempt" -ge 60 ]; then
+            echo "Doris backend did not register with the frontend."
+            exit 1
+          fi
+          echo "Waiting for a live Doris backend ($attempt/60)..."
           sleep 5
         done
         mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
