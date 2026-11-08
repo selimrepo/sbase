@@ -23,6 +23,7 @@ public class PipelineRunEntity {
     @Column(name = "attempt_count", nullable = false) private int attemptCount;
     @Column(name = "max_attempts", nullable = false) private int maxAttempts = 4;
     @Column(name = "next_attempt_at") private Instant nextAttemptAt;
+    @Column(name = "lease_until") private Instant leaseUntil;
     @Column(name = "idempotency_key", length = 160) private String idempotencyKey;
     @Version @Column(name = "version", nullable = false) private long version;
 
@@ -39,6 +40,7 @@ public class PipelineRunEntity {
     public boolean scheduleRetry(String message, Instant retryAt) {
         errorMessage = message == null ? "Unknown execution error" : message;
         finishedAt = Instant.now();
+        leaseUntil = null;
         if (attemptCount >= maxAttempts) { status = "FAILED"; nextAttemptAt = null; return false; }
         status = "RETRY_WAIT"; nextAttemptAt = retryAt; return true;
     }
@@ -47,9 +49,10 @@ public class PipelineRunEntity {
     public int getAttemptCount() { return attemptCount; }
     public int getMaxAttempts() { return maxAttempts; }
     public Instant getNextAttemptAt() { return nextAttemptAt; }
+    public Instant getLeaseUntil() { return leaseUntil; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public void succeed(String resultJson, long records) {
-        status = "SUCCEEDED"; this.resultJson = resultJson; recordsProcessed = records; finishedAt = Instant.now();
+        status = "SUCCEEDED"; this.resultJson = resultJson; recordsProcessed = records; finishedAt = Instant.now(); leaseUntil = null;
     }
     public void fail(String message) {
         status = "FAILED"; errorMessage = message == null ? "Unknown execution error" : message;
