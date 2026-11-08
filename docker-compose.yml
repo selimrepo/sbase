@@ -40,6 +40,10 @@ services:
       DORIS_JDBC_URL: jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
       DORIS_USERNAME: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       JAVA_TOOL_OPTIONS: -Xms512m -Xmx2g
     depends_on:
       postgres:
