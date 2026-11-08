@@ -36,7 +36,7 @@ public class PipelineRunEntity {
         this.status = "QUEUED";
         this.submittedAt = Instant.now();
     }
-    public void start() { status = "RUNNING"; startedAt = Instant.now(); attemptCount++; nextAttemptAt = null; errorMessage = null; }
+    public void start() { status = "RUNNING"; startedAt = Instant.now(); finishedAt = null; leaseUntil = null; attemptCount++; nextAttemptAt = null; errorMessage = null; }
     public boolean scheduleRetry(String message, Instant retryAt) {
         errorMessage = message == null ? "Unknown execution error" : message;
         finishedAt = Instant.now();
@@ -56,7 +56,7 @@ public class PipelineRunEntity {
     }
     public void fail(String message) {
         status = "FAILED"; errorMessage = message == null ? "Unknown execution error" : message;
-        finishedAt = Instant.now();
+        finishedAt = Instant.now(); leaseUntil = null; nextAttemptAt = null;
     }
     public UUID getId() { return id; }
     public UUID getPipelineId() { return pipelineId; }
