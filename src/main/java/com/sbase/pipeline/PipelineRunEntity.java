@@ -20,6 +20,11 @@ public class PipelineRunEntity {
     @Column(name = "started_at") private Instant startedAt;
     @Column(name = "finished_at") private Instant finishedAt;
     @Column(name = "records_processed", nullable = false) private long recordsProcessed;
+    @Column(name = "attempt_count", nullable = false) private int attemptCount;
+    @Column(name = "max_attempts", nullable = false) private int maxAttempts = 4;
+    @Column(name = "next_attempt_at") private Instant nextAttemptAt;
+    @Column(name = "idempotency_key", length = 160) private String idempotencyKey;
+    @Version @Column(name = "version", nullable = false) private long version;
 
     protected PipelineRunEntity() { }
     public PipelineRunEntity(UUID pipelineId, int pipelineVersion, String definitionSnapshot) {
@@ -30,7 +35,19 @@ public class PipelineRunEntity {
         this.status = "QUEUED";
         this.submittedAt = Instant.now();
     }
-    public void start() { status = "RUNNING"; startedAt = Instant.now(); errorMessage = null; }
+    public void start() { status = "RUNNING"; startedAt = Instant.now(); attemptCount++; nextAttemptAt = null; errorMessage = null; }
+    public boolean scheduleRetry(String message, Instant retryAt) {
+        errorMessage = message == null ? "Unknown execution error" : message;
+        finishedAt = Instant.now();
+        if (attemptCount >= maxAttempts) { status = "FAILED"; nextAttemptAt = null; return false; }
+        status = "RETRY_WAIT"; nextAttemptAt = retryAt; return true;
+    }
+    public void setMaxAttempts(int value) { if (value < 1 || value > 20) throw new IllegalArgumentException("maxAttempts must be 1..20"); maxAttempts = value; }
+    public void setIdempotencyKey(String value) { idempotencyKey = value; }
+    public int getAttemptCount() { return attemptCount; }
+    public int getMaxAttempts() { return maxAttempts; }
+    public Instant getNextAttemptAt() { return nextAttemptAt; }
+    public String getIdempotencyKey() { return idempotencyKey; }
     public void succeed(String resultJson, long records) {
         status = "SUCCEEDED"; this.resultJson = resultJson; recordsProcessed = records; finishedAt = Instant.now();
     }
