@@ -86,8 +86,11 @@ public class PipelineDefinitionValidator {
             }
             case "doris_write" -> {
                 table(text(step, "table"));
-                String mode = step.path("mode").asText("overwrite");
-                if (!Set.of("overwrite", "append").contains(mode)) throw invalid("Write mode must be overwrite or append");
+                String mode = step.path("mode").asText("append");
+                if (!"append".equals(mode)) throw invalid("Idempotent Doris writes support append into UNIQUE KEY tables only");
+                JsonNode keys = step.path("idempotencyColumns");
+                if (!keys.isArray() || keys.isEmpty()) throw invalid("Doris write requires non-empty idempotencyColumns");
+                keys.forEach(key -> identifier(key.asText()));
             }
             default -> throw invalid("Unsupported step type: " + type);
         }
