@@ -1,6 +1,10 @@
 package com.sbase.pipeline;
 
 import org.junit.jupiter.api.Test;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
+import java.time.Instant;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -33,6 +37,7 @@ class PipelineRunRepositoryIntegrationTest {
 
     @Autowired PipelineRepository pipelines;
     @Autowired PipelineRunRepository runs;
+    @Autowired JdbcTemplate jdbc;
 
     @Test
     void persistsImmutablePipelineSnapshotAndExecutionLifecycle() {
@@ -75,6 +80,19 @@ class PipelineRunRepositoryIntegrationTest {
         assertThat(runs.claimDueRetry(run.getId())).isEqualTo(1);
         assertThat(runs.claimDueRetry(run.getId())).isZero();
         assertThat(runs.findById(run.getId()).orElseThrow().getStatus()).isEqualTo("QUEUED");
+    }
+
+
+    @Test
+    void onlineFeatureUpsertServesNewestEventAndIgnoresLateArrivals() {
+        OnlineFeatureStoreService features = new OnlineFeatureStoreService(jdbc, new ObjectMapper());
+        features.upsert("customer_profile_it", "customer-7", 1,
+            Instant.parse("2026-11-08T12:00:00Z"), Map.of("score", 0.95));
+        features.upsert("customer_profile_it", "customer-7", 1,
+            Instant.parse("2026-11-08T11:00:00Z"), Map.of("score", 0.10));
+        assertThat(features.get("customer_profile_it", "customer-7")).isPresent();
+        assertThat(features.get("customer_profile_it", "customer-7").orElseThrow())
+            .containsEntry("score", 0.95);
     }
 
 }
