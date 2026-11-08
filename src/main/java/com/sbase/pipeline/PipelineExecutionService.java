@@ -135,6 +135,7 @@ public class PipelineExecutionService {
             case "with_column" -> withColumn(input, step);
             case "aggregate" -> aggregate(input, step);
             case "join" -> join(inputs, step);
+            case "union" -> union(inputs, step);
             case "feature_store_write" -> { writeOnlineFeatures(requireInput(input), step, runId); yield input; }
             case "doris_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
@@ -170,6 +171,14 @@ public class PipelineExecutionService {
         for (String name : right.columns())
             projection.add(col("right_source." + name).alias(leftNames.contains(name) ? "right_" + name : name));
         return left.join(right, condition, joinType).select(projection.toArray(Column[]::new));
+    }
+
+
+    private Dataset<Row> union(List<Dataset<Row>> inputs, JsonNode step) {
+        if (inputs == null || inputs.size() != 2 || inputs.get(0) == null || inputs.get(1) == null)
+            throw new IllegalArgumentException("Union requires two materialized input datasets");
+        Dataset<Row> merged = inputs.get(0).unionByName(inputs.get(1), true);
+        return "distinct".equals(step.path("mode").asText("all")) ? merged.dropDuplicates() : merged;
     }
 
     private Dataset<Row> filter(Dataset<Row> input, JsonNode step) {
