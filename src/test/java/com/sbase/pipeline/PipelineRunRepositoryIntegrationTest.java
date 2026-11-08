@@ -97,4 +97,21 @@ class PipelineRunRepositoryIntegrationTest {
             .containsEntry("score", 0.95);
     }
 
+
+    @Test
+    void recoversExpiredRunningLeaseIntoDurableRetryQueue() {
+        PipelineEntity pipeline = pipelines.saveAndFlush(new PipelineEntity(
+            "lease recovery", "expired execution lease",
+            "{\"steps\":[{\"id\":\"source\",\"type\":\"doris_read\",\"table\":\"analytics.events\"}]}", true));
+        PipelineRunEntity run = runs.saveAndFlush(new PipelineRunEntity(
+            pipeline.getId(), pipeline.getVersion(), pipeline.getDefinitionJson()));
+        assertThat(runs.claimQueued(run.getId())).isEqualTo(1);
+        jdbc.update("UPDATE pipeline_runs SET lease_until=now()-interval '1 second' WHERE id=?", run.getId());
+        assertThat(runs.recoverExpired(run.getId())).isEqualTo(1);
+        PipelineRunEntity recovered = runs.findById(run.getId()).orElseThrow();
+        assertThat(recovered.getStatus()).isEqualTo("RETRY_WAIT");
+        assertThat(recovered.getNextAttemptAt()).isNotNull();
+        assertThat(runs.recoverExpired(run.getId())).isZero();
+    }
+
 }
