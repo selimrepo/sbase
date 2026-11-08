@@ -27,7 +27,8 @@ class SparkDorisResilienceTest {
              var statement = connection.createStatement()) {
             statement.execute("CREATE TABLE " + table +
                 " (id BIGINT NOT NULL, payload VARCHAR(128)) UNIQUE KEY(id) " +
-                "DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES (\"replication_num\"=\"1\")");
+                "DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES " +
+                "(\\"replication_num\\"=\\"1\\", \\"storage_medium\\"=\\"HDD\\")");
         }
 
         SparkSession spark = SparkSession.builder().appName("sbase-doris-resilience-test")
