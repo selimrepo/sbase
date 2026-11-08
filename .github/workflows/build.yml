@@ -88,26 +88,33 @@ jobs:
           gradle-version: '8.14'
       - name: Compile integration tests before fault injection
         run: gradle --no-daemon testClasses
-      - name: Exercise Doris outage and recovery
+      - name: Exercise Doris SQL endpoint outage and recovery
         run: |
           set -eu
-          docker compose -f docker-compose.yml stop doris-be
+          # Doris FE owns the MySQL protocol endpoint on port 9030. Stopping only
+          # the BE leaves FE accepting JDBC connections, so it cannot satisfy a
+          # connection-refused assertion.
+          docker compose -f docker-compose.yml stop doris-fe
           curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness
           SBASE_DORIS_TEST_JDBC_URL='jdbc:mysql://127.0.0.1:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true' \
           SBASE_DORIS_TEST_USERNAME=root SBASE_DORIS_TEST_PASSWORD='' \
-            gradle --no-daemon test --tests '*SparkDorisResilienceTest.jdbcEndpointIsUnavailableDuringDorisBackendOutage'
-          echo "Doris outage was explicitly detected by the expected JDBC connection failure."
-          docker compose -f docker-compose.yml start doris-be
+            gradle --no-daemon test --tests '*SparkDorisResilienceTest.jdbcEndpointIsUnavailableDuringDorisFrontendOutage'
+          echo "Doris SQL endpoint outage was detected while SBase remained live."
+          docker compose -f docker-compose.yml start doris-fe
           for attempt in $(seq 1 36); do
-            state="$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-be 2>/dev/null || true)"
+            state="$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-fe 2>/dev/null || true)"
             if [ "$state" = "healthy" ]; then
-              echo "Doris backend recovered."
-              exit 0
+              echo "Doris frontend SQL endpoint recovered."
+              break
             fi
             sleep 5
           done
-          docker compose -f docker-compose.yml logs --no-color --tail=200 doris-fe doris-be
-          exit 1
+          if [ "$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-fe 2>/dev/null || true)" != "healthy" ]; then
+            docker compose -f docker-compose.yml logs --no-color --tail=200 doris-fe doris-be
+            exit 1
+          fi
+          # Wait for the BE to re-register with the recovered FE before the load test.
+          docker compose -f docker-compose.yml run --rm --no-deps doris-init
       - name: Run real Spark-Doris load and idempotency test
         env:
           SBASE_DORIS_TEST_JDBC_URL: jdbc:mysql://127.0.0.1:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
