@@ -34,6 +34,8 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
 
     implementation "org.apache.spark:spark-sql_2.12:${sparkVersion}"
+    // Spark 3.5 still links against the javax.servlet API even when its embedded UI is disabled.
+    implementation 'javax.servlet:javax.servlet-api:4.0.1'
     implementation "org.apache.spark:spark-mllib_2.12:${sparkVersion}"
     implementation "org.apache.mahout:mahout-math:${mahoutVersion}"
 
