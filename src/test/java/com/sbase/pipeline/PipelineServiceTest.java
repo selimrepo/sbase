@@ -6,22 +6,20 @@ import org.springframework.web.server.ResponseStatusException;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PipelineServiceTest {
+    private final PipelineDefinitionValidator validator = new PipelineDefinitionValidator(new ObjectMapper());
+
     @Test
-    void acceptsPipelineWithStepsArray() {
-        PipelineService service = new PipelineService(null, new ObjectMapper());
-        assertDoesNotThrow(() -> {
-            var method = PipelineService.class.getDeclaredMethod("validateDefinition", String.class);
-            method.setAccessible(true);
-            method.invoke(service, "{\"steps\":[{\"type\":\"read-doris\"},{\"type\":\"select\"}]}");
-        });
+    void acceptsPipelineWithExecutableSteps() {
+        assertDoesNotThrow(() -> validator.parseAndValidate("""
+            {"steps":[
+              {"id":"source","type":"doris_read","table":"analytics.events"},
+              {"id":"projection","type":"select","dependsOn":["source"],"columns":["id"]}
+            ]}
+            """));
     }
+
     @Test
     void rejectsPipelineWithoutSteps() {
-        PipelineService service = new PipelineService(null, new ObjectMapper());
-        assertThrows(Exception.class, () -> {
-            var method = PipelineService.class.getDeclaredMethod("validateDefinition", String.class);
-            method.setAccessible(true);
-            method.invoke(service, "{\"nodes\":[]}");
-        });
+        assertThrows(ResponseStatusException.class, () -> validator.parseAndValidate("{\"nodes\":[]}"));
     }
 }

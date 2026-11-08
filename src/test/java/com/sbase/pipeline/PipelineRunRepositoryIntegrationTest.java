@@ -1,0 +1,59 @@
+package com.sbase.pipeline;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@DataJpaTest
+@Testcontainers(disabledWithoutDocker = true)
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+class PipelineRunRepositoryIntegrationTest {
+    @Container
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
+            .withDatabaseName("sbase")
+            .withUsername("sbase")
+            .withPassword("sbase");
+
+    @DynamicPropertySource
+    static void databaseProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("spring.flyway.enabled", () -> true);
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
+    }
+
+    @Autowired PipelineRepository pipelines;
+    @Autowired PipelineRunRepository runs;
+
+    @Test
+    void persistsImmutablePipelineSnapshotAndExecutionLifecycle() {
+        PipelineEntity pipeline = pipelines.saveAndFlush(new PipelineEntity(
+                "integration pipeline", "repository integration test",
+                "{\"steps\":[{\"id\":\"source\",\"type\":\"doris_read\",\"table\":\"analytics.events\"}]}",
+                true));
+        PipelineRunEntity run = runs.saveAndFlush(new PipelineRunEntity(
+                pipeline.getId(), pipeline.getVersion(), pipeline.getDefinitionJson()));
+
+        run.start();
+        runs.saveAndFlush(run);
+        run.succeed("{\"recordsProcessed\":3}", 3);
+        runs.saveAndFlush(run);
+
+        PipelineRunEntity reloaded = runs.findById(run.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(reloaded.getPipelineVersion()).isEqualTo(1);
+        assertThat(reloaded.getDefinitionSnapshot()).contains("doris_read");
+        assertThat(reloaded.getRecordsProcessed()).isEqualTo(3);
+        assertThat(reloaded.getStartedAt()).isNotNull();
+        assertThat(reloaded.getFinishedAt()).isNotNull();
+    }
+}

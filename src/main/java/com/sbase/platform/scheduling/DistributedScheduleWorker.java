@@ -1,13 +1,17 @@
 package com.sbase.platform.scheduling;
 
+import com.sbase.pipeline.PipelineExecutionService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -16,12 +20,15 @@ import java.util.concurrent.Executor;
 public class DistributedScheduleWorker {
     private final JdbcTemplate db;
     private final Executor executor;
+    private final PipelineExecutionService pipelines;
     private final String node = UUID.randomUUID().toString();
 
     public DistributedScheduleWorker(@Qualifier("jdbcTemplate") JdbcTemplate db,
-                                     @Qualifier("miningExecutor") Executor executor) {
+                                     @Qualifier("miningExecutor") Executor executor,
+                                     PipelineExecutionService pipelines) {
         this.db = db;
         this.executor = executor;
+        this.pipelines = pipelines;
     }
 
     @Scheduled(fixedDelayString = "${sbase.scheduler.poll-ms:5000}")
@@ -29,17 +36,11 @@ public class DistributedScheduleWorker {
     public void poll() {
         List<UUID> claimed = claim();
         if (claimed.isEmpty()) return;
-
-        // Do not let workers race the transaction that writes their leases.
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
+            @Override public void afterCommit() {
                 claimed.forEach(id -> {
-                    try {
-                        executor.execute(() -> execute(id));
-                    } catch (RuntimeException ex) {
-                        recordFailure(id, "Schedule executor rejected the job: " + ex.getMessage());
-                    }
+                    try { executor.execute(() -> execute(id)); }
+                    catch (RuntimeException ex) { recordFailure(id, "Schedule executor rejected the job: " + ex.getMessage()); }
                 });
             }
         });
@@ -65,12 +66,24 @@ public class DistributedScheduleWorker {
 
     void execute(UUID id) {
         try {
-            // Pipeline definitions are metadata only: there is no pipeline execution
-            // engine/step registry yet. Never mark a schedule successful as a no-op.
-            throw new IllegalStateException(
-                    "Pipeline execution is not configured; schedule cannot be marked successful");
+            ScheduleRow schedule = db.queryForObject("""
+                    SELECT pipeline_id, cron_expression FROM scheduled_jobs
+                    WHERE id=? AND lease_owner=?
+                    """, (rs, row) -> new ScheduleRow(
+                    rs.getObject("pipeline_id", UUID.class), rs.getString("cron_expression")), id, node);
+            if (schedule == null || schedule.pipelineId() == null)
+                throw new IllegalStateException("Schedule has no pipeline configured");
+            pipelines.submit(schedule.pipelineId());
+            var cron = CronExpression.parse(schedule.cronExpression());
+            var next = cron.next(LocalDateTime.now(ZoneOffset.UTC));
+            if (next == null) throw new IllegalStateException("Cron expression has no next execution time");
+            db.update("""
+                    UPDATE scheduled_jobs SET last_run_at=now(), next_run_at=?,
+                      lease_owner=NULL, lease_until=NULL, attempt_count=0, last_error=NULL, updated_at=now()
+                    WHERE id=? AND lease_owner=?
+                    """, next.toInstant(ZoneOffset.UTC), id, node);
         } catch (Exception ex) {
-            recordFailure(id, String.valueOf(ex.getMessage()));
+            recordFailure(id, ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage());
         }
     }
 
@@ -83,4 +96,6 @@ public class DistributedScheduleWorker {
                 WHERE id=? AND lease_owner=?
                 """, message, id, node);
     }
+
+    private record ScheduleRow(UUID pipelineId, String cronExpression) { }
 }
