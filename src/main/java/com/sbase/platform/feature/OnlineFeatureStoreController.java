@@ -41,5 +41,5 @@ public class OnlineFeatureStoreController {
 
     public record UpsertRequest(@Positive int featureVersion, Instant eventTime,
                                 @NotEmpty Map<String, Object> values) {}
-    public record CountResponse(int entities) {}
+    public record CountResponse(long entities) {}
 }
