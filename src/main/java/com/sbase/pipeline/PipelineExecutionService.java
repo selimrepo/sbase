@@ -415,7 +415,7 @@ public class PipelineExecutionService {
     }
 
     private static Duration retryDelay(int attempt) {
-        long seconds = Math.min(900L, 10L * (1L << Math.min(6, Math.max(0, attempt - 1))));
+        long seconds = Math.min(900L, 10L * (1L << Math.min(7, Math.max(0, attempt - 1))));
         return Duration.ofSeconds(seconds);
     }
 
