@@ -28,7 +28,7 @@ class SparkDorisResilienceTest {
             statement.execute("CREATE TABLE " + table +
                 " (id BIGINT NOT NULL, payload VARCHAR(128)) UNIQUE KEY(id) " +
                 "DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES " +
-                "(\\"replication_num\\"=\\"1\\", \\"storage_medium\\"=\\"HDD\\")");
+                "(\"replication_num\"=\"1\", \"storage_medium\"=\"HDD\")");
         }
 
         SparkSession spark = SparkSession.builder().appName("sbase-doris-resilience-test")
@@ -65,8 +65,7 @@ class SparkDorisResilienceTest {
     }
 
     /**
-     * The CI recovery scenario restarts the Doris FE immediately before this test.
-     * A healthy FE SQL port does not mean that its BE has re-registered and is
+     * A healthy FE SQL port does not mean its BE has re-registered and is
      * eligible for tablet placement yet, so wait for SHOW BACKENDS to report Alive.
      */
     private static void awaitAliveBackend(String url, String user, String password) throws Exception {
@@ -101,5 +100,4 @@ class SparkDorisResilienceTest {
         throw new IllegalStateException("Doris FE recovered, but no backend became Alive within 3 minutes",
             lastFailure);
     }
-
 }
