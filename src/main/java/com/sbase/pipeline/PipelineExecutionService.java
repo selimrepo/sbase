@@ -6,7 +6,6 @@ import com.sbase.doris.DorisClient;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.expressions.Window;
-import org.apache.spark.api.java.function.ForeachPartitionFunction;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -333,12 +332,12 @@ public class PipelineExecutionService {
             int open = ddl.indexOf('(', keyStart);
             int close = ddl.indexOf(')', open);
             if (open < 0 || close < 0) throw new IllegalStateException("Cannot inspect Doris UNIQUE KEY definition");
-            String declaredKeys = ddl.substring(open + 1, close);
-            for (String key : keyColumns) {
-                if (!Arrays.stream(declaredKeys.split(","))
-                        .map(String::trim).anyMatch(column -> column.equals(key.toUpperCase(Locale.ROOT))))
-                    throw new IllegalArgumentException("Idempotency column is not part of Doris UNIQUE KEY: " + key);
-            }
+            Set<String> declaredKeys = Arrays.stream(ddl.substring(open + 1, close).split(","))
+                .map(String::trim).collect(java.util.stream.Collectors.toSet());
+            Set<String> requestedKeys = Arrays.stream(keyColumns)
+                .map(key -> key.toUpperCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
+            if (!declaredKeys.equals(requestedKeys))
+                throw new IllegalArgumentException("idempotencyColumns must exactly match the Doris UNIQUE KEY columns: " + declaredKeys);
         } catch (java.sql.SQLException ex) {
             throw new IllegalStateException("Cannot verify Doris idempotency constraints for " + table, ex);
         }
