@@ -386,6 +386,23 @@ public class PipelineExecutionService {
     private void markFailed(UUID id, String error) {
         runs.findById(id).ifPresent(run -> { if ("QUEUED".equals(run.getStatus()) || "RUNNING".equals(run.getStatus())) { run.scheduleRetry(error, Instant.now().plus(retryDelay(run.getAttemptCount()))); runs.save(run); } });
     }
+
+    @Transactional
+    public void dispatchQueued(UUID runId) {
+        if (!runs.existsById(runId)) return;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() {
+                try { executor.execute(() -> execute(runId)); }
+                catch (RuntimeException ex) { markFailed(runId, "Execution queue rejected recovered run: " + ex.getMessage()); }
+            }
+        });
+    }
+
+    @Transactional
+    public void recoverExpired(UUID runId) {
+        runs.recoverExpired(runId);
+    }
+
     @Transactional
     public void retryDue(UUID runId) {
         if (runs.claimDueRetry(runId) != 1) return;
