@@ -56,4 +56,25 @@ class PipelineRunRepositoryIntegrationTest {
         assertThat(reloaded.getStartedAt()).isNotNull();
         assertThat(reloaded.getFinishedAt()).isNotNull();
     }
+
+    @Test
+    void persistsRetryScheduleAndClaimsEachAttemptOnlyOnce() {
+        PipelineEntity pipeline = pipelines.saveAndFlush(new PipelineEntity(
+            "retry pipeline", "retry persistence test",
+            "{\"steps\":[{\"id\":\"source\",\"type\":\"doris_read\",\"table\":\"analytics.events\"}]}", true));
+        PipelineRunEntity run = new PipelineRunEntity(pipeline.getId(), pipeline.getVersion(), pipeline.getDefinitionJson());
+        run.setMaxAttempts(3);
+        runs.saveAndFlush(run);
+        assertThat(runs.claimQueued(run.getId())).isEqualTo(1);
+        PipelineRunEntity running = runs.findById(run.getId()).orElseThrow();
+        running.scheduleRetry("temporary Doris failure", java.time.Instant.now().minusSeconds(1));
+        runs.saveAndFlush(running);
+
+        assertThat(runs.findTop100ByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc(
+            "RETRY_WAIT", java.time.Instant.now())).hasSize(1);
+        assertThat(runs.claimDueRetry(run.getId())).isEqualTo(1);
+        assertThat(runs.claimDueRetry(run.getId())).isZero();
+        assertThat(runs.findById(run.getId()).orElseThrow().getStatus()).isEqualTo("QUEUED");
+    }
+
 }
