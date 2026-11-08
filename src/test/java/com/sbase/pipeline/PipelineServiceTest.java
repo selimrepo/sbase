@@ -94,4 +94,26 @@ class PipelineServiceTest {
             """));
     }
 
+
+    @Test
+    void acceptsMultiSourceUnionAllAndDistinct() {
+        assertDoesNotThrow(() -> validator.parseAndValidate("""
+            {"steps":[
+              {"id":"events_a","type":"doris_read","table":"analytics.events_a"},
+              {"id":"events_b","type":"doris_read","table":"analytics.events_b"},
+              {"id":"merged","type":"union","dependsOn":["events_a","events_b"],"mode":"distinct"}
+            ]}
+            """));
+    }
+
+    @Test
+    void rejectsUnionWithOnlyOneInput() {
+        assertThrows(ResponseStatusException.class, () -> validator.parseAndValidate("""
+            {"steps":[
+              {"id":"events_a","type":"doris_read","table":"analytics.events_a"},
+              {"id":"merged","type":"union","dependsOn":["events_a"],"mode":"all"}
+            ]}
+            """));
+    }
+
 }
