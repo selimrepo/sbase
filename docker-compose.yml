@@ -36,7 +36,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase
-      SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar
+      SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
       DORIS_JDBC_URL: jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
       DORIS_USERNAME: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
