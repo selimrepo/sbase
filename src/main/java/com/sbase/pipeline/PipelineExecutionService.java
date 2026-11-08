@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sbase.doris.DorisClient;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.expressions.Window;
+import org.apache.spark.api.java.function.ForeachPartitionFunction;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,15 +35,22 @@ public class PipelineExecutionService {
     private final Executor executor;
     private final Set<String> allowedTables;
     private final int configuredMaxAttempts;
+    private final String postgresUrl;
+    private final String postgresUser;
+    private final String postgresPassword;
 
     public PipelineExecutionService(PipelineRepository pipelines, PipelineRunRepository runs,
             PipelineDefinitionValidator validator, ObjectMapper mapper, ObjectProvider<SparkSession> sparkProvider,
             DorisClient doris, @Qualifier("miningExecutor") Executor executor,
             @Value("${sbase.doris.allowed-tables:}") String allowedTables,
-            @Value("${sbase.pipeline.retry.max-attempts:4}") int configuredMaxAttempts) {
+            @Value("${sbase.pipeline.retry.max-attempts:4}") int configuredMaxAttempts,
+            @Value("${spring.datasource.url}") String postgresUrl,
+            @Value("${spring.datasource.username}") String postgresUser,
+            @Value("${spring.datasource.password}") String postgresPassword) {
         this.pipelines = pipelines; this.runs = runs; this.validator = validator; this.mapper = mapper;
         this.sparkProvider = sparkProvider; this.doris = doris; this.executor = executor;
         this.configuredMaxAttempts = Math.max(1, Math.min(20, configuredMaxAttempts));
+        this.postgresUrl = postgresUrl; this.postgresUser = postgresUser; this.postgresPassword = postgresPassword;
         this.allowedTables = new HashSet<>();
         for (String table : allowedTables.split(",")) if (!table.isBlank()) this.allowedTables.add(table.trim().toLowerCase(Locale.ROOT));
     }
@@ -122,6 +131,7 @@ public class PipelineExecutionService {
             case "with_column" -> withColumn(input, step);
             case "aggregate" -> aggregate(input, step);
             case "join" -> join(inputs, step);
+            case "feature_store_write" -> { writeOnlineFeatures(requireInput(input), step, runId); yield input; }
             case "doris_write" -> { writeDoris(requireInput(input), step, runId); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
         };
@@ -243,6 +253,73 @@ public class PipelineExecutionService {
         }
     }
 
+
+
+    private void writeOnlineFeatures(Dataset<Row> source, JsonNode step, UUID runId) {
+        String featureSet = step.path("featureSet").asText();
+        String entityKeyColumn = step.path("entityKeyColumn").asText();
+        String eventTimeColumn = step.path("eventTimeColumn").asText("");
+        int featureVersion = step.path("featureVersion").asInt(1);
+        if (!Arrays.asList(source.columns()).contains(entityKeyColumn))
+            throw new IllegalArgumentException("Online feature entity key column is missing: " + entityKeyColumn);
+        if (!eventTimeColumn.isBlank() && !Arrays.asList(source.columns()).contains(eventTimeColumn))
+            throw new IllegalArgumentException("Online feature event-time column is missing: " + eventTimeColumn);
+        String[] featureColumns = Arrays.stream(source.columns())
+            .filter(name -> !name.equals(entityKeyColumn) && !name.equals(eventTimeColumn))
+            .toArray(String[]::new);
+        if (featureColumns.length == 0) throw new IllegalArgumentException("Online feature materialization requires at least one feature column");
+
+        Dataset<Row> latest = source;
+        if (!eventTimeColumn.isBlank()) {
+            latest = source.withColumn("__sbase_rn", row_number().over(
+                Window.partitionBy(col(entityKeyColumn)).orderBy(col(eventTimeColumn).desc_nulls_last())))
+                .filter(col("__sbase_rn").equalTo(1)).drop("__sbase_rn");
+        } else {
+            latest = source.dropDuplicates(entityKeyColumn);
+        }
+        Column[] featureExpressions = Arrays.stream(featureColumns).map(org.apache.spark.sql.functions::col).toArray(Column[]::new);
+        Column eventTime = eventTimeColumn.isBlank() ? lit(null).cast(DataTypes.TimestampType) : col(eventTimeColumn).cast(DataTypes.TimestampType);
+        Dataset<Row> staged = latest.select(
+            lit(featureSet).alias("feature_set"),
+            col(entityKeyColumn).cast(DataTypes.StringType).alias("entity_key"),
+            lit(featureVersion).alias("feature_version"),
+            to_json(struct(featureExpressions)).alias("feature_values"),
+            eventTime.alias("event_time")
+        ).repartition(8);
+
+        String stageTable = "sbase_feature_stage_" + UUID.nameUUIDFromBytes(
+            (runId + ":" + step.path("id").asText()).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            .toString().replace("-", "");
+        String stageName = stageTable;
+        try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgresUrl, postgresUser, postgresPassword);
+             java.sql.Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE IF NOT EXISTS " + stageName + " (" +
+                "feature_set VARCHAR(160) NOT NULL, entity_key VARCHAR(512) NOT NULL, " +
+                "feature_version INTEGER NOT NULL, feature_values TEXT NOT NULL, event_time TIMESTAMPTZ)");
+            statement.executeUpdate("TRUNCATE TABLE " + stageName);
+        } catch (java.sql.SQLException ex) {
+            throw new IllegalStateException("Cannot prepare online feature staging table", ex);
+        }
+
+        staged.write().format("jdbc").option("url", postgresUrl).option("dbtable", stageName)
+            .option("user", postgresUser).option("password", postgresPassword)
+            .option("driver", "org.postgresql.Driver").option("batchsize", "2000")
+            .option("numPartitions", "8").mode("append").save();
+
+        try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgresUrl, postgresUser, postgresPassword);
+             java.sql.Statement statement = connection.createStatement()) {
+            connection.setAutoCommit(false);
+            statement.executeUpdate("INSERT INTO online_feature_values(feature_set, entity_key, feature_version, feature_values, event_time, materialized_at) " +
+                "SELECT feature_set, entity_key, feature_version, feature_values::jsonb, COALESCE(event_time, now()), now() FROM " + stageName +
+                " ON CONFLICT(feature_set, entity_key) DO UPDATE SET feature_version=EXCLUDED.feature_version, " +
+                "feature_values=EXCLUDED.feature_values, event_time=EXCLUDED.event_time, materialized_at=now() " +
+                "WHERE EXCLUDED.event_time >= online_feature_values.event_time");
+            statement.execute("DROP TABLE " + stageName);
+            connection.commit();
+        } catch (java.sql.SQLException ex) {
+            throw new IllegalStateException("Online feature materialization failed; retry is safe", ex);
+        }
+    }
 
     private void verifyDorisUniqueKey(String table, String[] keyColumns) {
         try (java.sql.Connection connection = doris.openConnection();
