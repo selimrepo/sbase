@@ -7,6 +7,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,6 +22,7 @@ class SparkDorisResilienceTest {
         String user = System.getenv().getOrDefault("SBASE_DORIS_TEST_USERNAME", "root");
         String password = System.getenv().getOrDefault("SBASE_DORIS_TEST_PASSWORD", "");
         String table = "sbase_it_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        awaitAliveBackend(url, user, password);
         try (var connection = DriverManager.getConnection(url, user, password);
              var statement = connection.createStatement()) {
             statement.execute("CREATE TABLE " + table +
@@ -58,4 +62,43 @@ class SparkDorisResilienceTest {
             }
         }
     }
+
+    /**
+     * The CI recovery scenario restarts the Doris FE immediately before this test.
+     * A healthy FE SQL port does not mean that its BE has re-registered and is
+     * eligible for tablet placement yet, so wait for SHOW BACKENDS to report Alive.
+     */
+    private static void awaitAliveBackend(String url, String user, String password) throws Exception {
+        long deadline = System.nanoTime() + java.time.Duration.ofMinutes(3).toNanos();
+        SQLException lastFailure = null;
+        while (System.nanoTime() < deadline) {
+            try (var connection = DriverManager.getConnection(url, user, password);
+                 var statement = connection.createStatement();
+                 ResultSet backends = statement.executeQuery("SHOW BACKENDS")) {
+                ResultSetMetaData metadata = backends.getMetaData();
+                int aliveColumn = -1;
+                for (int column = 1; column <= metadata.getColumnCount(); column++) {
+                    if ("Alive".equalsIgnoreCase(metadata.getColumnLabel(column))) {
+                        aliveColumn = column;
+                        break;
+                    }
+                }
+                if (aliveColumn < 0) {
+                    throw new SQLException("SHOW BACKENDS did not expose an Alive column");
+                }
+                while (backends.next()) {
+                    if (Boolean.parseBoolean(backends.getString(aliveColumn))) {
+                        return;
+                    }
+                }
+                lastFailure = null;
+            } catch (SQLException exception) {
+                lastFailure = exception;
+            }
+            Thread.sleep(2_000);
+        }
+        throw new IllegalStateException("Doris FE recovered, but no backend became Alive within 3 minutes",
+            lastFailure);
+    }
+
 }
