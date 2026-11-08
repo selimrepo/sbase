@@ -128,7 +128,7 @@ public class PlatformMetadataController {
     @GetMapping("/bi/summary")
     public Map<String,Object> summary() {
         Map<String,Object> result=new LinkedHashMap<>();
-        for(String table:List.of("datasets","pipelines","experiments","registered_models","feature_sets","scheduled_jobs"))
+        for(String table:List.of("datasets","pipelines","pipeline_runs","experiments","registered_models","feature_sets","scheduled_jobs"))
             result.put(table,db.queryForObject("SELECT COUNT(*) FROM "+table,Long.class));
         return result;
     }
