@@ -79,6 +79,35 @@ jobs:
           docker compose -f docker-compose.yml ps
           docker compose -f docker-compose.yml logs --no-color --tail=200
           exit 1
+      - name: Exercise Doris outage and recovery
+        run: |
+          set -eu
+          docker compose -f docker-compose.yml stop doris-be
+          curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness
+          docker compose -f docker-compose.yml start doris-be
+          for attempt in $(seq 1 36); do
+            state="$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-be 2>/dev/null || true)"
+            if [ "$state" = "healthy" ]; then
+              echo "Doris backend recovered."
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose -f docker-compose.yml logs --no-color --tail=200 doris-fe doris-be
+          exit 1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+      - name: Run real Spark-Doris load and idempotency test
+        env:
+          SBASE_DORIS_TEST_JDBC_URL: jdbc:mysql://127.0.0.1:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
+          SBASE_DORIS_TEST_USERNAME: root
+          SBASE_DORIS_TEST_PASSWORD: ""
+        run: gradle --no-daemon test --tests '*SparkDorisResilienceTest'
       - name: Show container status
         if: always()
         run: docker compose -f docker-compose.yml ps
