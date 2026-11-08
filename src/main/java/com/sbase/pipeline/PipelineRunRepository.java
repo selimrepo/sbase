@@ -28,7 +28,7 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRunEntity, 
     int claimDueRetry(@Param("id") UUID id);
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = "UPDATE pipeline_runs SET status=CASE WHEN attempt_count>=max_attempts THEN 'FAILED' ELSE 'RETRY_WAIT' END, next_attempt_at=CASE WHEN attempt_count>=max_attempts THEN NULL ELSE now()+make_interval(secs=>LEAST(900,10*power(2,LEAST(GREATEST(attempt_count-1,0),6))::int)) END, finished_at=now(), lease_until=NULL, error_message='Execution lease expired; retry scheduled' WHERE id=:id AND status='RUNNING' AND lease_until<now()", nativeQuery = true)
+    @Query(value = "UPDATE pipeline_runs SET status=CASE WHEN attempt_count>=max_attempts THEN 'FAILED' ELSE 'RETRY_WAIT' END, next_attempt_at=CASE WHEN attempt_count>=max_attempts THEN NULL ELSE now()+make_interval(secs=>LEAST(900,10*power(2,LEAST(GREATEST(attempt_count-1,0),7))::int)) END, finished_at=now(), lease_until=NULL, error_message='Execution lease expired; retry scheduled' WHERE id=:id AND status='RUNNING' AND lease_until<now()", nativeQuery = true)
     int recoverExpired(@Param("id") UUID id);
 
 }
