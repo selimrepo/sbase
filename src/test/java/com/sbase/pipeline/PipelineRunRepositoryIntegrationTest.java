@@ -1,5 +1,7 @@
 package com.sbase.pipeline;
 
+import com.sbase.platform.feature.OnlineFeatureStoreService;
+
 import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
