@@ -319,23 +319,33 @@ public class PipelineExecutionService {
             throw new IllegalStateException("Cannot prepare online feature staging table", ex);
         }
 
-        staged.write().format("jdbc").option("url", postgresUrl).option("dbtable", stageName)
-            .option("user", postgresUser).option("password", postgresPassword)
-            .option("driver", "org.postgresql.Driver").option("batchsize", "2000")
-            .option("numPartitions", "8").mode("append").save();
+        try {
+            staged.write().format("jdbc").option("url", postgresUrl).option("dbtable", stageName)
+                .option("user", postgresUser).option("password", postgresPassword)
+                .option("driver", "org.postgresql.Driver").option("batchsize", "2000")
+                .option("numPartitions", "8").mode("append").save();
 
-        try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgresUrl, postgresUser, postgresPassword);
-             java.sql.Statement statement = connection.createStatement()) {
-            connection.setAutoCommit(false);
-            statement.executeUpdate("INSERT INTO online_feature_values(feature_set, entity_key, feature_version, feature_values, event_time, materialized_at) " +
-                "SELECT feature_set, entity_key, feature_version, feature_values::jsonb, COALESCE(event_time, now()), now() FROM " + stageName +
-                " ON CONFLICT(feature_set, entity_key) DO UPDATE SET feature_version=EXCLUDED.feature_version, " +
-                "feature_values=EXCLUDED.feature_values, event_time=EXCLUDED.event_time, materialized_at=now() " +
-                "WHERE EXCLUDED.event_time >= online_feature_values.event_time");
-            statement.execute("DROP TABLE " + stageName);
-            connection.commit();
-        } catch (java.sql.SQLException ex) {
-            throw new IllegalStateException("Online feature materialization failed; retry is safe", ex);
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgresUrl, postgresUser, postgresPassword);
+                 java.sql.Statement statement = connection.createStatement()) {
+                connection.setAutoCommit(false);
+                statement.executeUpdate("INSERT INTO online_feature_values(feature_set, entity_key, feature_version, feature_values, event_time, materialized_at) " +
+                    "SELECT feature_set, entity_key, feature_version, feature_values::jsonb, COALESCE(event_time, now()), now() FROM " + stageName +
+                    " ON CONFLICT(feature_set, entity_key) DO UPDATE SET feature_version=EXCLUDED.feature_version, " +
+                    "feature_values=EXCLUDED.feature_values, event_time=EXCLUDED.event_time, materialized_at=now() " +
+                    "WHERE EXCLUDED.event_time >= online_feature_values.event_time");
+                statement.execute("DROP TABLE " + stageName);
+                connection.commit();
+            } catch (java.sql.SQLException ex) {
+                throw new IllegalStateException("Online feature materialization failed; retry is safe", ex);
+            }
+        } catch (RuntimeException ex) {
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgresUrl, postgresUser, postgresPassword);
+                 java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("DROP TABLE IF EXISTS " + stageName);
+            } catch (java.sql.SQLException cleanupError) {
+                ex.addSuppressed(cleanupError);
+            }
+            throw ex;
         }
     }
 
