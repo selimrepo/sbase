@@ -114,7 +114,7 @@ public class PipelineExecutionEngine {
                         };
                         aggregations[i]=aggregate.alias(alias);
                     }
-                    RelationalGroupedDataset grouped=groupNames.length==0?null:frame.groupBy(groupNames);
+                    RelationalGroupedDataset grouped=groupNames.length==0?null:frame.groupBy(groupNames[0],Arrays.copyOfRange(groupNames,1,groupNames.length));
                     frame=grouped==null?frame.agg(aggregations[0],Arrays.copyOfRange(aggregations,1,aggregations.length))
                             :grouped.agg(aggregations[0],Arrays.copyOfRange(aggregations,1,aggregations.length));
                 }
