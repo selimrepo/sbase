@@ -19,7 +19,7 @@ public class OnlineFeatureStoreController {
         this.features = features;
     }
 
-    @PutMapping("/{featureSet}/{entityKey}")
+    @PutMapping("/{featureSet}/entities/{entityKey}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void materialize(@PathVariable String featureSet, @PathVariable String entityKey,
                             @Valid @RequestBody UpsertRequest request) {
@@ -27,7 +27,7 @@ public class OnlineFeatureStoreController {
             request.eventTime(), request.values());
     }
 
-    @GetMapping("/{featureSet}/{entityKey}")
+    @GetMapping("/{featureSet}/entities/{entityKey}")
     public Map<String, Object> serve(@PathVariable String featureSet, @PathVariable String entityKey) {
         return features.get(featureSet, entityKey)
             .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
