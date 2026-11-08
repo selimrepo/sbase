@@ -10,7 +10,7 @@ import java.util.*;
 
 @Component
 public class PipelineDefinitionValidator {
-    private static final Set<String> TYPES = Set.of("doris_read", "filter", "select", "with_column", "aggregate", "doris_write", "join");
+    private static final Set<String> TYPES = Set.of("doris_read", "filter", "select", "with_column", "aggregate", "doris_write", "join", "feature_store_write");
     private static final Set<String> OPERATORS = Set.of("eq", "ne", "gt", "gte", "lt", "lte", "contains", "is_null", "not_null", "in");
     private static final Set<String> COLUMN_OPS = Set.of("cast_double", "lower", "upper", "trim", "abs", "log1p");
     private static final String IDENTIFIER = "[A-Za-z_][A-Za-z0-9_]*";
@@ -64,6 +64,13 @@ public class PipelineDefinitionValidator {
                 identifier(text(step, "column"));
                 identifier(text(step, "sourceColumn"));
                 if (!COLUMN_OPS.contains(text(step, "operation"))) throw invalid("Unsupported column operation");
+            }
+            case "feature_store_write" -> {
+                String featureSet = text(step, "featureSet");
+                if (!featureSet.matches("[A-Za-z0-9_.-]{1,160}")) throw invalid("Invalid feature set name");
+                identifier(text(step, "entityKeyColumn"));
+                if (step.hasNonNull("eventTimeColumn")) identifier(text(step, "eventTimeColumn"));
+                if (step.path("featureVersion").asInt(1) < 1) throw invalid("featureVersion must be positive");
             }
             case "join" -> {
                 identifier(text(step, "leftKey"));
