@@ -59,4 +59,39 @@ class PipelineServiceTest {
             """));
     }
 
+
+    @Test
+    void acceptsSparkOnlineFeatureMaterialization() {
+        assertDoesNotThrow(() -> validator.parseAndValidate("""
+            {"steps":[
+              {"id":"source","type":"doris_read","table":"analytics.customer_features"},
+              {"id":"online","type":"feature_store_write","dependsOn":["source"],
+               "featureSet":"customer_profile","entityKeyColumn":"customer_id",
+               "eventTimeColumn":"event_time","featureVersion":2}
+            ]}
+            """));
+    }
+
+    @Test
+    void rejectsDorisAppendWithoutIdempotencyColumns() {
+        assertThrows(ResponseStatusException.class, () -> validator.parseAndValidate("""
+            {"steps":[
+              {"id":"source","type":"doris_read","table":"analytics.customer_features"},
+              {"id":"write","type":"doris_write","dependsOn":["source"],
+               "table":"analytics.customer_profile","mode":"append"}
+            ]}
+            """));
+    }
+
+    @Test
+    void rejectsUnsafeOnlineFeatureKeyColumn() {
+        assertThrows(ResponseStatusException.class, () -> validator.parseAndValidate("""
+            {"steps":[
+              {"id":"source","type":"doris_read","table":"analytics.customer_features"},
+              {"id":"online","type":"feature_store_write","dependsOn":["source"],
+               "featureSet":"customer_profile","entityKeyColumn":"customer_id;drop"}
+            ]}
+            """));
+    }
+
 }
