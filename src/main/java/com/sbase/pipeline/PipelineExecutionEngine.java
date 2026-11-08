@@ -39,6 +39,7 @@ public class PipelineExecutionEngine {
             JsonNode step=steps.get(index);
             String type=step.path("type").asText();
             long started=System.nanoTime();
+            try {
             switch(type) {
                 case "read-doris" -> {
                     require(frame==null,"Only one source step is allowed and it must be first");
@@ -62,8 +63,8 @@ public class PipelineExecutionEngine {
                     String column=identifier(required(step,"column"));
                     String operator=required(step,"operator");
                     JsonNode value=step.get("value");
-                    require(value!=null,"filter.value is required");
-                    Column left=col(column), right=lit(scalar(value));
+                    if(!Set.of("is-null","not-null").contains(operator)) require(value!=null,"filter.value is required");
+                    Column left=col(column), right=value==null?lit(null):lit(scalar(value));
                     Column predicate=switch(operator) {
                         case "eq" -> left.equalTo(right); case "ne" -> left.notEqual(right);
                         case "gt" -> left.gt(right); case "gte" -> left.geq(right);
@@ -135,6 +136,13 @@ public class PipelineExecutionEngine {
             }
             results.add(Map.of("index",index,"type",type,"status","SUCCEEDED",
                     "durationMs",(System.nanoTime()-started)/1_000_000L));
+            } catch(Exception ex) {
+                results.add(Map.of("index",index,"type",type,"status","FAILED",
+                        "durationMs",(System.nanoTime()-started)/1_000_000L,
+                        "error",String.valueOf(ex.getMessage())));
+                throw new PipelineStepException("Step "+index+" ("+type+") failed: "+ex.getMessage(),
+                        mapper.writeValueAsString(results),ex);
+            }
         }
         require(frame!=null,"Pipeline did not produce a dataset");
         require(output!=null,"Pipeline must finish with write-doris or write-parquet");
@@ -172,4 +180,11 @@ public class PipelineExecutionEngine {
 
     public record ExecutionResult(long recordsRead,long recordsWritten,String outputLocation,
                                   String stepResultsJson,String resultSummary) { }
+    public static class PipelineStepException extends RuntimeException {
+        private final String stepResultsJson;
+        public PipelineStepException(String message,String stepResultsJson,Throwable cause) {
+            super(message,cause); this.stepResultsJson=stepResultsJson;
+        }
+        public String stepResultsJson(){return stepResultsJson;}
+    }
 }
