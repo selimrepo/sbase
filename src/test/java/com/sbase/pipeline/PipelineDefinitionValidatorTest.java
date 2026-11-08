@@ -16,7 +16,7 @@ class PipelineDefinitionValidatorTest {
               {"id":"source","type":"doris_read","table":"analytics.events"},
               {"id":"filtered","type":"filter","dependsOn":["source"],"column":"age","operator":"gte","value":18},
               {"id":"projection","type":"select","dependsOn":["filtered"],"columns":["id","age"]},
-              {"id":"persist","type":"doris_write","dependsOn":["projection"],"table":"analytics.filtered_events","mode":"overwrite"}
+              {"id":"persist","type":"doris_write","dependsOn":["projection"],"table":"analytics.filtered_events","mode":"append","idempotencyColumns":["id"]}
             ]}
             """));
     }
