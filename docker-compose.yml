@@ -112,16 +112,37 @@ services:
     command:
       - |
         attempt=0
-        # SHOW BACKENDS columns: Alive is column 10 (LastHeartbeat is column 9).
-        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -B -e "SHOW BACKENDS" 2>/dev/null | awk -F '\t' 'tolower($10) == "true" { alive=1 } END { exit !alive }'; do
+        healthy=0
+        # Parse SHOW BACKENDS by column name; positional columns vary by Doris release.
+        # Require Alive=true and SystemDecommissioned=false for 3 consecutive checks.
+        while [ "$$healthy" -lt 3 ]; do
+          if mysql --protocol=TCP -h doris-fe -P 9030 -uroot -B -e "SHOW BACKENDS" 2>/dev/null | awk -F '\\t' '
+            NR == 1 {
+              for (i = 1; i <= NF; i++) {
+                if (tolower($$i) == "alive") alive_col = i
+                if (tolower($$i) == "systemdecommissioned") decommissioned_col = i
+              }
+              next
+            }
+            alive_col > 0 && decommissioned_col > 0 &&
+              tolower($$alive_col) == "true" && tolower($$decommissioned_col) == "false" {
+              found = 1
+            }
+            END { exit !found }
+          '; then
+            healthy=$$((healthy+1))
+            echo "Doris has a schedulable backend ($$healthy/3 consecutive checks)."
+          else
+            healthy=0
+            echo "Waiting for a schedulable Doris backend..."
+          fi
           attempt=$$((attempt+1))
           if [ "$$attempt" -ge 60 ]; then
-            echo "Doris backend did not register as Alive=true with the frontend."
+            echo "Doris backend did not remain Alive and schedulable for 3 consecutive checks."
             mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS" || true
             exit 1
           fi
-          echo "Waiting for a live Doris backend ($$attempt/60)..."
-          sleep 5
+          if [ "$$healthy" -lt 3 ]; then sleep 5; fi
         done
         mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
     networks: [sbase-net]
