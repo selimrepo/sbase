@@ -47,10 +47,15 @@ public class OnlineFeatureStoreService {
         return jdbc.query("""
             SELECT feature_values::text FROM online_feature_values
             WHERE feature_set=? AND entity_key=?
-            """, rs -> rs.next()
-                ? Optional.of(mapper.readValue(rs.getString(1),
-                    mapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class)))
-                : Optional.empty(), featureSet, entityKey);
+            """, rs -> {
+                if (!rs.next()) return Optional.empty();
+                try {
+                    return Optional.of(mapper.readValue(rs.getString(1),
+                        mapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class)));
+                } catch (Exception ex) {
+                    throw new IllegalStateException("Stored feature vector is not valid JSON", ex);
+                }
+            }, featureSet, entityKey);
     }
 
     @Transactional(readOnly = true)
