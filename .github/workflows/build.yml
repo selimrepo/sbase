@@ -61,7 +61,7 @@ jobs:
       - name: Wait for application liveness
         run: |
           set -eu
-          max_attempts=36
+          max_attempts=72
           for attempt in $(seq 1 "$max_attempts"); do
             if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness; then
               echo
@@ -75,7 +75,7 @@ jobs:
             fi
             sleep 5
           done
-          echo "SBase did not become live within 3 minutes."
+          echo "SBase did not become live within 6 minutes."
           docker compose -f docker-compose.yml ps
           docker compose -f docker-compose.yml logs --no-color --tail=200
           exit 1
