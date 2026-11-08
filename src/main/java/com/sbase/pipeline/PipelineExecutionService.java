@@ -6,6 +6,7 @@ import com.sbase.doris.DorisClient;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -25,17 +26,17 @@ public class PipelineExecutionService {
     private final PipelineRunRepository runs;
     private final PipelineDefinitionValidator validator;
     private final ObjectMapper mapper;
-    private final SparkSession spark;
+    private final ObjectProvider<SparkSession> sparkProvider;
     private final DorisClient doris;
     private final Executor executor;
     private final Set<String> allowedTables;
 
     public PipelineExecutionService(PipelineRepository pipelines, PipelineRunRepository runs,
-            PipelineDefinitionValidator validator, ObjectMapper mapper, SparkSession spark,
+            PipelineDefinitionValidator validator, ObjectMapper mapper, ObjectProvider<SparkSession> sparkProvider,
             DorisClient doris, @Qualifier("miningExecutor") Executor executor,
             @Value("${sbase.doris.allowed-tables:}") String allowedTables) {
         this.pipelines = pipelines; this.runs = runs; this.validator = validator; this.mapper = mapper;
-        this.spark = spark; this.doris = doris; this.executor = executor;
+        this.sparkProvider = sparkProvider; this.doris = doris; this.executor = executor;
         this.allowedTables = new HashSet<>();
         for (String table : allowedTables.split(",")) if (!table.isBlank()) this.allowedTables.add(table.trim().toLowerCase(Locale.ROOT));
     }
@@ -118,7 +119,7 @@ public class PipelineExecutionService {
 
     private Dataset<Row> readDoris(String table) {
         requireAllowed(table);
-        return spark.read().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
+        return sparkProvider.getObject().read().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
                 .option("user", doris.username()).option("password", doris.password())
                 .option("driver", "com.mysql.cj.jdbc.Driver").load();
     }
