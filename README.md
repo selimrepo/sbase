@@ -63,7 +63,7 @@ Example idempotent write step:
 ```
 
 Online feature serving is backed by PostgreSQL table online_feature_values, keyed by (feature_set, entity_key). Spark pipelines can use feature_store_write with featureSet, entityKeyColumn, optional eventTimeColumn and featureVersion. Materialization stages each batch, then atomically upserts JSONB feature vectors; late-arriving events do not overwrite newer feature timestamps. The REST interface supports:
-- PUT /api/online-features/{featureSet}/{entityKey} to upsert a feature vector.
+- PUT /api/online-features/{featureSet}/entities/{entityKey} to upsert a feature vector.
 - GET /api/online-features/{featureSet}/{entityKey} to serve a vector.
 - GET /api/online-features/{featureSet}/_count for the current entity count.
 
