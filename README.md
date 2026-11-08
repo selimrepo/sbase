@@ -28,7 +28,7 @@ Pipeline definitions are executable DAG-like ordered step lists. The runtime val
 
 Supported steps:
 - Sources: `read-doris` (`table`), `read-parquet` (`uri`) and `read-csv` (`uri`, optional `header`). Doris table identifiers are restricted to SQL identifier syntax. Object storage paths accept `s3a://` and `hdfs://` only.
-- Transformations: `filter` (`column`, `operator`, `value`; operators `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `is-null`, `not-null`), `select` (`columns`), `derive` (`operation`: `copy`, `cast-double`, `cast-string`, `log1p;` plus `source` and `output`), and `aggregate` (`groupBy`, `metrics`; functions `count`, `sum`, `avg`, `min`, `max`).
+- Transformations: `filter` (`column`, `operator`, `value`; operators `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `is-null`, `not-null`), `select` (`columns`), `derive` (`operation`: `copy`, `cast-double`, `cast-string`, `log1p` plus `source` and `output`), and `aggregate` (`groupBy`, `metrics`; functions `count`, `sum`, `avg`, `min`, `max`).
 - Sinks: `write-doris` (`table`, append mode) and `write-parquet` (`uri`, overwrite mode).
 
 Example pipeline:
@@ -48,7 +48,7 @@ Run APIs: `POST /api/pipelines/{id}/runs` (202, returns a run ID), `GET /api/pip
 
 Schedules require an enabled pipeline. Workers claim due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`, heartbeat their leases while Spark runs, persist the pipeline run ID, compute the next UTC cron occurrence after success, and apply bounded exponential retry on failure. Exhausted schedules are disabled. Migration V5 creates pipeline run history and schedule linkage.
 
-For S3-compatible object stores, configure `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`. Spark uses Hadoop S3A support; the `hadoop-aws` version is aligned with Spark's Hadoop 3.3.4 runtime. `hdfs://` paths use the configured Spark/Hadoop environment.
+For S3-compatible object stores, configure `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY` and `S3_SECRET_KEY` in the Compose environment. The Docker image distributes the Hadoop S3A and AWS SDK jars to Spark workers together with the MySQL JDBC driver. Spark uses Hadoop S3A support; the `hadoop-aws` version is aligned with Spark's Hadoop 3.3.4 runtime. `hdfs://` paths use the configured Spark/Hadoop environment.
 
 ## Core APIs
 - Mining jobs: `/api/mining/jobs`
