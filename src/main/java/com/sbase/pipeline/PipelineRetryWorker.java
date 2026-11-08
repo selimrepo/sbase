@@ -17,7 +17,12 @@ public class PipelineRetryWorker {
 
     @Scheduled(fixedDelayString = "${sbase.pipeline.retry.poll-ms:5000}")
     public void poll() {
-        runs.findTop100ByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc("RETRY_WAIT", Instant.now())
+        Instant now = Instant.now();
+        runs.findTop100ByStatusAndLeaseUntilBeforeOrderByLeaseUntilAsc("RUNNING", now)
+            .forEach(run -> execution.recoverExpired(run.getId()));
+        runs.findTop100ByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAsc("RETRY_WAIT", now)
             .forEach(run -> execution.retryDue(run.getId()));
+        runs.findTop100ByStatusAndSubmittedAtLessThanEqualOrderBySubmittedAtAsc("QUEUED", now.minusSeconds(30))
+            .forEach(run -> execution.dispatchQueued(run.getId()));
     }
 }
