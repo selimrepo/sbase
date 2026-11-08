@@ -7,6 +7,7 @@ ALTER TABLE pipeline_runs
     ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 4,
     ADD COLUMN next_attempt_at TIMESTAMPTZ,
     ADD COLUMN idempotency_key VARCHAR(160),
+    ADD COLUMN lease_until TIMESTAMPTZ,
     ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX idx_pipeline_runs_retry_due
