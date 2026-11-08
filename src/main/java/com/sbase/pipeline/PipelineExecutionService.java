@@ -8,6 +8,8 @@ import org.apache.spark.sql.types.DataTypes;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import java.time.Instant;
+import java.time.Duration;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,13 +32,16 @@ public class PipelineExecutionService {
     private final DorisClient doris;
     private final Executor executor;
     private final Set<String> allowedTables;
+    private final int configuredMaxAttempts;
 
     public PipelineExecutionService(PipelineRepository pipelines, PipelineRunRepository runs,
             PipelineDefinitionValidator validator, ObjectMapper mapper, ObjectProvider<SparkSession> sparkProvider,
             DorisClient doris, @Qualifier("miningExecutor") Executor executor,
-            @Value("${sbase.doris.allowed-tables:}") String allowedTables) {
+            @Value("${sbase.doris.allowed-tables:}") String allowedTables,
+            @Value("${sbase.pipeline.retry.max-attempts:4}") int configuredMaxAttempts) {
         this.pipelines = pipelines; this.runs = runs; this.validator = validator; this.mapper = mapper;
         this.sparkProvider = sparkProvider; this.doris = doris; this.executor = executor;
+        this.configuredMaxAttempts = Math.max(1, Math.min(20, configuredMaxAttempts));
         this.allowedTables = new HashSet<>();
         for (String table : allowedTables.split(",")) if (!table.isBlank()) this.allowedTables.add(table.trim().toLowerCase(Locale.ROOT));
     }
@@ -47,7 +52,10 @@ public class PipelineExecutionService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline not found"));
         if (!pipeline.isEnabled()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Pipeline is disabled");
         validator.parseAndValidate(pipeline.getDefinitionJson());
-        PipelineRunEntity run = runs.save(new PipelineRunEntity(pipelineId, pipeline.getVersion(), pipeline.getDefinitionJson()));
+        PipelineRunEntity run = new PipelineRunEntity(pipelineId, pipeline.getVersion(), pipeline.getDefinitionJson());
+        run.setMaxAttempts(configuredMaxAttempts);
+        run.setIdempotencyKey(UUID.randomUUID().toString());
+        run = runs.save(run);
         UUID runId = run.getId();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCommit() {
@@ -88,7 +96,7 @@ public class PipelineExecutionService {
                 step.path("dependsOn").forEach(d -> dependencies.add(d.asText()));
                 List<Dataset<Row>> inputs = dependencies.stream().map(outputs::get).toList();
                 Dataset<Row> input = inputs.isEmpty() ? current : inputs.get(0);
-                Dataset<Row> result = apply(type, step, input, inputs);
+                Dataset<Row> result = apply(type, step, input, inputs, runId);
                 if (result != null) {
                     outputs.put(id, result);
                     current = result;
@@ -106,7 +114,7 @@ public class PipelineExecutionService {
         }
     }
 
-    private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs) {
+    private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs, UUID runId) {
         return switch (type) {
             case "doris_read" -> readDoris(step.path("table").asText());
             case "filter" -> filter(input, step);
@@ -114,7 +122,7 @@ public class PipelineExecutionService {
             case "with_column" -> withColumn(input, step);
             case "aggregate" -> aggregate(input, step);
             case "join" -> join(inputs, step);
-            case "doris_write" -> { writeDoris(requireInput(input), step); yield input; }
+            case "doris_write" -> { writeDoris(requireInput(input), step, runId); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
         };
     }
@@ -211,14 +219,23 @@ public class PipelineExecutionService {
         return df.groupBy(groups.toArray(Column[]::new)).agg(metrics.get(0), metrics.subList(1, metrics.size()).toArray(Column[]::new));
     }
 
-    private void writeDoris(Dataset<Row> df, JsonNode step) {
+    private void writeDoris(Dataset<Row> df, JsonNode step, UUID runId) {
         String table = step.path("table").asText();
         requireAllowed(table);
         String mode = step.path("mode").asText("overwrite");
-        df.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
+        JsonNode keys = step.path("idempotencyColumns");
+        if (!keys.isArray() || keys.isEmpty())
+            throw new IllegalArgumentException("Doris writes require idempotencyColumns; configure the target as a Doris UNIQUE KEY table using these columns");
+        String[] keyColumns = new String[keys.size()];
+        for (int i = 0; i < keys.size(); i++) { keyColumns[i] = keys.get(i).asText(); PipelineDefinitionValidator.identifier(keyColumns[i]); }
+        Dataset<Row> stable = df.dropDuplicates(keyColumns);
+        // Doris UNIQUE KEY tables provide duplicate-key replacement on retried JDBC inserts.
+        // The run UUID remains stable across retries and is included in the Spark job group for traceability.
+        sparkProvider.getObject().sparkContext().setJobGroup("pipeline-" + runId, "Idempotent Doris write " + runId, true);
+        stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
                 .option("user", doris.username()).option("password", doris.password())
                 .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "5000")
-                .mode(mode).save();
+                .mode("append").save();
     }
 
     private Object literal(JsonNode value) {
@@ -250,16 +267,31 @@ public class PipelineExecutionService {
     }
 
     private PipelineRunEntity markRunning(UUID id) {
-        PipelineRunEntity run = runs.findById(id).orElse(null);
-        if (run == null || !"QUEUED".equals(run.getStatus())) return null;
-        run.start(); return runs.save(run);
+        if (runs.claimQueued(id) != 1) return null;
+        return runs.findById(id).orElse(null);
     }
     private void markSucceeded(UUID id, String result, long records) {
         runs.findById(id).ifPresent(run -> { if ("RUNNING".equals(run.getStatus())) { run.succeed(result, records); runs.save(run); } });
     }
     private void markFailed(UUID id, String error) {
-        runs.findById(id).ifPresent(run -> { if ("QUEUED".equals(run.getStatus()) || "RUNNING".equals(run.getStatus())) { run.fail(error); runs.save(run); } });
+        runs.findById(id).ifPresent(run -> { if ("QUEUED".equals(run.getStatus()) || "RUNNING".equals(run.getStatus())) { run.scheduleRetry(error, Instant.now().plus(retryDelay(run.getAttemptCount()))); runs.save(run); } });
     }
+    @Transactional
+    public void retryDue(UUID runId) {
+        if (runs.claimDueRetry(runId) != 1) return;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() {
+                try { executor.execute(() -> execute(runId)); }
+                catch (RuntimeException ex) { markFailed(runId, "Retry executor rejected run: " + ex.getMessage()); }
+            }
+        });
+    }
+
+    private static Duration retryDelay(int attempt) {
+        long seconds = Math.min(900L, 10L * (1L << Math.min(6, Math.max(0, attempt - 1))));
+        return Duration.ofSeconds(seconds);
+    }
+
     private static String rootMessage(Throwable error) {
         Throwable current = error;
         while (current.getCause() != null) current = current.getCause();
