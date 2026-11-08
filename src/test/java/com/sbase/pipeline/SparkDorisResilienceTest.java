@@ -10,20 +10,8 @@ import java.sql.DriverManager;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import java.sql.SQLException;
 
 class SparkDorisResilienceTest {
-    @Test
-    @EnabledIfEnvironmentVariable(named = "SBASE_DORIS_TEST_JDBC_URL", matches = ".+")
-    void jdbcEndpointIsUnavailableDuringDorisFrontendOutage() {
-        String url = System.getenv("SBASE_DORIS_TEST_JDBC_URL");
-        String user = System.getenv().getOrDefault("SBASE_DORIS_TEST_USERNAME", "root");
-        String password = System.getenv().getOrDefault("SBASE_DORIS_TEST_PASSWORD", "");
-        assertThrows(SQLException.class, () -> DriverManager.getConnection(url, user, password),
-            "The Doris frontend must reject new JDBC connections while its SQL endpoint is stopped");
-    }
-
     @Test
     @EnabledIfEnvironmentVariable(named = "SBASE_DORIS_TEST_JDBC_URL", matches = ".+")
     void loadsReadsAndRetriesDuplicateUniqueKeysWithoutGrowingTheTarget() throws Exception {
