@@ -88,6 +88,10 @@ public class PipelineExecutionService {
     public void execute(UUID runId) {
         PipelineRunEntity run = markRunning(runId);
         if (run == null) return;
+        executeClaimed(runId, run);
+    }
+
+    private void executeClaimed(UUID runId, PipelineRunEntity run) {
         try {
             JsonNode definition = validator.parseAndValidate(run.getDefinitionSnapshot());
             Map<String, Dataset<Row>> outputs = new HashMap<>();
@@ -389,10 +393,12 @@ public class PipelineExecutionService {
 
     @Transactional
     public void dispatchQueued(UUID runId) {
-        if (!runs.existsById(runId)) return;
+        if (runs.claimQueued(runId) != 1) return;
+        PipelineRunEntity claimed = runs.findById(runId).orElse(null);
+        if (claimed == null) return;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCommit() {
-                try { executor.execute(() -> execute(runId)); }
+                try { executor.execute(() -> executeClaimed(runId, claimed)); }
                 catch (RuntimeException ex) { markFailed(runId, "Execution queue rejected recovered run: " + ex.getMessage()); }
             }
         });
