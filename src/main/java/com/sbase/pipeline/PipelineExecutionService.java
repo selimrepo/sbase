@@ -86,8 +86,9 @@ public class PipelineExecutionService {
                 String type = step.path("type").asText();
                 List<String> dependencies = new ArrayList<>();
                 step.path("dependsOn").forEach(d -> dependencies.add(d.asText()));
-                Dataset<Row> input = dependencies.isEmpty() ? current : outputs.get(dependencies.get(0));
-                Dataset<Row> result = apply(type, step, input);
+                List<Dataset<Row>> inputs = dependencies.stream().map(outputs::get).toList();
+                Dataset<Row> input = inputs.isEmpty() ? current : inputs.get(0);
+                Dataset<Row> result = apply(type, step, input, inputs);
                 if (result != null) {
                     outputs.put(id, result);
                     current = result;
@@ -105,13 +106,14 @@ public class PipelineExecutionService {
         }
     }
 
-    private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input) {
+    private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs) {
         return switch (type) {
             case "doris_read" -> readDoris(step.path("table").asText());
             case "filter" -> filter(input, step);
             case "select" -> select(input, step);
             case "with_column" -> withColumn(input, step);
             case "aggregate" -> aggregate(input, step);
+            case "join" -> join(inputs, step);
             case "doris_write" -> { writeDoris(requireInput(input), step); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
         };
@@ -122,6 +124,25 @@ public class PipelineExecutionService {
         return sparkProvider.getObject().read().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
                 .option("user", doris.username()).option("password", doris.password())
                 .option("driver", "com.mysql.cj.jdbc.Driver").load();
+    }
+
+
+    private Dataset<Row> join(List<Dataset<Row>> inputs, JsonNode step) {
+        if (inputs == null || inputs.size() != 2 || inputs.get(0) == null || inputs.get(1) == null)
+            throw new IllegalArgumentException("Join requires two materialized input datasets");
+        Dataset<Row> left = inputs.get(0).alias("left_source");
+        Dataset<Row> right = inputs.get(1).alias("right_source");
+        String leftKey = step.path("leftKey").asText();
+        String rightKey = step.path("rightKey").asText();
+        String joinType = switch (step.path("joinType").asText()) {
+            case "inner" -> "inner";
+            case "left" -> "left_outer";
+            case "right" -> "right_outer";
+            case "full" -> "full_outer";
+            default -> throw new IllegalArgumentException("Unsupported join type");
+        };
+        Column condition = col("left_source." + leftKey).equalTo(col("right_source." + rightKey));
+        return left.join(right, condition, joinType);
     }
 
     private Dataset<Row> filter(Dataset<Row> input, JsonNode step) {
