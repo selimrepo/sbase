@@ -43,7 +43,7 @@ Migration V3 adds ingestion connector/run metadata, experiment tracking, registe
 
 ## Pipeline execution, retries and online features
 
-Pipeline definitions are validated DAGs. Supported steps include doris_read, filter, select, with_column, aggregate, join, doris_write and feature_store_write. Joins accept exactly two dependencies and support inner, left, right and full join types. The engine does not execute arbitrary SQL, Python, shell commands or user-provided code.
+Pipeline definitions are validated DAGs. Supported steps include doris_read, filter, select, with_column, aggregate, join, union, doris_write and feature_store_write. Joins accept exactly two dependencies and support inner, left, right and full join types. Union accepts two dependencies and supports schema-aware union-all or union-distinct; additional sources can be composed by chaining merge steps. The engine does not execute arbitrary SQL, Python, shell commands or user-provided code.
 
 Pipeline runs preserve an immutable definition snapshot and a stable run idempotency key. Failed runs enter durable RETRY_WAIT state and are polled from PostgreSQL; attempts are atomically claimed, bounded by sbase.pipeline.retry.max-attempts (default 4), and delayed exponentially (10 seconds up to 15 minutes). Set sbase.pipeline.retry.poll-ms to tune polling. Queued work is redispatched if the process exits before dispatch, and RUNNING work has a six-hour execution lease; expired leases are recovered into the retry queue. A terminal run becomes FAILED after the configured attempt budget is exhausted.
 
