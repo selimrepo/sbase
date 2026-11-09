@@ -106,13 +106,35 @@ services:
     depends_on:
       doris-fe:
         condition: service_healthy
+      doris-be:
+        condition: service_healthy
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        set -eu
         until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SELECT 1" >/dev/null 2>&1; do
           echo "Waiting for Doris SQL endpoint..."
           sleep 5
         done
+
+        # A running BE process is not necessarily registered with the FE.
+        # Register it explicitly and wait until the FE reports it as alive.
+        if ! mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -e "SHOW BACKENDS" | grep -Fq "172.30.0.11"; then
+          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "ALTER SYSTEM ADD BACKEND '172.30.0.11:9050'"
+        fi
+
+        attempt=0
+        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -e "SHOW BACKENDS" | awk '$2 == "172.30.0.11" && tolower($7) == "true" { found=1 } END { exit !found }'; do
+          attempt=$((attempt + 1))
+          if [ "$attempt" -ge 60 ]; then
+            echo "Doris BE did not become alive in the FE within 5 minutes."
+            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS"
+            exit 1
+          fi
+          echo "Waiting for Doris BE registration ($attempt/60)..."
+          sleep 5
+        done
+
         mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
     networks: [sbase-net]
     restart: "no"
