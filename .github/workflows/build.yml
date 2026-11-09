@@ -126,7 +126,24 @@ jobs:
             docker compose -f docker-compose.yml logs --no-color --tail=200 doris-fe doris-be
             exit 1
           fi
-          # Wait for the BE to re-register with the recovered FE before the load test.
+          # Force a fresh BE heartbeat/storage-path report after FE recovery.
+          # A still-running BE can leave the restarted FE without its disk-path
+          # scheduling state even while SHOW BACKENDS reports stale capacity.
+          docker compose -f docker-compose.yml restart doris-be
+          for attempt in $(seq 1 36); do
+            state="$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-be 2>/dev/null || true)"
+            if [ "$state" = "healthy" ]; then
+              echo "Doris backend restarted and its heartbeat port is healthy."
+              break
+            fi
+            sleep 5
+          done
+          if [ "$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-be 2>/dev/null || true)" != "healthy" ]; then
+            docker compose -f docker-compose.yml logs --no-color --tail=200 doris-be
+            exit 1
+          fi
+          # Re-run initialization so SQL readiness and backend storage capacity
+          # are checked against the recovered FE, not the pre-fault FE state.
           docker compose -f docker-compose.yml run --rm --no-deps doris-init
       - name: Run real Spark-Doris load and idempotency test
         env:
