@@ -58,6 +58,10 @@ sbase:
     retention-hours: 168
   scheduler:
     poll-ms: ${SBASE_SCHEDULER_POLL_MS:5000}
+  pipeline:
+    retry:
+      max-attempts: ${SBASE_PIPELINE_MAX_ATTEMPTS:4}
+      poll-ms: ${SBASE_PIPELINE_RETRY_POLL_MS:5000}
   s3:
     endpoint: ${S3_ENDPOINT:}
     region: ${S3_REGION:us-east-1}
