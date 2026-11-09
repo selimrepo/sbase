@@ -65,33 +65,48 @@ class SparkDorisResilienceTest {
     }
 
     /**
-     * A healthy FE SQL port does not mean its BE has re-registered and is
-     * eligible for tablet placement yet, so wait for SHOW BACKENDS to report Alive.
+     * Wait until the FE has received the BE's storage-path report. Alive=true
+     * is insufficient: Doris may still have no schedulable disk capacity.
      */
     private static void awaitAliveBackend(String url, String user, String password) throws Exception {
         long deadline = System.nanoTime() + java.time.Duration.ofMinutes(3).toNanos();
         SQLException lastFailure = null;
+        String lastBackendState = "no backend rows";
         int consecutiveHealthyObservations = 0;
         while (System.nanoTime() < deadline) {
             try (var connection = DriverManager.getConnection(url, user, password);
                  var statement = connection.createStatement();
                  ResultSet backends = statement.executeQuery("SHOW BACKENDS")) {
                 ResultSetMetaData metadata = backends.getMetaData();
+                int hostColumn = -1;
                 int aliveColumn = -1;
                 int decommissionedColumn = -1;
+                int availableCapacityColumn = -1;
+                int totalCapacityColumn = -1;
                 for (int column = 1; column <= metadata.getColumnCount(); column++) {
                     String label = metadata.getColumnLabel(column);
+                    if ("Host".equalsIgnoreCase(label)) hostColumn = column;
                     if ("Alive".equalsIgnoreCase(label)) aliveColumn = column;
                     if ("SystemDecommissioned".equalsIgnoreCase(label)) decommissionedColumn = column;
+                    if ("AvailCapacity".equalsIgnoreCase(label)) availableCapacityColumn = column;
+                    if ("TotalCapacity".equalsIgnoreCase(label)) totalCapacityColumn = column;
                 }
-                if (aliveColumn < 0 || decommissionedColumn < 0) {
-                    throw new SQLException("SHOW BACKENDS must expose Alive and SystemDecommissioned columns");
+                if (hostColumn < 0 || aliveColumn < 0 || decommissionedColumn < 0
+                        || availableCapacityColumn < 0 || totalCapacityColumn < 0) {
+                    throw new SQLException("SHOW BACKENDS must expose Host, Alive, SystemDecommissioned, "
+                        + "AvailCapacity and TotalCapacity columns");
                 }
+
                 boolean schedulableBackendFound = false;
                 while (backends.next()) {
+                    String host = backends.getString(hostColumn);
+                    String available = backends.getString(availableCapacityColumn);
+                    String total = backends.getString(totalCapacityColumn);
                     boolean alive = Boolean.parseBoolean(backends.getString(aliveColumn));
                     boolean decommissioned = Boolean.parseBoolean(backends.getString(decommissionedColumn));
-                    if (alive && !decommissioned) {
+                    lastBackendState = "host=" + host + ", alive=" + alive + ", decommissioned=" + decommissioned
+                        + ", availableCapacity=" + available + ", totalCapacity=" + total;
+                    if (alive && !decommissioned && hasPositiveCapacity(available) && hasPositiveCapacity(total)) {
                         schedulableBackendFound = true;
                         break;
                     }
@@ -107,7 +122,19 @@ class SparkDorisResilienceTest {
             Thread.sleep(5_000);
         }
         throw new IllegalStateException(
-            "Doris FE recovered, but no schedulable Alive backend remained available for 3 consecutive checks within 3 minutes",
+            "Doris FE recovered, but no Alive, non-decommissioned backend with registered disk capacity "
+                + "was observed for 3 consecutive checks within 3 minutes. Last backend state: " + lastBackendState,
             lastFailure);
     }
+
+    private static boolean hasPositiveCapacity(String capacity) {
+        if (capacity == null || capacity.isBlank()) return false;
+        String numericPart = capacity.trim().split("\\s+")[0].replace(",", "");
+        try {
+            return Double.parseDouble(numericPart) > 0;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+}
 }
