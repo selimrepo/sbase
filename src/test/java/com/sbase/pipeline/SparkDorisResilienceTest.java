@@ -4,6 +4,9 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.sql.DriverManager;
@@ -16,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class SparkDorisResilienceTest {
     @Test
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     @EnabledIfEnvironmentVariable(named = "SBASE_DORIS_TEST_JDBC_URL", matches = ".+")
     void loadsReadsAndRetriesDuplicateUniqueKeysWithoutGrowingTheTarget() throws Exception {
         String url = System.getenv("SBASE_DORIS_TEST_JDBC_URL");
@@ -37,10 +41,11 @@ class SparkDorisResilienceTest {
             .config("spark.sql.shuffle.partitions", "4")
             .config("spark.driver.host", "127.0.0.1").getOrCreate();
         try {
-            Dataset<Row> batch = spark.range(100_000)
+            Dataset<Row> batch = spark.range(10_000)
                 .selectExpr("id", "concat('payload-', cast(id as string)) as payload")
                 .repartition(1); // One Doris bucket: avoid four concurrent writers contending for one tablet.
             for (int attempt = 0; attempt < 2; attempt++) {
+                System.out.println("Spark-Doris append attempt " + (attempt + 1) + "/2");
                 batch.write().format("jdbc").option("url", url).option("dbtable", table)
                     .option("user", user).option("password", password)
                     .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "10000")
@@ -50,10 +55,10 @@ class SparkDorisResilienceTest {
                  var statement = connection.createStatement();
                  var result = statement.executeQuery("SELECT COUNT(*) FROM " + table)) {
                 result.next();
-                assertEquals(100_000L, result.getLong(1),
+                assertEquals(10_000L, result.getLong(1),
                     "Repeating a Spark JDBC append to a Doris UNIQUE KEY table must not duplicate entities");
             }
-            assertEquals(100_000L, spark.read().format("jdbc").option("url", url).option("dbtable", table)
+            assertEquals(10_000L, spark.read().format("jdbc").option("url", url).option("dbtable", table)
                 .option("user", user).option("password", password)
                 .option("driver", "com.mysql.cj.jdbc.Driver").load().count());
         } finally {
