@@ -171,6 +171,32 @@ services:
         done
 
         mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
+
+        # SHOW BACKENDS can report an alive BE before FE's RPC blacklist clears.
+        # A real OLAP table creation is the authoritative tablet-placement check.
+        probe_attempt=0
+        while :; do
+          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e \
+            "DROP TABLE IF EXISTS analytics.sbase_backend_readiness_probe" >/dev/null 2>&1 || true
+          if mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e \
+            'CREATE TABLE analytics.sbase_backend_readiness_probe (id BIGINT NOT NULL) UNIQUE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES ("replication_num"="1", "storage_medium"="HDD")' \
+            2>/tmp/doris-backend-probe.err; then
+            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e \
+              "DROP TABLE analytics.sbase_backend_readiness_probe"
+            echo "Doris successfully placed a tablet on the registered backend."
+            break
+          fi
+
+          probe_attempt=$((probe_attempt + 1))
+          if [ "$probe_attempt" -ge 60 ]; then
+            echo "Doris could not place a tablet after 5 minutes; backend is not schedulable."
+            cat /tmp/doris-backend-probe.err
+            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS" || true
+            exit 1
+          fi
+          echo "Waiting for Doris tablet placement readiness ($probe_attempt/60)..."
+          sleep 5
+        done
     networks: [sbase-net]
     restart: "no"
   doris-be:
