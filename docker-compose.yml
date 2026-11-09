@@ -51,6 +51,56 @@ services:
       doris-be:
         condition: service_healthy
       doris-init:
+        condition: service_completed_successfully
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  spark-master:
+    image: apache/spark:3.5.6
+    container_name: sbase-spark-master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master"]
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  spark-worker:
+    image: apache/spark:3.5.6
+    container_name: sbase-spark-worker
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    depends_on: [spark-master]
+    environment:
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: 2
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  doris-fe:
+    image: apache/doris:doris-fe-2.1.7
+    container_name: sbase-doris-fe
+    hostname: doris-fe
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010
+      FE_ID: 1
+    ports:
+      - "8030:8030"
+      - "9030:9030"
+    volumes:
+      - doris-fe-meta:/opt/apache-doris/fe/doris-meta
+      - doris-fe-log:/opt/apache-doris/fe/log
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+  doris-init:
     image: mysql:8.4
     container_name: sbase-doris-init
     depends_on:
@@ -67,39 +117,36 @@ services:
           sleep 5
         done
 
-        # Register the BE once. A listening heartbeat port alone does not mean
-        # the FE has received the backend's storage-path report.
+        # Register the BE once. Alive=true alone does not prove that the FE
+        # has received storage-path information or can schedule tablets.
         if ! mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -e "SHOW BACKENDS" | grep -Fq "172.30.0.11"; then
           mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "ALTER SYSTEM ADD BACKEND '172.30.0.11:9050'"
         fi
 
         attempt=0
         healthy=0
-        while [ "$healthy" -lt 3 ]; do
+        while [ "$$healthy" -lt 3 ]; do
           if mysql --protocol=TCP -h doris-fe -P 9030 -uroot -B -e "SHOW BACKENDS" 2>/dev/null | awk -F '\\t' '
             NR == 1 {
               for (i = 1; i <= NF; i++) {
-                name = tolower($i)
+                name = tolower($$i)
                 if (name == "host") host_col = i
                 if (name == "alive") alive_col = i
                 if (name == "systemdecommissioned") decommissioned_col = i
                 if (name == "availcapacity") available_col = i
                 if (name == "totalcapacity") total_col = i
-                if (name == "status") status_col = i
               }
               next
             }
             {
-              available = $(available_col)
-              total = $(total_col)
-              sub(/[[:space:]].*$/, "", available)
-              sub(/[[:space:]].*$/, "", total)
-              status = status_col > 0 ? tolower($(status_col)) : ""
-              if ($(host_col) == "172.30.0.11" &&
-                  tolower($(alive_col)) == "true" &&
-                  tolower($(decommissioned_col)) == "false" &&
-                  (available + 0) > 0 && (total + 0) > 0 &&
-                  index(status, "\\"isscheduledisabled\\":true") == 0) {
+              available = $$(available_col)
+              total = $$(total_col)
+              sub(/[[:space:]].*$$/, "", available)
+              sub(/[[:space:]].*$$/, "", total)
+              if ($$(host_col) == "172.30.0.11" &&
+                  tolower($$(alive_col)) == "true" &&
+                  tolower($$(decommissioned_col)) == "false" &&
+                  (available + 0) > 0 && (total + 0) > 0) {
                 found = 1
               }
             }
@@ -108,58 +155,24 @@ services:
               exit !found
             }
           '; then
-            healthy=$((healthy + 1))
-            echo "Doris BE has registered storage capacity and is schedulable ($healthy/3)."
+            healthy=$$((healthy + 1))
+            echo "Doris BE has registered storage capacity ($$healthy/3 consecutive checks)."
           else
             healthy=0
-            echo "Waiting for Doris BE storage-path registration and scheduling readiness..."
+            echo "Waiting for Doris BE storage-path registration and capacity..."
           fi
-          attempt=$((attempt + 1))
-          if [ "$attempt" -ge 60 ]; then
-            echo "Doris BE did not become schedulable with registered storage capacity within 5 minutes."
+          attempt=$$((attempt + 1))
+          if [ "$$attempt" -ge 60 ]; then
+            echo "Doris BE did not register usable storage capacity within 5 minutes."
             mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS" || true
             exit 1
           fi
-          if [ "$healthy" -lt 3 ]; then sleep 5; fi
+          if [ "$$healthy" -lt 3 ]; then sleep 5; fi
         done
 
         mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
     networks: [sbase-net]
     restart: "no"
-
-  doris-be:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SELECT 1" >/dev/null 2>&1; do
-          echo "Waiting for Doris SQL endpoint..."
-          sleep 5
-        done
-
-        # A running BE process is not necessarily registered with the FE.
-        # Register it explicitly and wait until the FE reports it as alive.
-        if ! mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -e "SHOW BACKENDS" | grep -Fq "172.30.0.11"; then
-          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "ALTER SYSTEM ADD BACKEND '172.30.0.11:9050'"
-        fi
-
-        attempt=0
-        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -e "SHOW BACKENDS" | awk '$2 == "172.30.0.11" && tolower($7) == "true" { found=1 } END { exit !found }'; do
-          attempt=$((attempt + 1))
-          if [ "$attempt" -ge 60 ]; then
-            echo "Doris BE did not become alive in the FE within 5 minutes."
-            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS"
-            exit 1
-          fi
-          echo "Waiting for Doris BE registration ($attempt/60)..."
-          sleep 5
-        done
-
-        mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
-    networks: [sbase-net]
-    restart: "no"
-
   doris-be:
     image: apache/doris:doris-be-2.1.7
     container_name: sbase-doris-be
