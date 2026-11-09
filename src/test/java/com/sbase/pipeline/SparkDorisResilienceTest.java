@@ -77,8 +77,11 @@ class SparkDorisResilienceTest {
                 statement.execute(sql);
                 return;
             } catch (SQLException exception) {
-                if (exception.getErrorCode() != 2
-                        || exception.getMessage() == null
+                // Doris 2.1.x may expose this DDL placement failure as vendor
+                // code 1105 (or 2 depending on the MySQL protocol path). The
+                // stable discriminator is the Doris error message, not JDBC's
+                // vendor-code mapping.
+                if (exception.getMessage() == null
                         || !exception.getMessage().contains("Failed to find enough backend")) {
                     throw exception;
                 }
