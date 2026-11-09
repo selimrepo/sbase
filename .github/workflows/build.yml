@@ -1,4 +1,8 @@
 name: build
+
+concurrency:
+  group: sbase-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 on:
   push:
     branches: [main, feature/pipeline-execution-engine]
