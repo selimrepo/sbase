@@ -1,11 +1,11 @@
 name: build
 
 concurrency:
-  group: sbase-${{ github.workflow }}-${{ github.ref }}
+  group: sbase-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 on:
   push:
-    branches: [main, feature/pipeline-execution-engine]
+    branches: [main]
   pull_request:
     branches: [main]
 
