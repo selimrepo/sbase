@@ -25,10 +25,11 @@ class SparkDorisResilienceTest {
         awaitAliveBackend(url, user, password);
         try (var connection = DriverManager.getConnection(url, user, password);
              var statement = connection.createStatement()) {
-            statement.execute("CREATE TABLE " + table +
+            String createTableSql = "CREATE TABLE " + table +
                 " (id BIGINT NOT NULL, payload VARCHAR(128)) UNIQUE KEY(id) " +
                 "DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES " +
-                "(\"replication_num\"=\"1\", \"storage_medium\"=\"HDD\")");
+                "(\"replication_num\"=\"1\", \"storage_medium\"=\"HDD\")";
+            createTableWithBackendRetry(statement, createTableSql);
         }
 
         SparkSession spark = SparkSession.builder().appName("sbase-doris-resilience-test")
@@ -62,6 +63,32 @@ class SparkDorisResilienceTest {
                 statement.execute("DROP TABLE IF EXISTS " + table);
             }
         }
+    }
+
+    /**
+     * FE recovery can temporarily leave tablet scheduling without backend path
+     * information. Retry only that transient placement error; all other DDL
+     * failures must fail immediately.
+     */
+    private static void createTableWithBackendRetry(java.sql.Statement statement, String sql) throws Exception {
+        SQLException lastFailure = null;
+        for (int attempt = 1; attempt <= 12; attempt++) {
+            try {
+                statement.execute(sql);
+                return;
+            } catch (SQLException exception) {
+                if (exception.getErrorCode() != 2
+                        || exception.getMessage() == null
+                        || !exception.getMessage().contains("Failed to find enough backend")) {
+                    throw exception;
+                }
+                lastFailure = exception;
+                if (attempt < 12) Thread.sleep(5_000);
+            }
+        }
+        throw new IllegalStateException(
+            "Doris FE did not make the registered BE schedulable for tablet placement after 60 seconds",
+            lastFailure);
     }
 
     /**
