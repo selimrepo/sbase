@@ -27,6 +27,16 @@ public class SparkConfig {
         if (extraJars != null && !extraJars.isBlank()) {
             builder.config("spark.jars", extraJars);
         }
+        String endpoint=System.getenv("S3_ENDPOINT");
+        String accessKey=System.getenv("S3_ACCESS_KEY");
+        String secretKey=System.getenv("S3_SECRET_KEY");
+        String region=System.getenv().getOrDefault("S3_REGION","us-east-1");
+        builder.config("spark.hadoop.fs.s3a.impl","org.apache.hadoop.fs.s3a.S3AFileSystem")
+                .config("spark.hadoop.fs.s3a.endpoint.region",region)
+                .config("spark.hadoop.fs.s3a.path.style.access","true");
+        if(endpoint!=null&&!endpoint.isBlank()) builder.config("spark.hadoop.fs.s3a.endpoint",endpoint);
+        if(accessKey!=null&&!accessKey.isBlank()) builder.config("spark.hadoop.fs.s3a.access.key",accessKey);
+        if(secretKey!=null&&!secretKey.isBlank()) builder.config("spark.hadoop.fs.s3a.secret.key",secretKey);
         return builder.getOrCreate();
     }
 }

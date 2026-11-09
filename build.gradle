@@ -34,6 +34,7 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
 
     implementation "org.apache.spark:spark-sql_2.12:${sparkVersion}"
+    implementation 'org.apache.hadoop:hadoop-aws:3.3.4'
     implementation "org.apache.spark:spark-mllib_2.12:${sparkVersion}"
     implementation "org.apache.mahout:mahout-math:${mahoutVersion}"
 
