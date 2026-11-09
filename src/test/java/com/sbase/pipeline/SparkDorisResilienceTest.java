@@ -39,11 +39,11 @@ class SparkDorisResilienceTest {
         try {
             Dataset<Row> batch = spark.range(100_000)
                 .selectExpr("id", "concat('payload-', cast(id as string)) as payload")
-                .repartition(4);
+                .repartition(1); // One Doris bucket: avoid four concurrent writers contending for one tablet.
             for (int attempt = 0; attempt < 2; attempt++) {
                 batch.write().format("jdbc").option("url", url).option("dbtable", table)
                     .option("user", user).option("password", password)
-                    .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "2000")
+                    .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "10000")
                     .mode("append").save();
             }
             try (var connection = DriverManager.getConnection(url, user, password);
