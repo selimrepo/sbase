@@ -72,7 +72,7 @@ class SparkDorisResilienceTest {
      */
     private static void createTableWithBackendRetry(java.sql.Statement statement, String sql) throws Exception {
         SQLException lastFailure = null;
-        for (int attempt = 1; attempt <= 12; attempt++) {
+        for (int attempt = 1; attempt <= 60; attempt++) {
             try {
                 statement.execute(sql);
                 return;
@@ -86,11 +86,16 @@ class SparkDorisResilienceTest {
                     throw exception;
                 }
                 lastFailure = exception;
-                if (attempt < 12) Thread.sleep(5_000);
+                if (attempt < 60) {
+                    if (attempt == 1 || attempt % 12 == 0) {
+                        System.err.println("Doris has not scheduled a tablet yet; retry " + attempt + "/60");
+                    }
+                    Thread.sleep(5_000);
+                }
             }
         }
         throw new IllegalStateException(
-            "Doris FE did not make the registered BE schedulable for tablet placement after 60 seconds",
+            "Doris FE did not make the registered BE schedulable for tablet placement after 5 minutes",
             lastFailure);
     }
 
