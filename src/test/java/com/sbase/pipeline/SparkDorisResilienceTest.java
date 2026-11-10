@@ -23,6 +23,12 @@ class SparkDorisResilienceTest {
     @EnabledIfEnvironmentVariable(named = "SBASE_DORIS_TEST_JDBC_URL", matches = ".+")
     void loadsReadsAndRetriesDuplicateUniqueKeysWithoutGrowingTheTarget() throws Exception {
         String url = System.getenv("SBASE_DORIS_TEST_JDBC_URL");
+        // MySQL Connector/J otherwise sends each batched row as an individual
+        // INSERT. Doris then opens thousands of tiny transactions and Spark's
+        // JDBC write can exceed the integration-test timeout.
+        if (!url.toLowerCase(java.util.Locale.ROOT).contains("rewritebatchedstatements=")) {
+            url += (url.contains("?") ? "&" : "?") + "rewriteBatchedStatements=true";
+        }
         String user = System.getenv().getOrDefault("SBASE_DORIS_TEST_USERNAME", "root");
         String password = System.getenv().getOrDefault("SBASE_DORIS_TEST_PASSWORD", "");
         String table = "sbase_it_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
@@ -48,7 +54,7 @@ class SparkDorisResilienceTest {
                 System.out.println("Spark-Doris append attempt " + (attempt + 1) + "/2");
                 batch.write().format("jdbc").option("url", url).option("dbtable", table)
                     .option("user", user).option("password", password)
-                    .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "10000")
+                    .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "1000")
                     .mode("append").save();
             }
             try (var connection = DriverManager.getConnection(url, user, password);
