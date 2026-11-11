@@ -35,7 +35,7 @@ public class OnlineFeatureStoreService {
                     feature_values=EXCLUDED.feature_values,
                     event_time=EXCLUDED.event_time,
                     materialized_at=now()
-                WHERE EXCLUDED.event_time >= online_feature_values.event_time
+                WHERE EXCLUDED.event_time > online_feature_values.event_time OR (EXCLUDED.event_time = online_feature_values.event_time AND EXCLUDED.feature_version >= online_feature_values.feature_version)
                 """,tenantId,featureSet,entityKey,featureVersion,json,eventTime==null?null:java.sql.Timestamp.from(eventTime));
         } catch(JsonProcessingException ex) {
             throw new IllegalArgumentException("Feature values are not valid JSON",ex);
