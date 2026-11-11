@@ -50,7 +50,7 @@ CREATE TABLE resource_access_grants (
 );
 CREATE INDEX idx_resource_access_subject ON resource_access_grants(tenant_id, subject, resource_type, resource_id);
 
-CREATE TABLE audit_events (
+CREATE TABLE platform_audit_events (
     id BIGSERIAL PRIMARY KEY,
     occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     tenant_id UUID REFERENCES tenants(id),
@@ -64,8 +64,8 @@ CREATE TABLE audit_events (
     user_agent TEXT,
     details JSONB NOT NULL DEFAULT '{}'::jsonb
 );
-CREATE INDEX idx_audit_events_tenant_time ON audit_events(tenant_id, occurred_at DESC);
-CREATE INDEX idx_audit_events_subject_time ON audit_events(subject, occurred_at DESC);
+CREATE INDEX idx_platform_audit_events_tenant_time ON platform_audit_events(tenant_id, occurred_at DESC);
+CREATE INDEX idx_platform_audit_events_subject_time ON platform_audit_events(subject, occurred_at DESC);
 
 CREATE TABLE api_rate_limit_buckets (
     bucket_key VARCHAR(240) PRIMARY KEY,
