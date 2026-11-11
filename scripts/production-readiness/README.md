@@ -82,3 +82,12 @@ Existing CI already exercises Spark-to-Doris load, duplicate-key idempotency, Do
 ## Release gate
 
 Do not call a release production-ready until applicable checks have evidence, critical/high security findings are resolved or formally accepted, restore and rollback drills pass, and load tests meet agreed SLOs at expected peak volume. Store reports with release tag, commit SHA, environment version and timestamp.
+
+
+## Static production configuration audit
+
+Run this before deploying. It intentionally detects the insecure development password fallbacks currently present in the checked-in Compose/Spring configuration; it should remain red until those defaults are removed and explicit secrets are required.
+
+\`\`\`bash
+bash scripts/production-readiness/config-audit.sh
+\`\`\`
