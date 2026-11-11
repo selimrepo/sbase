@@ -62,6 +62,16 @@ public class DurableRecordSink {
             }, topic, partition, ownerId, connectorId));
     }
 
+    public boolean renewKafkaPartition(UUID connectorId, String topic, int partition,
+                                       String ownerId, long fencingToken) {
+        return jdbc.update("""
+            UPDATE ingestion_partition_offsets
+               SET lease_until=now()+interval '2 minutes',updated_at=now()
+             WHERE connector_id=? AND topic=? AND partition_id=? AND lease_owner=?
+               AND fencing_token=? AND lease_until>now()
+            """, connectorId, topic, partition, ownerId, fencingToken) == 1;
+    }
+
     /** Revocation invalidates the current token before Kafka may assign the partition elsewhere. */
     public void releaseKafkaPartition(UUID connectorId, String topic, int partition,
                                       String ownerId, long fencingToken) {
