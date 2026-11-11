@@ -47,7 +47,7 @@ services:
       DORIS_JDBC_URL: ${DORIS_JDBC_URL:-jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true}
       DORIS_USERNAME: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
-      SBASE_S3_ENDPOINT: ${SBASE_S3_ENDPOINT:-}
+      SBASE_S3_ENDPOINT: ${SBASE_S3_ENDPOINT:-http://minio:9000}
       SBASE_S3_REGION: ${SBASE_S3_REGION:-us-east-1}
       SBASE_S3_BUCKET: ${SBASE_S3_BUCKET:-sbase-artifacts}
       SBASE_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-}
@@ -284,7 +284,7 @@ services:
     restart: unless-stopped
 
   sbase-node-2:
-    profiles: ["app-ha", "doris-fe-ha", "doris-ha"]
+    profiles: ["app-ha"]
     build:
       context: .
       dockerfile: Dockerfile
