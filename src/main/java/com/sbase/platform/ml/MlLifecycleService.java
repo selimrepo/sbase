@@ -28,6 +28,7 @@ import static org.apache.spark.sql.functions.*;
 public class MlLifecycleService {
  private final JdbcTemplate db; private final ObjectMapper json; private final ObjectProvider<SparkSession> spark;
  private final Executor executor; private final String jdbcUrl,user,password,artifactRoot; private final Set<String> tables;
+ private final java.util.concurrent.ConcurrentHashMap<String,PipelineModel> loadedModels=new java.util.concurrent.ConcurrentHashMap<>();
  public MlLifecycleService(@Qualifier("jdbcTemplate") JdbcTemplate db,ObjectMapper json,ObjectProvider<SparkSession> spark,
    @Qualifier("miningExecutor") Executor executor,@Value("${spring.datasource.url}") String jdbcUrl,
    @Value("${spring.datasource.username}") String user,@Value("${spring.datasource.password}") String password,
@@ -71,7 +72,7 @@ public class MlLifecycleService {
    SparkSession session=spark.getObject();
    Properties props=new Properties();props.setProperty("user",user);props.setProperty("password",password);props.setProperty("driver","org.postgresql.Driver");
    String projection=String.join(",",features)+","+label;
-   Dataset<Row> data=session.read().jdbc(jdbcUrl,"(SELECT "+projection+" FROM "+table+" WHERE "+label+" IS NOT NULL) s",props)
+   Dataset<Row> data=session.read().jdbc(jdbcUrl,"(SELECT "+projection+" FROM "+table+" WHERE tenant_id='"+tenant+"' AND "+label+" IS NOT NULL) s",props)
      .na().drop(new String[]{label});
    if(data.limit(2).count()<2)throw new IllegalArgumentException("Training dataset must contain at least two labeled rows");
    VectorAssembler assembler=new VectorAssembler().setInputCols(features.toArray(String[]::new)).setOutputCol("features").setHandleInvalid("skip");
@@ -90,6 +91,7 @@ public class MlLifecycleService {
     fitted=(PipelineModel)cvModel.bestModel();
     best.put("crossValidationMetrics",Arrays.stream(cvModel.avgMetrics()).boxed().toList());
     best.put("bestAverageMetric",Arrays.stream(cvModel.avgMetrics()).min().orElse(0));
+    best.put("bestEstimatorParameters",cvModel.bestModel().stages()[1].extractParamMap().toString());
    } else fitted=pipeline.fit(train);
    double metric=evaluator(task,label).evaluate(fitted.transform(test));
    String metricName=task.equals("CLASSIFICATION")?"accuracy":"rmse";
@@ -153,7 +155,7 @@ public class MlLifecycleService {
    StructType schema=DataTypes.createStructType(fields);
    Row row=RowFactory.create(cols.stream().map(c->((Number)input.get(c)).doubleValue()).toArray());
    Dataset<Row> frame=spark.getObject().createDataFrame(List.of(row),schema);
-   PipelineModel model=PipelineModel.load(uriPath((String)m.get("artifact_uri")));
+   String artifact=(String)m.get("artifact_uri");PipelineModel model=loadedModels.computeIfAbsent(artifact,PipelineModel::load);
    Row prediction=model.transform(frame).select("prediction").first();
    result.put("prediction",prediction.get(0));ok=true;return result;
   } catch(Exception ex){result.put("error",ex.getMessage());throw new IllegalStateException("Model prediction failed",ex);}
