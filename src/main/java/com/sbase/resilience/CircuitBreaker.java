@@ -36,7 +36,8 @@ public final class CircuitBreaker {
             probeInFlight.set(false);
             return result;
         } catch (RuntimeException | Error failure) {
-            if (probe || failures.incrementAndGet() >= threshold) openedAt.compareAndSet(0, System.nanoTime());
+            if (probe) { openedAt.set(System.nanoTime()); failures.set(threshold); }
+            else if (failures.incrementAndGet() >= threshold) openedAt.compareAndSet(0, System.nanoTime());
             probeInFlight.set(false);
             throw failure;
         }
