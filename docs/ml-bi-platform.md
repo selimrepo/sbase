@@ -28,7 +28,7 @@ This change adds a tenant-scoped ML lifecycle and self-service BI layer to the e
 
 - Create a deployment using `POST /api/ml/deployments`.
 - Online prediction: `POST /api/ml/deployments/{deploymentId}/predict` with a `features` object. Inputs are checked against the saved model signature.
-- Batch prediction: `POST /api/ml/deployments/{deploymentId}/batch` with 1–10,000 records. The current API executes the batch synchronously and persists its complete JSON result; retrieve it with `GET /api/ml/batches/{batchId}`.
+- Batch prediction: `POST /api/ml/deployments/{deploymentId}/batch` with 1–10,000 records. The API queues the batch on the bounded mining executor and persists its status and complete JSON result; retrieve it with `GET /api/ml/batches/{batchId}`.
 - Monitoring: `GET /api/ml/deployments/{deploymentId}/monitoring` returns 24-hour request/success/failure counts, average and p95 latency, recent sample count and per-feature serving-mean z-scores against the training baseline. A feature is flagged at an absolute z-score of 3 or more. This is a basic numeric mean-shift detector, not a replacement for PSI/KS tests, label-based quality monitoring or alert routing.
 
 ### Artifact storage
