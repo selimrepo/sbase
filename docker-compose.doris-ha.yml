@@ -13,6 +13,7 @@ services:
     volumes:
       - ./ops/register-doris-ha-backends.sh:/ops/register-doris-ha-backends.sh:ro
     entrypoint: ["/bin/bash","/ops/register-doris-ha-backends.sh"]
+    command: []
     depends_on:
       doris-fe-2:
         condition: service_started
