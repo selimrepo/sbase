@@ -131,7 +131,8 @@ public class MlLifecycleService {
   ParamMap[] grid=added?b.build():new ParamGridBuilder().build();if(grid.length>64)throw new IllegalArgumentException("Hyperparameter grid expands to more than 64 combinations");return grid;
  }
  private Evaluator evaluator(String task,String label){return task.equals("CLASSIFICATION")?new MulticlassClassificationEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName("accuracy"):new RegressionEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName("rmse");}
- @org.springframework.transaction.annotation.Transactional\n public UUID registerModel(UUID tenant,UUID run,String name,String description,String subject) {
+ @org.springframework.transaction.annotation.Transactional
+ public UUID registerModel(UUID tenant,UUID run,String name,String description,String subject) {
   Map<String,Object> r=db.queryForMap("SELECT artifact_uri,algorithm,task_type,metrics_json,feature_columns_json,label_column,feature_baseline_json FROM sbase_ml_runs WHERE id=? AND tenant_id=? AND status='SUCCEEDED'",run,tenant);
   UUID model=db.query("SELECT id FROM sbase_ml_models WHERE tenant_id=? AND name=?",(rs)->rs.next()?rs.getObject(1,UUID.class):null,tenant,name);
   if(model==null){model=UUID.randomUUID();db.update("INSERT INTO sbase_ml_models(id,tenant_id,name,description,owner_subject) VALUES(?,?,?,?,?)",model,tenant,name,description,subject);}
