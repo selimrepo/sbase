@@ -144,9 +144,9 @@ public class MlLifecycleService {
   UUID id=UUID.randomUUID();db.update("INSERT INTO sbase_ml_deployments(id,tenant_id,model_version_id,deployment_name,status,created_by) VALUES(?,?,?,?,'ACTIVE',?)",id,tenant,version,name,subject);return id;
  }
  public Map<String,Object> predict(UUID tenant,UUID deployment,Map<String,Object> input) {
-  long start=System.nanoTime();boolean ok=false;Map<String,Object> result=new LinkedHashMap<>();
+  long start=System.nanoTime();boolean ok=false,found=false;Map<String,Object> result=new LinkedHashMap<>();
   try {
-   Map<String,Object> m=db.queryForMap("SELECT v.artifact_uri,v.signature_json,d.id FROM sbase_ml_deployments d JOIN sbase_ml_model_versions v ON v.id=d.model_version_id WHERE d.id=? AND d.tenant_id=? AND d.status='ACTIVE'",deployment,tenant);
+   Map<String,Object> m=db.queryForMap("SELECT v.artifact_uri,v.signature_json,d.id FROM sbase_ml_deployments d JOIN sbase_ml_model_versions v ON v.id=d.model_version_id WHERE d.id=? AND d.tenant_id=? AND d.status='ACTIVE'",deployment,tenant);found=true;
    @SuppressWarnings("unchecked") Map<String,Object> signature=json.readValue(m.get("signature_json").toString(),Map.class);
    List<String> cols=(List<String>)signature.getOrDefault("features",List.of());
    if(cols.isEmpty())throw new IllegalStateException("Model signature is missing feature columns");
@@ -161,12 +161,28 @@ public class MlLifecycleService {
   } catch(Exception ex){result.put("error",ex.getMessage());throw new IllegalStateException("Model prediction failed",ex);}
   finally {
    long latency=(System.nanoTime()-start)/1_000_000;
-   db.update("INSERT INTO sbase_ml_prediction_events(tenant_id,deployment_id,latency_ms,succeeded,prediction_json,error_code) VALUES(?,?,?,?,CAST(? AS jsonb),?)",
-    tenant,deployment,latency,ok,ok?toJson(result):"{}",ok?null:"PREDICTION_FAILED");
+   if(found)db.update("INSERT INTO sbase_ml_prediction_events(tenant_id,deployment_id,latency_ms,succeeded,prediction_json,error_code,input_json) VALUES(?,?,?,?,CAST(? AS jsonb),?,CAST(? AS jsonb))",
+    tenant,deployment,latency,ok,ok?toJson(result):"{}",ok?null:"PREDICTION_FAILED",toJson(input));
   }
  }
  public Map<String,Object> monitor(UUID tenant,UUID deployment) {
-  return db.queryForMap("SELECT count(*) AS requests,count(*) FILTER(WHERE succeeded) AS successes,count(*) FILTER(WHERE NOT succeeded) AS failures,COALESCE(avg(latency_ms),0) AS avg_latency_ms,COALESCE(percentile_cont(0.95) WITHIN GROUP(ORDER BY latency_ms),0) AS p95_latency_ms FROM sbase_ml_prediction_events WHERE tenant_id=? AND deployment_id=? AND created_at>=now()-interval '24 hours'",tenant,deployment);
+  Map<String,Object> metrics=db.queryForMap("SELECT count(*) AS requests,count(*) FILTER(WHERE succeeded) AS successes,count(*) FILTER(WHERE NOT succeeded) AS failures,COALESCE(avg(latency_ms),0) AS avg_latency_ms,COALESCE(percentile_cont(0.95) WITHIN GROUP(ORDER BY latency_ms),0) AS p95_latency_ms,MAX(created_at) AS last_prediction_at FROM sbase_ml_prediction_events WHERE tenant_id=? AND deployment_id=? AND created_at>=now()-interval '24 hours'",tenant,deployment);
+  metrics.put("recentInputSamples",db.queryForList("SELECT input_json FROM sbase_ml_prediction_events WHERE tenant_id=? AND deployment_id=? ORDER BY created_at DESC LIMIT 20",tenant,deployment));
+  return metrics;
+ }
+ @Transactional
+ public void promote(UUID tenant,UUID version,String stage) {
+  if(!Set.of("NONE","STAGING","PRODUCTION","ARCHIVED").contains(stage))throw new IllegalArgumentException("Invalid model stage");
+  UUID model=db.query("SELECT model_id FROM sbase_ml_model_versions WHERE id=? AND tenant_id=?",(rs)->rs.next()?rs.getObject(1,UUID.class):null,version,tenant);
+  if(model==null)throw new IllegalArgumentException("Model version not found");
+  if("PRODUCTION".equals(stage))db.update("UPDATE sbase_ml_model_versions SET stage='ARCHIVED' WHERE tenant_id=? AND model_id=? AND stage='PRODUCTION'",tenant,model);
+  db.update("UPDATE sbase_ml_model_versions SET stage=?,promoted_at=CASE WHEN ?='PRODUCTION' THEN now() ELSE promoted_at END WHERE id=? AND tenant_id=?",stage,stage,version,tenant);
+ }
+ public Map<String,Object> lineage(UUID tenant,UUID version) {
+  return db.queryForMap("SELECT m.id AS model_id,m.name AS model_name,v.id AS version_id,v.version,v.stage,v.artifact_uri,v.run_id,r.experiment_id,r.run_name,r.algorithm,r.parameters_json,r.search_space_json,r.metrics_json,r.dataset_table,r.feature_columns_json,r.label_column,r.submitted_by,r.created_at AS run_created_at FROM sbase_ml_model_versions v JOIN sbase_ml_models m ON m.id=v.model_id LEFT JOIN sbase_ml_runs r ON r.id=v.run_id WHERE v.id=? AND v.tenant_id=? AND m.tenant_id=?",version,tenant,tenant);
+ }
+ public Map<String,Object> batchResult(UUID tenant,UUID id) {
+  return db.queryForMap("SELECT id,status,row_count,result_json,error_message,created_at,finished_at FROM sbase_ml_batch_jobs WHERE id=? AND tenant_id=?",id,tenant);
  }
  public UUID batchPredict(UUID tenant,UUID deployment,List<Map<String,Object>> rows) {
   if(rows==null||rows.isEmpty()||rows.size()>10000)throw new IllegalArgumentException("Batch must contain 1..10000 records");
