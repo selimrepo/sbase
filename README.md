@@ -25,7 +25,7 @@ Organizations often operate ERP, CRM, operational databases, files and analytica
 
 ### Data integration and catalog
 
-The dataset catalog records data assets and their source metadata. Ingestion endpoints expose JDBC, Doris and Kafka connector types. JDBC and Doris ingestion use bounded batch inserts. The Kafka execution path currently refuses to consume when a durable sink is not configured, avoiding consumption that could acknowledge data without persisting it.
+The dataset catalog records data assets and their source metadata. Ingestion endpoints expose JDBC, Doris, Kafka, Debezium CDC, REST and file connector types. Kafka and Debezium events are persisted to a PostgreSQL JSONB landing sink before Kafka offsets are committed. REST JSON and CSV/JSONL/NDJSON files use the same durable landing and idempotency infrastructure. Connector executions have bounded retries and a persistent dead-letter table.
 
 The `IngestionConnector` interface is an extension point for additional connector implementations. Connector registration metadata and ingestion run metadata are persisted in PostgreSQL.
 
@@ -260,7 +260,7 @@ Do not commit production credentials, signing keys or access tokens. Use deploym
 
 SBase includes durable retry state, idempotency-key-based Doris append behavior and online feature serving. These do not guarantee exactly-once processing across arbitrary external systems.
 
-The connector SPI is an extension point; it does not mean every possible source connector has a complete production-ready adapter and durable execution path. Kafka ingestion intentionally does not consume until a durable sink is configured. Model artifact URIs require an external object store and lifecycle policy. Dataset-level authorization and tenant isolation must be completed and verified before exposing a shared multi-user deployment to untrusted customers.
+The connector SPI is an extension point; it does not mean every possible source connector has a complete production-ready adapter and durable execution path. Kafka and Debezium consumers persist each batch and checkpoint transactionally before committing source offsets. This is at-least-once delivery with idempotent landing, not a distributed exactly-once guarantee. Model artifact URIs require an external object store and lifecycle policy. Dataset-level authorization and tenant isolation must be completed and verified before exposing a shared multi-user deployment to untrusted customers.
 
 SBase is currently a self-hosted platform, not a hosted multi-tenant SaaS service. SaaS billing, tenant provisioning, hosted operations and service-level commitments are not represented as available product capabilities.
 
