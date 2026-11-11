@@ -17,9 +17,12 @@ import java.util.*;
 @RequestMapping("/api/platform")
 public class PlatformMetadataController {
     private final JdbcTemplate db;
+    private final com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics;
 
-    public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db) {
+    public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db,
+                                       com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics) {
         this.db = db;
+        this.dorisAnalytics = dorisAnalytics;
     }
 
     public record Experiment(@NotBlank @Size(max=160) String name, String description, UUID datasetId,
@@ -120,9 +123,12 @@ public class PlatformMetadataController {
 
     @GetMapping("/bi/summary")
     public Map<String,Object> summary() {
-        Map<String,Object> result=new LinkedHashMap<>();
+        Map<String,Object> metadata=new LinkedHashMap<>();
         for(String table:List.of("datasets","pipelines","experiments","registered_models","feature_sets","scheduled_jobs"))
-            result.put(table,db.queryForObject("SELECT COUNT(*) FROM "+table,Long.class));
+            metadata.put(table,db.queryForObject("SELECT COUNT(*) FROM "+table,Long.class));
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("metadata",metadata);
+        result.put("analytics",dorisAnalytics.summary());
         return result;
     }
 }
