@@ -61,7 +61,7 @@ class AdvancedPlatformIntegrationTest {
     private PermissionService permissions() { return new PermissionService(db); }
     private TestingAuthenticationToken auth(String subject, String... authorities) {
         return new TestingAuthenticationToken(subject, "n/a",
-            java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toList());
+            java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toArray(SimpleGrantedAuthority[]::new));
     }
 
     @Test

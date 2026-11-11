@@ -116,7 +116,7 @@ public class AdvancedWorkspaceController {
    Boolean cycle=db.queryForObject("""
     WITH RECURSIVE dependency_chain(id,depends_on) AS (
      SELECT id,depends_on FROM scheduled_jobs WHERE id=?
-     UNION ALL
+     UNION
      SELECT parent.id,parent.depends_on FROM scheduled_jobs parent JOIN dependency_chain child ON parent.id=child.depends_on
     )
     SELECT EXISTS(SELECT 1 FROM dependency_chain WHERE id=?)
