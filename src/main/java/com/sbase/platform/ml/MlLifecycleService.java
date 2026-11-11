@@ -203,9 +203,16 @@ public class MlLifecycleService {
  }
  public UUID batchPredict(UUID tenant,UUID deployment,List<Map<String,Object>> rows) {
   if(rows==null||rows.isEmpty()||rows.size()>10000)throw new IllegalArgumentException("Batch must contain 1..10000 records");
-  UUID id=UUID.randomUUID();List<Map<String,Object>> predictions=new ArrayList<>();for(Map<String,Object> row:rows)predictions.add(predict(tenant,deployment,row));
-  db.update("INSERT INTO sbase_ml_batch_jobs(id,tenant_id,model_version_id,input_table,output_table,status,row_count,result_json,submitted_by,finished_at) SELECT ?,tenant_id,model_version_id,'API_PAYLOAD','API_RESPONSE','SUCCEEDED',?,CAST(? AS jsonb),'api',now() FROM sbase_ml_deployments WHERE id=?",
-    id,rows.size(),toJson(predictions),deployment);
+  UUID id=UUID.randomUUID();
+  int created=db.update("INSERT INTO sbase_ml_batch_jobs(id,tenant_id,model_version_id,input_table,output_table,status,row_count,submitted_by) SELECT ?,tenant_id,model_version_id,'API_PAYLOAD','API_RESPONSE','QUEUED',0,'api' FROM sbase_ml_deployments WHERE id=? AND tenant_id=? AND status='ACTIVE'",id,deployment,tenant);
+  if(created==0)throw new IllegalArgumentException("Active deployment not found");
+  List<Map<String,Object>> payload=List.copyOf(rows);
+  try{executor.execute(()->{
+   db.update("UPDATE sbase_ml_batch_jobs SET status='RUNNING' WHERE id=? AND status='QUEUED'",id);
+   try{List<Map<String,Object>> predictions=new ArrayList<>();for(Map<String,Object> row:payload)predictions.add(predict(tenant,deployment,row));
+    db.update("UPDATE sbase_ml_batch_jobs SET status='SUCCEEDED',row_count=?,result_json=CAST(? AS jsonb),finished_at=now() WHERE id=?",predictions.size(),toJson(predictions),id);
+   }catch(Exception ex){String message=ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage();db.update("UPDATE sbase_ml_batch_jobs SET status='FAILED',error_message=?,finished_at=now() WHERE id=?",message.substring(0,Math.min(4000,message.length())),id);}
+  });}catch(RuntimeException ex){db.update("UPDATE sbase_ml_batch_jobs SET status='FAILED',error_message=?,finished_at=now() WHERE id=?",ex.getMessage(),id);throw ex;}
   return id;
  }
  private String toJson(Object value){try{return json.writeValueAsString(value);}catch(Exception ex){return "{}";}}
