@@ -1,34 +1,60 @@
 package com.sbase.doris;
 
 import com.sbase.config.DorisProperties;
+import com.sbase.resilience.CircuitBreaker;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.SQLException;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.time.Duration;
+
+/** Pooled Doris connectivity with a fail-fast breaker around connection acquisition. */
 @Component
 public class DorisClient {
     private final DorisProperties properties;
+    private final DataSource dataSource;
+    private final CircuitBreaker breaker = new CircuitBreaker(4, Duration.ofSeconds(20));
 
-    public DorisClient(DorisProperties properties) {
+    public DorisClient(DorisProperties properties, @Qualifier("dorisDataSource") DataSource dataSource) {
         this.properties = properties;
+        this.dataSource = dataSource;
     }
 
     public Connection openConnection() throws SQLException {
-        return DriverManager.getConnection(properties.jdbcUrl(), properties.username(), properties.password());
+        try {
+            return breaker.execute(() -> {
+                try {
+                    Connection connection = dataSource.getConnection();
+                    try (var statement = connection.createStatement();
+                         var result = statement.executeQuery("SELECT 1")) {
+                        if (!result.next()) throw new SQLException("Doris validation query returned no rows");
+                    } catch (SQLException failure) {
+                        try { connection.close(); } catch (SQLException closeFailure) { failure.addSuppressed(closeFailure); }
+                        throw new DorisConnectionFailure(failure);
+                    }
+                    return connection;
+                } catch (SQLException failure) {
+                    throw new DorisConnectionFailure(failure);
+                }
+            });
+        } catch (DorisConnectionFailure failure) {
+            throw failure.sqlException;
+        }
     }
 
     public boolean isHealthy() {
-        try (Connection connection = openConnection();
-             var statement = connection.createStatement();
-             var result = statement.executeQuery("SELECT 1")) {
-            return result.next() && result.getInt(1) == 1;
-        } catch (SQLException ex) {
-            return false;
-        }
+        try (Connection connection = openConnection()) { return connection.isValid(2); }
+        catch (SQLException | CircuitBreaker.CircuitOpenException ex) { return false; }
     }
 
     public String jdbcUrl() { return properties.jdbcUrl(); }
     public String username() { return properties.username(); }
     public String password() { return properties.password(); }
+
+    private static final class DorisConnectionFailure extends RuntimeException {
+        private final SQLException sqlException;
+        private DorisConnectionFailure(SQLException cause) { super(cause); this.sqlException = cause; }
+    }
 }

@@ -7,6 +7,7 @@ import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.expressions.Window;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,6 +40,9 @@ public class PipelineExecutionService {
     private final String postgresUrl;
     private final String postgresUser;
     private final String postgresPassword;
+    private final String pipelineWorkerId = UUID.randomUUID().toString();
+    @Autowired private PipelineLeaseCoordinator leaseCoordinator;
+    @Autowired private PipelineLeaseHeartbeat leaseHeartbeat;
 
     public PipelineExecutionService(@Qualifier("jdbcTemplate") JdbcTemplate jdbc, PipelineRepository pipelines, PipelineRunRepository runs,
             PipelineDefinitionValidator validator, ObjectMapper mapper, ObjectProvider<SparkSession> sparkProvider,
@@ -93,12 +97,15 @@ public class PipelineExecutionService {
     }
 
     public void execute(UUID runId) {
-        PipelineRunEntity run = markRunning(runId);
+        PipelineLeaseCoordinator.Lease lease = leaseCoordinator.claim(runId, pipelineWorkerId);
+        if (lease == null) return;
+        PipelineRunEntity run = runs.findById(runId).orElse(null);
         if (run == null) return;
-        executeClaimed(runId, run);
+        leaseHeartbeat.register(lease, pipelineWorkerId);
+        executeClaimed(runId, run, lease);
     }
 
-    private void executeClaimed(UUID runId, PipelineRunEntity run) {
+    private void executeClaimed(UUID runId, PipelineRunEntity run, PipelineLeaseCoordinator.Lease lease) {
         String currentStepId = null;
         long stepStartedNanos = 0L;
         var spark = sparkProvider.getObject();
@@ -114,7 +121,8 @@ public class PipelineExecutionService {
             long processed = 0;
             List<Map<String, Object>> stepResults = new ArrayList<>();
             for (String id : ordered) {
-                if (runs.findById(runId).map(r -> "CANCELLED".equals(r.getStatus())).orElse(true)) {
+                if (!leaseHeartbeat.valid(runId) ||
+                    runs.findById(runId).map(r -> "CANCELLED".equals(r.getStatus())).orElse(true)) {
                     spark.sparkContext().cancelJobGroup(jobGroup);
                     return;
                 }
@@ -161,7 +169,11 @@ public class PipelineExecutionService {
             summary.put("recordsProcessed", processed);
             summary.put("pipelineVersion", run.getPipelineVersion());
             summary.put("idempotencyKey", run.getIdempotencyKey());
-            markSucceeded(runId, mapper.writeValueAsString(summary), processed);
+            String resultJson = mapper.writeValueAsString(summary);
+            if (!leaseHeartbeat.valid(runId) ||
+                !leaseCoordinator.complete(lease, pipelineWorkerId, resultJson, processed)) {
+                spark.sparkContext().cancelJobGroup(jobGroup);
+            }
         } catch (Exception ex) {
             String failure = rootMessage(ex);
             if (currentStepId != null) {
@@ -174,8 +186,9 @@ public class PipelineExecutionService {
                     Duration.ofNanos(Math.max(0L, System.nanoTime() - stepStartedNanos)).toMillis(),
                     failure, runId, currentStepId, run.getAttemptCount());
             }
-            markFailed(runId, failure, isRetryable(ex));
+            if (leaseHeartbeat.valid(runId)) leaseCoordinator.fail(lease, pipelineWorkerId, failure, isRetryable(ex));
         } finally {
+            leaseHeartbeat.unregister(runId);
             spark.sparkContext().clearJobGroup();
         }
     }
@@ -550,12 +563,9 @@ public class PipelineExecutionService {
 
     @Transactional
     public void dispatchQueued(UUID runId) {
-        if (runs.claimQueued(runId) != 1) return;
-        PipelineRunEntity claimed = runs.findById(runId).orElse(null);
-        if (claimed == null) return;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCommit() {
-                try { executor.execute(() -> executeClaimed(runId, claimed)); }
+                try { executor.execute(() -> execute(runId)); }
                 catch (RuntimeException ex) { markFailed(runId, "Execution queue rejected recovered run: " + ex.getMessage()); }
             }
         });
