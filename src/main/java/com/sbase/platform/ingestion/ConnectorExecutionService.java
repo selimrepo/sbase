@@ -9,11 +9,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Qualifier;
 import java.util.concurrent.Executor;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.Duration;
 import java.util.*;
 
 /**
@@ -143,7 +141,7 @@ public class ConnectorExecutionService {
             db.update("""
                 UPDATE ingestion_runs SET status='SUCCEEDED',finished_at=now(),records_read=?,
                     records_written=?,lease_owner=NULL,lease_until=NULL
-                 WHERE id=? AND tenant_id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=?
+                 WHERE id=? AND tenant_id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now()
                 """, result.recordsRead(), result.recordsWritten(), run.id(), run.tenantId(), workerId, run.fencingToken());
             return;
         } catch (Exception ex) {
@@ -174,14 +172,6 @@ public class ConnectorExecutionService {
             if (failure != null) failure.addSuppressed(persistenceFailure);
             // Lease expiry allows another node to recover this run; do not acknowledge it.
         }
-    }
-
-    private void heartbeatOrLose(ClaimedRun run) {
-        int updated = db.update("""
-            UPDATE ingestion_runs SET lease_until=now()+interval '90 seconds',lease_heartbeat_at=now()
-             WHERE id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now()
-            """, run.id(), workerId, run.fencingToken());
-        if (updated != 1) throw new IllegalStateException("Ingestion lease lost; worker must not publish further state");
     }
 
     public Set<String> types() { return connectors.keySet(); }
