@@ -54,6 +54,13 @@ public class PipelineRunEntity {
     public void succeed(String resultJson, long records) {
         status = "SUCCEEDED"; this.resultJson = resultJson; recordsProcessed = records; finishedAt = Instant.now(); leaseUntil = null;
     }
+    public void cancel() {
+        status = "CANCELLED";
+        errorMessage = "Cancelled by user";
+        finishedAt = Instant.now();
+        leaseUntil = null;
+        nextAttemptAt = null;
+    }
     public void fail(String message) {
         status = "FAILED"; errorMessage = message == null ? "Unknown execution error" : message;
         finishedAt = Instant.now(); leaseUntil = null; nextAttemptAt = null;

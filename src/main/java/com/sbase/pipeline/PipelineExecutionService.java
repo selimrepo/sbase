@@ -7,6 +7,7 @@ import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.expressions.Window;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import java.time.Instant;
@@ -25,6 +26,7 @@ import static org.apache.spark.sql.functions.*;
 
 @Service
 public class PipelineExecutionService {
+    private final JdbcTemplate jdbc;
     private final PipelineRepository pipelines;
     private final PipelineRunRepository runs;
     private final PipelineDefinitionValidator validator;
@@ -38,7 +40,7 @@ public class PipelineExecutionService {
     private final String postgresUser;
     private final String postgresPassword;
 
-    public PipelineExecutionService(PipelineRepository pipelines, PipelineRunRepository runs,
+    public PipelineExecutionService(@Qualifier("jdbcTemplate") JdbcTemplate jdbc, PipelineRepository pipelines, PipelineRunRepository runs,
             PipelineDefinitionValidator validator, ObjectMapper mapper, ObjectProvider<SparkSession> sparkProvider,
             DorisClient doris, @Qualifier("miningExecutor") Executor executor,
             @Value("${sbase.doris.allowed-tables:}") String allowedTables,
@@ -46,7 +48,7 @@ public class PipelineExecutionService {
             @Value("${spring.datasource.url}") String postgresUrl,
             @Value("${spring.datasource.username}") String postgresUser,
             @Value("${spring.datasource.password}") String postgresPassword) {
-        this.pipelines = pipelines; this.runs = runs; this.validator = validator; this.mapper = mapper;
+        this.jdbc = jdbc; this.pipelines = pipelines; this.runs = runs; this.validator = validator; this.mapper = mapper;
         this.sparkProvider = sparkProvider; this.doris = doris; this.executor = executor;
         this.configuredMaxAttempts = Math.max(1, Math.min(20, configuredMaxAttempts));
         this.postgresUrl = postgresUrl; this.postgresUser = postgresUser; this.postgresPassword = postgresPassword;
@@ -92,6 +94,11 @@ public class PipelineExecutionService {
     }
 
     private void executeClaimed(UUID runId, PipelineRunEntity run) {
+        String currentStepId = null;
+        long stepStartedNanos = 0L;
+        var spark = sparkProvider.getObject();
+        String jobGroup = "pipeline-run-" + runId;
+        spark.sparkContext().setJobGroup(jobGroup, "SBase pipeline run " + runId, true);
         try {
             JsonNode definition = validator.parseAndValidate(run.getDefinitionSnapshot());
             Map<String, Dataset<Row>> outputs = new HashMap<>();
@@ -102,19 +109,47 @@ public class PipelineExecutionService {
             long processed = 0;
             List<Map<String, Object>> stepResults = new ArrayList<>();
             for (String id : ordered) {
+                if (runs.findById(runId).map(r -> "CANCELLED".equals(r.getStatus())).orElse(true)) {
+                    spark.sparkContext().cancelJobGroup(jobGroup);
+                    return;
+                }
                 JsonNode step = steps.get(id);
                 String type = step.path("type").asText();
+                currentStepId = id;
+                stepStartedNanos = System.nanoTime();
+                jdbc.update("""
+                    INSERT INTO pipeline_step_runs(id,pipeline_run_id,step_id,step_type,status,started_at,attempt)
+                    VALUES(?,?,?,?,'RUNNING',now(),?)
+                    ON CONFLICT(pipeline_run_id,step_id,attempt) DO UPDATE
+                       SET status='RUNNING',started_at=now(),finished_at=NULL,duration_ms=NULL,
+                           records_processed=0,output_schema_json=NULL,error_message=NULL
+                    """, UUID.randomUUID(), runId, id, type, run.getAttemptCount());
                 List<String> dependencies = new ArrayList<>();
                 step.path("dependsOn").forEach(d -> dependencies.add(d.asText()));
                 List<Dataset<Row>> inputs = dependencies.stream().map(outputs::get).toList();
                 Dataset<Row> input = inputs.isEmpty() ? current : inputs.get(0);
                 Dataset<Row> result = apply(type, step, input, inputs, runId, run.getIdempotencyKey());
+                long stepRecords = 0;
+                String schema = null;
                 if (result != null) {
                     outputs.put(id, result);
                     current = result;
-                    if (!"doris_write".equals(type)) processed = result.count();
+                    schema = mapper.writeValueAsString(Arrays.asList(result.columns()));
+                    if (!"doris_write".equals(type)) {
+                        stepRecords = result.count();
+                        processed = stepRecords;
+                    }
                 }
-                stepResults.add(Map.of("stepId", id, "type", type, "status", "SUCCEEDED"));
+                long duration = Duration.ofNanos(System.nanoTime() - stepStartedNanos).toMillis();
+                jdbc.update("""
+                    UPDATE pipeline_step_runs
+                       SET status='SUCCEEDED',finished_at=now(),duration_ms=?,
+                           records_processed=?,output_schema_json=?
+                     WHERE pipeline_run_id=? AND step_id=? AND attempt=?
+                    """, duration, stepRecords, schema, runId, id, run.getAttemptCount());
+                stepResults.add(Map.of("stepId", id, "type", type, "status", "SUCCEEDED",
+                    "durationMs", duration, "recordsProcessed", stepRecords));
+                currentStepId = null;
             }
             Map<String, Object> summary = new LinkedHashMap<>();
             summary.put("steps", stepResults);
@@ -123,8 +158,47 @@ public class PipelineExecutionService {
             summary.put("idempotencyKey", run.getIdempotencyKey());
             markSucceeded(runId, mapper.writeValueAsString(summary), processed);
         } catch (Exception ex) {
-            markFailed(runId, rootMessage(ex), isRetryable(ex));
+            String failure = rootMessage(ex);
+            if (currentStepId != null) {
+                boolean cancelled = runs.findById(runId).map(r -> "CANCELLED".equals(r.getStatus())).orElse(false);
+                jdbc.update("""
+                    UPDATE pipeline_step_runs
+                       SET status=?,finished_at=now(),duration_ms=?,error_message=?
+                     WHERE pipeline_run_id=? AND step_id=? AND attempt=?
+                    """, cancelled ? "CANCELLED" : "FAILED",
+                    Duration.ofNanos(Math.max(0L, System.nanoTime() - stepStartedNanos)).toMillis(),
+                    failure, runId, currentStepId, run.getAttemptCount());
+            }
+            markFailed(runId, failure, isRetryable(ex));
+        } finally {
+            spark.sparkContext().clearJobGroup();
         }
+    }
+
+    @Transactional
+    public PipelineRunEntity cancel(UUID runId) {
+        PipelineRunEntity run = runs.findById(runId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline run not found"));
+        if (Set.of("SUCCEEDED", "FAILED", "CANCELLED").contains(run.getStatus()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Pipeline run is already terminal");
+        run.cancel();
+        PipelineRunEntity saved = runs.save(run);
+        var spark = sparkProvider.getIfAvailable();
+        if (spark != null) spark.sparkContext().cancelJobGroup("pipeline-run-" + runId);
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> stepRuns(UUID runId) {
+        if (!runs.existsById(runId))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline run not found");
+        return jdbc.queryForList("""
+            SELECT step_id,step_type,status,started_at,finished_at,duration_ms,
+                   records_processed,output_schema_json,error_message,attempt
+              FROM pipeline_step_runs
+             WHERE pipeline_run_id=?
+             ORDER BY started_at,step_id
+            """, runId);
     }
 
     private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs, UUID runId, String idempotencyKey) {
@@ -258,17 +332,12 @@ public class PipelineExecutionService {
         for (int i = 0; i < keys.size(); i++) { keyColumns[i] = keys.get(i).asText(); PipelineDefinitionValidator.identifier(keyColumns[i]); }
         verifyDorisUniqueKey(table, keyColumns);
         Dataset<Row> stable = df.dropDuplicates(keyColumns);
-        // Doris UNIQUE KEY tables provide duplicate-key replacement on retried JDBC inserts.
-        // The run UUID remains stable across retries and is included in the Spark job group for traceability.
-        sparkProvider.getObject().sparkContext().setJobGroup("pipeline-" + idempotencyKey, "Idempotent Doris write " + idempotencyKey, true);
-        try {
-            stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
-                    .option("user", doris.username()).option("password", doris.password())
-                    .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "5000")
-                    .mode("append").save();
-        } finally {
-            sparkProvider.getObject().sparkContext().clearJobGroup();
-        }
+        // The run-level Spark job group is set by executeClaimed, allowing
+        // cancellation to interrupt this external write as well.
+        stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
+                .option("user", doris.username()).option("password", doris.password())
+                .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "5000")
+                .mode("append").save();
     }
 
 
