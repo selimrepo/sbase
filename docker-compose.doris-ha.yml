@@ -3,7 +3,7 @@
 services:
   sbase:
     environment:
-      DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
+      DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000&loadBalanceHostRemovalGracePeriod=15000
     depends_on:
       doris-fe-2:
         condition: service_started
