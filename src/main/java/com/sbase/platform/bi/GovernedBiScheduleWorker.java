@@ -5,8 +5,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Component;
@@ -59,7 +59,7 @@ public class GovernedBiScheduleWorker {
    if("JSON".equals(s.format()))Files.writeString(file,mapper.writeValueAsString(rows),StandardCharsets.UTF_8,StandardOpenOption.CREATE_NEW);
    else Files.writeString(file,csv(rows),StandardCharsets.UTF_8,StandardOpenOption.CREATE_NEW);
    String uri=file.toUri().toString();
-   if(s.target()!=null&&s.target().startsWith("mailto:"))sendMail(s.target().substring(7),s,uri,rows.size());
+   if(s.target()!=null&&s.target().startsWith("mailto:"))sendMail(s.target().substring(7),s,file,uri,rows.size());
    db.update("UPDATE sbase_bi_schedule_runs SET status='SUCCEEDED',artifact_uri=?,row_count=?,finished_at=now() WHERE id=?",uri,rows.size(),run);
    advance(s,true,null);
   }catch(Exception ex){
@@ -68,10 +68,12 @@ public class GovernedBiScheduleWorker {
    advance(s,false,message);
   }
  }
- private void sendMail(String to,Schedule s,String uri,int count){
+ private void sendMail(String to,Schedule s,Path file,String uri,int count)throws Exception{
   JavaMailSender sender=mail.getIfAvailable();if(sender==null)throw new IllegalStateException("Email delivery requested but spring.mail.host is not configured");
-  if(!to.matches("[A-Za-z0-9.!#$%&'*+/=?^_{|}~-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"))throw new IllegalArgumentException("Invalid report recipient");
-  SimpleMailMessage message=new SimpleMailMessage();message.setTo(to);message.setSubject("SBase BI report: "+s.report());message.setText("Scheduled BI report completed. Rows: "+count+"\nArtifact: "+uri);sender.send(message);
+  if(!to.matches("[A-Za-z0-9.!#$%&'*+/=?^_{|}~-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}"))throw new IllegalArgumentException("Invalid report recipient");
+  var message=sender.createMimeMessage();MimeMessageHelper helper=new MimeMessageHelper(message,true,StandardCharsets.UTF_8.name());
+  helper.setTo(to);helper.setSubject("SBase BI report: "+s.report());helper.setText("Scheduled BI report completed. Rows: "+count+"\\nArtifact: "+uri);
+  helper.addAttachment(file.getFileName().toString(),file.toFile());sender.send(message);
  }
  private String csv(List<Map<String,Object>> rows){
   if(rows.isEmpty())return "";LinkedHashSet<String> columns=new LinkedHashSet<>();rows.forEach(r->columns.addAll(r.keySet()));
