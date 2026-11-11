@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import com.zaxxer.hikari.HikariConfig;
 
 import javax.sql.DataSource;
 
@@ -44,20 +44,29 @@ public class DorisDataSourceConfig {
         return new JdbcTemplate(ds);
     }
 
-    @Bean(name = "dorisDataSource")
-    DataSource dorisDataSource(
+    @Bean(name = "dorisDataSource", destroyMethod = "close")
+    HikariDataSource dorisDataSource(
             @Value("${sbase.doris.jdbc-url}") String url,
             @Value("${sbase.doris.username}") String user,
             @Value("${sbase.doris.password}") String pass,
-            @Value("${sbase.doris.driver-class-name}") String driver) {
-        DriverManagerDataSource ds = new DriverManagerDataSource();
-        ds.setDriverClassName(driver);
-        ds.setUrl(url);
-        ds.setUsername(user);
-        ds.setPassword(pass);
-        return ds;
+            @Value("${sbase.doris.driver-class-name}") String driver,
+            @Value("${sbase.doris.pool.maximum-size:12}") int maxPool,
+            @Value("${sbase.doris.pool.minimum-idle:1}") int minIdle,
+            @Value("${sbase.doris.pool.connection-timeout-ms:3000}") long connectionTimeout,
+            @Value("${sbase.doris.pool.validation-timeout-ms:1000}") long validationTimeout,
+            @Value("${sbase.doris.pool.max-lifetime-ms:1500000}") long maxLifetime) {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(url); config.setUsername(user); config.setPassword(pass);
+        config.setDriverClassName(driver);
+        config.setMaximumPoolSize(Math.max(1, Math.min(64, maxPool)));
+        config.setMinimumIdle(Math.max(0, Math.min(minIdle, config.getMaximumPoolSize())));
+        config.setConnectionTimeout(Math.max(1000, connectionTimeout));
+        config.setValidationTimeout(Math.max(250, validationTimeout));
+        config.setMaxLifetime(Math.max(30000, maxLifetime));
+        config.setPoolName("sbase-doris"); config.setInitializationFailTimeout(-1);
+        config.setConnectionTestQuery("SELECT 1");
+        return new HikariDataSource(config);
     }
-
     @Bean(name = "dorisJdbcTemplate")
     JdbcTemplate dorisJdbcTemplate(@Qualifier("dorisDataSource") DataSource ds) {
         return new JdbcTemplate(ds);
