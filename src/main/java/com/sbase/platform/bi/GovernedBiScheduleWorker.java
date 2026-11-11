@@ -70,7 +70,7 @@ public class GovernedBiScheduleWorker {
  }
  private void sendMail(String to,Schedule s,String uri,int count){
   JavaMailSender sender=mail.getIfAvailable();if(sender==null)throw new IllegalStateException("Email delivery requested but spring.mail.host is not configured");
-  if(!to.matches("[A-Za-z0-9.!#$%&'*+/=?^_\u0060{|}~-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"))throw new IllegalArgumentException("Invalid report recipient");
+  if(!to.matches("[A-Za-z0-9.!#$%&'*+/=?^_{|}~-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"))throw new IllegalArgumentException("Invalid report recipient");
   SimpleMailMessage message=new SimpleMailMessage();message.setTo(to);message.setSubject("SBase BI report: "+s.report());message.setText("Scheduled BI report completed. Rows: "+count+"\nArtifact: "+uri);sender.send(message);
  }
  private String csv(List<Map<String,Object>> rows){
