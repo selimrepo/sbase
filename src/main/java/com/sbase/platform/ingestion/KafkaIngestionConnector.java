@@ -42,8 +42,26 @@ public class KafkaIngestionConnector implements IngestionConnector {
         p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,ByteArrayDeserializer.class.getName());
         p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,max);
         long read=0,written=0;
+        String ownerId=UUID.randomUUID().toString();
+        Map<Integer,Long> partitionTokens=new java.util.concurrent.ConcurrentHashMap<>();
         try(KafkaConsumer<String,byte[]> consumer=new KafkaConsumer<>(p)) {
-            consumer.subscribe(List.of(topic));
+            consumer.subscribe(List.of(topic), new ConsumerRebalanceListener() {
+                @Override public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                    for (TopicPartition tp : partitions) {
+                        Long token=partitionTokens.remove(tp.partition());
+                        if (token!=null) sink.releaseKafkaPartition(connectorId,topic,tp.partition(),ownerId,token);
+                    }
+                }
+                @Override public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                    for (TopicPartition tp : partitions) {
+                        long token=sink.claimKafkaPartition(connectorId,topic,tp.partition(),ownerId);
+                        partitionTokens.put(tp.partition(),token);
+                    }
+                }
+                @Override public void onPartitionsLost(Collection<TopicPartition> partitions) {
+                    onPartitionsRevoked(partitions);
+                }
+            });
             long deadline=System.currentTimeMillis()+Long.parseLong(o.getOrDefault("pollTimeoutMs","5000"));
             while(read<max && System.currentTimeMillis()<deadline) {
                 ConsumerRecords<String,byte[]> batch=consumer.poll(Duration.ofMillis(500));
@@ -70,7 +88,13 @@ public class KafkaIngestionConnector implements IngestionConnector {
                     envelopes.add(new DurableRecordSink.Envelope(key,payload));
                     nextOffsets.put(new TopicPartition(topic,r.partition()),r.offset()+1);
                 }
-                written+=sink.writeKafkaBatch(connectorId,topic,envelopes);
+                Map<Integer,Long> batchTokens=new HashMap<>();
+                for (TopicPartition tp : nextOffsets.keySet()) {
+                    Long token=partitionTokens.get(tp.partition());
+                    if (token==null) throw new IllegalStateException("Kafka partition is no longer owned by this consumer: "+tp);
+                    batchTokens.put(tp.partition(),token);
+                }
+                written+=sink.writeKafkaBatch(connectorId,topic,envelopes,ownerId,batchTokens);
                 Map<TopicPartition,OffsetAndMetadata> commits=new HashMap<>();
                 nextOffsets.forEach((tp,off)->commits.put(tp,new OffsetAndMetadata(off)));
                 consumer.commitSync(commits);
