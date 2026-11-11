@@ -192,7 +192,7 @@ public class MlLifecycleService {
   }catch(Exception ex){metrics.put("featureDriftAvailable",false);}
   return metrics;
  }
- @Transactional
+ @org.springframework.transaction.annotation.Transactional
  public void promote(UUID tenant,UUID version,String stage) {
   if(!Set.of("NONE","STAGING","PRODUCTION","ARCHIVED").contains(stage))throw new IllegalArgumentException("Invalid model stage");
   UUID model=db.query("SELECT model_id FROM sbase_ml_model_versions WHERE id=? AND tenant_id=?",(rs)->rs.next()?rs.getObject(1,UUID.class):null,version,tenant);
