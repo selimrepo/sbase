@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -56,6 +57,22 @@ public class PlatformSecurityConfig {
             .addFilterAfter(rateLimitFilter, BearerTokenAuthenticationFilter.class)
             .addFilterAfter(auditEventFilter, DatabaseRateLimitFilter.class);
         return http.build();
+    }
+
+
+    @Bean
+    FilterRegistrationBean<DatabaseRateLimitFilter> disableServletRateLimitRegistration(DatabaseRateLimitFilter filter) {
+        FilterRegistrationBean<DatabaseRateLimitFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    FilterRegistrationBean<com.sbase.platform.audit.AuditEventFilter> disableServletAuditRegistration(
+            com.sbase.platform.audit.AuditEventFilter filter) {
+        FilterRegistrationBean<com.sbase.platform.audit.AuditEventFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean
