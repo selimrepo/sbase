@@ -141,7 +141,7 @@ public class ConnectorExecutionService {
             db.update("""
                 UPDATE ingestion_runs SET status='SUCCEEDED',finished_at=now(),records_read=?,
                     records_written=?,lease_owner=NULL,lease_until=NULL
-                 WHERE id=? AND tenant_id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now()
+                 WHERE id=? AND tenant_id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now() AND lease_until>now()
                 """, result.recordsRead(), result.recordsWritten(), run.id(), run.tenantId(), workerId, run.fencingToken());
             return;
         } catch (Exception ex) {
@@ -157,8 +157,9 @@ public class ConnectorExecutionService {
                     SELECT gen_random_uuid(),id,connector_id,tenant_id,
                         COALESCE(request_payload->>'type','unknown'),request_payload->>'source',
                         request_payload,?, ?,now()
-                    FROM ingestion_runs WHERE id=? AND tenant_id=?
-                    """, message, run.attempt(), run.id(), run.tenantId());
+                    FROM ingestion_runs WHERE id=? AND tenant_id=? AND status='RUNNING'
+                      AND lease_owner=? AND fencing_token=? AND lease_until>now()
+                    """, message, run.attempt(), run.id(), run.tenantId(), workerId, run.fencingToken());
             }
             db.update("""
                 UPDATE ingestion_runs SET status=?,next_attempt_at=CASE WHEN ? THEN
