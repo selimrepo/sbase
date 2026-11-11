@@ -28,5 +28,20 @@ public class S3ArtifactStore implements AutoCloseable {
  }
  public ResponseInputStream<GetObjectResponse> get(String key){return client.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build());}
  public void delete(String key){client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());}
+ public String putForTenant(java.util.UUID tenantId,String key,InputStream input,long size,String contentType){
+  return put(tenantKey(tenantId,key),input,size,contentType);
+ }
+ public ResponseInputStream<GetObjectResponse> getForTenant(java.util.UUID tenantId,String key){
+  return get(tenantKey(tenantId,key));
+ }
+ public void deleteForTenant(java.util.UUID tenantId,String key){
+  delete(tenantKey(tenantId,key));
+ }
+ private static String tenantKey(java.util.UUID tenantId,String key){
+  if(tenantId==null) throw new IllegalArgumentException("tenantId is required");
+  if(key==null || key.isBlank() || key.startsWith("/") || key.contains("..") || key.contains("\\\\") || key.length()>900)
+   throw new IllegalArgumentException("Invalid tenant artifact key");
+  return "tenants/"+tenantId+"/"+key;
+ }
  public void close(){client.close();}
 }
