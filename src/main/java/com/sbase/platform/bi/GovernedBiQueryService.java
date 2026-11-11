@@ -25,7 +25,7 @@ public class GovernedBiQueryService {
   this.tables=new HashSet<>();for(String t:allowed.split(","))if(!t.isBlank())tables.add(t.trim().toLowerCase(Locale.ROOT));
   this.permits=new Semaphore(Math.max(1,concurrency));this.cacheMillis=Math.max(0,cacheMillis);this.maxRows=Math.min(10000,Math.max(1,maxRows));this.maxCost=Math.max(1000,maxCost);
  }
- public List<Map<String,Object>> tables(){List<Map<String,Object>> out=new ArrayList<>();for(String t:tables){List<Map<String,Object>> cols=analytics.queryForList("SELECT COLUMN_NAME AS name,DATA_TYPE AS type FROM information_schema.columns WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION",database,t);out.add(Map.of("name",t,"columns",cols));}return out;}
+ public List<Map<String,Object>> tables(){List<Map<String,Object>> out=new ArrayList<>();for(String t:tables){String[] parts=tableParts(t);List<Map<String,Object>> cols=analytics.queryForList("SELECT COLUMN_NAME AS name,DATA_TYPE AS type FROM information_schema.columns WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION",parts[0],parts[1]);out.add(Map.of("name",t,"columns",cols));}return out;}
  public Map<String,Object> execute(UUID tenant,String subject,QueryDefinition d){
   long started=System.nanoTime();String hash=hash(write(d));String key=tenant+":"+hash;CacheEntry cached=cache.get(key);
   if(cached!=null&&cached.expiresAt()>System.currentTimeMillis()){audit(tenant,subject,hash,0,cached.rows().size(),0,true,"CACHE_HIT");return Map.of("rows",cached.rows(),"rowCount",cached.rows().size(),"cacheHit",true,"queryHash",hash);}
@@ -42,7 +42,7 @@ public class GovernedBiQueryService {
  public String compile(QueryDefinition d,UUID tenant){
   if(d==null||d.table()==null||!tables.contains(d.table().toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Table is not allow-listed");
   if(d.dimensions()==null||d.dimensions().size()>12||d.metrics()==null||d.metrics().isEmpty()||d.metrics().size()>20)throw new IllegalArgumentException("Select up to 12 dimensions and 1..20 metrics");
-  Set<String> valid=new HashSet<>();List<Map<String,Object>> cols=analytics.queryForList("SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA=? AND TABLE_NAME=?",database,d.table());
+  String[] tableParts=tableParts(d.table());Set<String> valid=new HashSet<>();List<Map<String,Object>> cols=analytics.queryForList("SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA=? AND TABLE_NAME=?",tableParts[0],tableParts[1]);
   cols.forEach(c->valid.add(Objects.toString(c.get("COLUMN_NAME"),"").toLowerCase(Locale.ROOT)));
   List<String> select=new ArrayList<>(),groups=new ArrayList<>(),aliases=new ArrayList<>();
   for(String dim:d.dimensions()){column(dim,valid);select.add(dim);groups.add(dim);aliases.add(dim);}
@@ -66,6 +66,7 @@ public class GovernedBiQueryService {
  }
  private String literal(Object v){if(v==null)return "NULL";if(v instanceof Number n){double d=n.doubleValue();if(!Double.isFinite(d))throw new IllegalArgumentException("Non-finite filter value");return n.toString();}if(v instanceof Boolean b)return b?"TRUE":"FALSE";String s=String.valueOf(v);if(s.length()>2000)throw new IllegalArgumentException("Filter value too long");return "'"+s.replace("'","''")+"'";}
  private void column(String s,Set<String> valid){identifier(s);if(!valid.contains(s.toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Column is not present in selected table: "+s);}
+ private String[] tableParts(String table){int dot=table.lastIndexOf('.');return dot<0?new String[]{database,table}:new String[]{table.substring(0,dot),table.substring(dot+1)};}
  private String identifier(String s){if(s==null||!s.matches("[A-Za-z_][A-Za-z0-9_]{0,127}"))throw new IllegalArgumentException("Unsafe SQL identifier");return s;}
  private double estimate(QueryDefinition d,int rows,long elapsed){return Math.max(1,rows)*(1+(d.dimensions()==null?0:d.dimensions().size())+(d.filters()==null?0:d.filters().size()))+elapsed/1000.0;}
  private void audit(UUID tenant,String subject,String hash,long elapsed,int rows,double cost,boolean hit,String status){control.update("INSERT INTO sbase_bi_query_audit(tenant_id,subject,query_hash,elapsed_ms,returned_rows,estimated_cost,cache_hit,status) VALUES(?,?,?,?,?,?,?,?)",tenant,subject,hash,elapsed,rows,cost,hit,status);}
