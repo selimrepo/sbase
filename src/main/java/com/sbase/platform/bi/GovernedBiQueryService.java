@@ -1,0 +1,78 @@
+package com.sbase.platform.bi;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
+
+@Service
+public class GovernedBiQueryService {
+ private final DorisBiQueryService doris;private final JdbcTemplate control;private final JdbcTemplate analytics;
+ private final ObjectMapper mapper;private final String database;private final Set<String> tables;
+ private final Semaphore permits;private final long cacheMillis;private final int maxRows;private final ConcurrentHashMap<String,CacheEntry> cache=new ConcurrentHashMap<>();
+ public GovernedBiQueryService(DorisBiQueryService doris,@Qualifier("jdbcTemplate") JdbcTemplate control,
+  @Qualifier("dorisJdbcTemplate") JdbcTemplate analytics,ObjectMapper mapper,
+  @Value("${sbase.doris.database:analytics}") String database,@Value("${sbase.doris.allowed-tables:}") String allowed,
+  @Value("${sbase.bi.max-concurrent-queries:4}") int concurrency,@Value("${sbase.bi.cache-ttl-ms:30000}") long cacheMillis,
+  @Value("${sbase.bi.max-rows:5000}") int maxRows){
+  this.doris=doris;this.control=control;this.analytics=analytics;this.mapper=mapper;this.database=database;
+  this.tables=new HashSet<>();for(String t:allowed.split(","))if(!t.isBlank())tables.add(t.trim().toLowerCase(Locale.ROOT));
+  this.permits=new Semaphore(Math.max(1,concurrency));this.cacheMillis=Math.max(0,cacheMillis);this.maxRows=Math.min(10000,Math.max(1,maxRows));
+ }
+ public List<Map<String,Object>> tables(){List<Map<String,Object>> out=new ArrayList<>();for(String t:tables){List<Map<String,Object>> cols=analytics.queryForList("SELECT COLUMN_NAME AS name,DATA_TYPE AS type FROM information_schema.columns WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION",database,t);out.add(Map.of("name",t,"columns",cols));}return out;}
+ public Map<String,Object> execute(UUID tenant,String subject,QueryDefinition d){
+  long started=System.nanoTime();String hash=hash(write(d));String key=tenant+":"+hash;CacheEntry cached=cache.get(key);
+  if(cached!=null&&cached.expiresAt()>System.currentTimeMillis()){audit(tenant,subject,hash,0,cached.rows().size(),0,true,"CACHE_HIT");return Map.of("rows",cached.rows(),"rowCount",cached.rows().size(),"cacheHit",true,"queryHash",hash);}
+  if(!permits.tryAcquire())throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,"BI query concurrency limit reached");
+  String sql;try{sql=compile(d);}catch(RuntimeException e){permits.release();throw e;}
+  try{
+   List<Map<String,Object>> rows=doris.query(sql);long elapsed=(System.nanoTime()-started)/1_000_000;
+   double cost=estimate(d,rows.size(),elapsed);audit(tenant,subject,hash,elapsed,rows.size(),cost,false,"SUCCEEDED");
+   if(cacheMillis>0){if(cache.size()>2000)cache.entrySet().removeIf(e->e.getValue().expiresAt()<System.currentTimeMillis());cache.put(key,new CacheEntry(List.copyOf(rows),System.currentTimeMillis()+cacheMillis));}
+   return Map.of("rows",rows,"rowCount",rows.size(),"cacheHit",false,"queryHash",hash,"elapsedMs",elapsed,"estimatedCost",cost,"sql",sql);
+  }catch(RuntimeException ex){long elapsed=(System.nanoTime()-started)/1_000_000;audit(tenant,subject,hash,elapsed,0,0,false,"FAILED");throw ex;}
+  finally{permits.release();}
+ }
+ public String compile(QueryDefinition d){
+  if(d==null||d.table()==null||!tables.contains(d.table().toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Table is not allow-listed");
+  if(d.dimensions()==null||d.dimensions().size()>12||d.metrics()==null||d.metrics().isEmpty()||d.metrics().size()>20)throw new IllegalArgumentException("Select up to 12 dimensions and 1..20 metrics");
+  Set<String> valid=new HashSet<>();List<Map<String,Object>> cols=analytics.queryForList("SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA=? AND TABLE_NAME=?",database,d.table());
+  cols.forEach(c->valid.add(Objects.toString(c.get("COLUMN_NAME"),"").toLowerCase(Locale.ROOT)));
+  List<String> select=new ArrayList<>(),groups=new ArrayList<>(),aliases=new ArrayList<>();
+  for(String dim:d.dimensions()){column(dim,valid);select.add(dim);groups.add(dim);aliases.add(dim);}
+  for(Metric m:d.metrics()){column(m.column(),valid);String fn=m.aggregate()==null?"COUNT":m.aggregate().toUpperCase(Locale.ROOT);if(!Set.of("COUNT","SUM","AVG","MIN","MAX","COUNT_DISTINCT").contains(fn))throw new IllegalArgumentException("Unsupported metric aggregation");String alias=identifier(m.alias());String expression=fn.equals("COUNT_DISTINCT")?"COUNT(DISTINCT "+m.column()+")":fn+"("+m.column()+")";select.add(expression+" AS "+alias);aliases.add(alias);}
+  if(select.isEmpty())throw new IllegalArgumentException("At least one dimension or metric is required");
+  StringBuilder sql=new StringBuilder("SELECT ").append(String.join(",",select)).append(" FROM ").append(d.table());
+  List<String> where=new ArrayList<>();if(d.filters()!=null){if(d.filters().size()>40)throw new IllegalArgumentException("At most 40 filters are allowed");for(Filter f:d.filters())where.add(filter(f,valid));}
+  if(!where.isEmpty())sql.append(" WHERE ").append(String.join(" AND ",where));
+  if(!groups.isEmpty())sql.append(" GROUP BY ").append(String.join(",",groups));
+  if(d.orderBy()!=null&&!d.orderBy().isEmpty()){List<String> order=new ArrayList<>();if(d.orderBy().size()>10)throw new IllegalArgumentException("At most 10 sort expressions");for(Sort s:d.orderBy()){String col=identifier(s.column());if(!aliases.contains(col))throw new IllegalArgumentException("Sort must reference a selected dimension or metric alias");String dir="DESC".equalsIgnoreCase(s.direction())?"DESC":"ASC";order.add(col+" "+dir);}sql.append(" ORDER BY ").append(String.join(",",order));}
+  int limit=d.limit()==null?1000:d.limit();if(limit<1||limit>maxRows)throw new IllegalArgumentException("Query row limit must be 1.."+maxRows);sql.append(" LIMIT ").append(limit);return sql.toString();
+ }
+ private String filter(Filter f,Set<String> valid){column(f.column(),valid);String op=f.operator().toUpperCase(Locale.ROOT);Object v=f.value();
+  return switch(op){case "IS_NULL"->f.column()+" IS NULL";case "NOT_NULL"->f.column()+" IS NOT NULL";
+   case "EQ","NE","GT","GTE","LT","LTE"->{String symbol=switch(op){case "EQ"->"=";case "NE"->"<>";case "GT"->">";case "GTE"->">=";case "LT"->"<";default->"<=";};yield f.column()+" "+symbol+" "+literal(v);}
+   case "CONTAINS","STARTS_WITH","ENDS_WITH"->{String s=String.valueOf(v);s=s.replace("\\","\\\\").replace("%","\\%").replace("_","\\_");if(op.equals("CONTAINS"))s="%"+s+"%";if(op.equals("STARTS_WITH"))s+="%";if(op.equals("ENDS_WITH"))s="%"+s;yield f.column()+" LIKE "+literal(s);}
+   case "IN"->{if(!(v instanceof List<?> list)||list.isEmpty()||list.size()>100)throw new IllegalArgumentException("IN requires 1..100 values");yield f.column()+" IN ("+String.join(",",list.stream().map(this::literal).toList())+")";}
+   case "BETWEEN"->{if(!(v instanceof List<?> list)||list.size()!=2)throw new IllegalArgumentException("BETWEEN requires two values");yield f.column()+" BETWEEN "+literal(list.get(0))+" AND "+literal(list.get(1));}
+   default->throw new IllegalArgumentException("Unsupported filter operator");};
+ }
+ private String literal(Object v){if(v==null)return "NULL";if(v instanceof Number n){double d=n.doubleValue();if(!Double.isFinite(d))throw new IllegalArgumentException("Non-finite filter value");return n.toString();}if(v instanceof Boolean b)return b?"TRUE":"FALSE";String s=String.valueOf(v);if(s.length()>2000)throw new IllegalArgumentException("Filter value too long");return "'"+s.replace("'","''")+"'";}
+ private void column(String s,Set<String> valid){identifier(s);if(!valid.contains(s.toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Column is not present in selected table: "+s);}
+ private String identifier(String s){if(s==null||!s.matches("[A-Za-z_][A-Za-z0-9_]{0,127}"))throw new IllegalArgumentException("Unsafe SQL identifier");return s;}
+ private double estimate(QueryDefinition d,int rows,long elapsed){return Math.max(1,rows)*(1+(d.dimensions()==null?0:d.dimensions().size())+(d.filters()==null?0:d.filters().size()))+elapsed/1000.0;}
+ private void audit(UUID tenant,String subject,String hash,long elapsed,int rows,double cost,boolean hit,String status){control.update("INSERT INTO sbase_bi_query_audit(tenant_id,subject,query_hash,elapsed_ms,returned_rows,estimated_cost,cache_hit,status) VALUES(?,?,?,?,?,?,?,?)",tenant,subject,hash,elapsed,rows,cost,hit,status);}
+ private String write(Object x){try{return mapper.writeValueAsString(x);}catch(Exception e){throw new IllegalArgumentException(e);}}
+ private String hash(String s){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
+ private record CacheEntry(List<Map<String,Object>> rows,long expiresAt){}
+ public record Metric(String column,String aggregate,String alias){}
+ public record Filter(String column,String operator,Object value){}
+ public record Sort(String column,String direction){}
+ public record QueryDefinition(String table,List<String> dimensions,List<Metric> metrics,List<Filter> filters,List<Sort> orderBy,Integer limit){}
+}
