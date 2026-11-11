@@ -64,7 +64,7 @@ public class JdbcIngestionConnector implements IngestionConnector {
                         }
                         written+=successful(ps.executeBatch());
                         dest.commit();
-                    } catch(Exception ex) { dest.rollback(); throw ex; }
+                    } catch(SQLException ex) { dest.rollback(); throw ex; }
                 }
             }
         } catch(SQLException ex) { throw new IllegalStateException("JDBC ingestion failed",ex); }
@@ -96,8 +96,12 @@ public class JdbcIngestionConnector implements IngestionConnector {
         if(a instanceof Comparable c && a.getClass().isInstance(b)) return c.compareTo(b);
         return a.toString().compareTo(b.toString());
     }
-    private static int successfulCount(int[] counts) { return successful(counts); }
-    private static String serializeWatermark(Object value) {\n        if(value instanceof Timestamp timestamp) return timestamp.toInstant().toString();\n        if(value instanceof java.sql.Date date) return date.toLocalDate().toString();\n        return value.toString();\n    }\n    private static String safeIdentifier(String s) {
+    private static String serializeWatermark(Object value) {
+        if(value instanceof Timestamp timestamp) return timestamp.toInstant().toString();
+        if(value instanceof java.sql.Date date) return date.toLocalDate().toString();
+        return value.toString();
+    }
+    private static String safeIdentifier(String s) {
         if(!s.matches("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?")) throw new IllegalArgumentException("Unsafe SQL identifier: "+s);
         return s;
     }
