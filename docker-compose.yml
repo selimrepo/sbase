@@ -40,8 +40,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
       SPRING_DATASOURCE_USERNAME: sbase
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
-      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-}
-      JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-}
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://localhost:8081/realms/sbase}
+      JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase
       SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
@@ -301,8 +301,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
       SPRING_DATASOURCE_USERNAME: sbase
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
-      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-}
-      JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-}
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://localhost:8081/realms/sbase}
+      JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase-node-2
       SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
