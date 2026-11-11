@@ -20,7 +20,7 @@ public class MiningJobController {
     }
     @PostMapping @ResponseStatus(HttpStatus.ACCEPTED)
     public MiningJob submit(@Valid @RequestBody MiningJobRequest request,Authentication auth) {
-        permissions.require(auth,"mining:write");
+        permissions.require(auth,"mining:write"); tenants.requireWrite(auth);
         return jobs.submit(request,tenants.tenantId(auth),tenants.subject(auth));
     }
     @GetMapping("/{id}")
