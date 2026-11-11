@@ -29,7 +29,7 @@ public class OnlineFeatureStoreService {
             jdbc.update("""
                 INSERT INTO online_feature_values(tenant_id,feature_set,entity_key,feature_version,feature_values,event_time,materialized_at)
                 VALUES(?,?,?,?,CAST(? AS jsonb),COALESCE(?,now()),now())
-                ON CONFLICT(feature_set, entity_key) DO UPDATE SET
+                ON CONFLICT(tenant_id,feature_set,entity_key) DO UPDATE SET
                     tenant_id=EXCLUDED.tenant_id,
                     feature_version=EXCLUDED.feature_version,
                     feature_values=EXCLUDED.feature_values,
