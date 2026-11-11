@@ -16,7 +16,7 @@ chmod 600 secrets/prometheus_scrape_token.txt
 Set the following values in the deployment environment or a protected `.env` file (never commit it):
 
 - `POSTGRES_PASSWORD`: unique high-entropy password.
-- `DORIS_USERNAME` and `DORIS_PASSWORD`: dedicated Doris account; do not use root for the application.
+- `DORIS_USERNAME` and `DORIS_PASSWORD`: dedicated Doris account; bootstrap creates this account and grants access only to `analytics.*`. Use a URL-safe password containing no single quote or backslash. The Doris root account remains for internal initialization only.
 - `JWT_ISSUER_URI` and `JWT_JWK_SET_URI`: issuer and JWK endpoint of the production identity provider.
 - `SBASE_BIND_ADDRESS`: defaults to 127.0.0.1 so a host reverse proxy can terminate TLS.
 - `SBASE_DB_POOL_MAX`: size the pool against PostgreSQL max_connections and the number of app replicas.
@@ -38,7 +38,7 @@ Create a custom-format backup:
 
 ```bash
 export POSTGRES_PASSWORD='...'
-SBASE_BACKUP_DIR=/secure/backup/path ./ops/backup-postgres.sh
+COMPOSE_FILE=docker-compose.yml:docker-compose.production.yml SBASE_BACKUP_DIR=/secure/backup/path bash ops/backup-postgres.sh
 ```
 
 The script writes a checksum and retains local backups for 14 days by default. Copy both the dump and checksum to encrypted off-host storage; local Docker volumes are not a backup.
@@ -47,7 +47,7 @@ Restore is destructive and requires an explicit confirmation:
 
 ```bash
 export POSTGRES_PASSWORD='...'
-CONFIRM_DESTRUCTIVE_RESTORE=YES ./ops/restore-postgres.sh /secure/backup/path/sbase-YYYYMMDDTHHMMSSZ.dump
+COMPOSE_FILE=docker-compose.yml:docker-compose.production.yml CONFIRM_DESTRUCTIVE_RESTORE=YES bash ops/restore-postgres.sh /secure/backup/path/sbase-YYYYMMDDTHHMMSSZ.dump
 ```
 
 Perform restore drills on an isolated environment and verify Flyway state, dataset metadata, pipeline runs, schedules and online feature values. PostgreSQL backup does not back up Doris data or S3-compatible artifacts. Configure Doris snapshot/restore and object-store versioning/replication independently before production use.
