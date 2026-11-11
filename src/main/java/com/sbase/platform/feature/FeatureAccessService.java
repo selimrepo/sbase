@@ -10,19 +10,22 @@ import org.springframework.stereotype.Service;
 public class FeatureAccessService {
     private final JdbcTemplate db;
     private final PermissionService permissions;
+    private final com.sbase.platform.tenant.TenantContext tenants;
 
-    public FeatureAccessService(@Qualifier("jdbcTemplate") JdbcTemplate db, PermissionService permissions) {
+    public FeatureAccessService(@Qualifier("jdbcTemplate") JdbcTemplate db, PermissionService permissions, com.sbase.platform.tenant.TenantContext tenants) {
         this.db = db;
         this.permissions = permissions;
+        this.tenants = tenants;
     }
 
     private record FeatureRow(java.util.UUID id, String lifecycle, String owner) { }
 
     public void require(Authentication authentication, String featureSet, boolean write) {
         String subject = permissions.subject(authentication);
+        java.util.UUID tenantId = tenants.tenantId(authentication);
         permissions.require(authentication, write ? "features:write" : "features:read");
         FeatureRow row = db.query("""
-            SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=?
+            SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=? AND tenant_id=?
             """, rs -> rs.next() ? new FeatureRow(rs.getObject("id", java.util.UUID.class),
                 rs.getString("lifecycle_state"), rs.getString("owner_subject")) : null, featureSet);
         if (row == null) throw new org.springframework.web.server.ResponseStatusException(
