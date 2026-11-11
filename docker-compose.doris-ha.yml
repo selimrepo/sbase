@@ -9,6 +9,19 @@ services:
     environment:
       FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
       BE_ADDR: 172.30.0.11:9050
+  doris-init:
+    volumes:
+      - ./ops/register-doris-ha-backends.sh:/ops/register-doris-ha-backends.sh:ro
+    entrypoint: ["/bin/bash","/ops/register-doris-ha-backends.sh"]
+    depends_on:
+      doris-fe-2:
+        condition: service_started
+      doris-fe-3:
+        condition: service_started
+      doris-be-2:
+        condition: service_started
+      doris-be-3:
+        condition: service_started
   doris-fe-2:
     image: apache/doris:doris-fe-2.1.7
     hostname: doris-fe-2
