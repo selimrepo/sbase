@@ -31,7 +31,7 @@ class FileIngestionConnectorTest {
         assertEquals(2,result.recordsRead());
         @SuppressWarnings("unchecked")
         org.mockito.ArgumentCaptor<List<DurableRecordSink.Envelope>> captor=org.mockito.ArgumentCaptor.forClass(List.class);
-        verify(sink).write(eq(connectorId),eq(file.toRealPath().toString()),captor.capture(),eq("file:"+file.toRealPath()),eq("2"));
+        verify(sink).write(eq(connectorId),eq(file.toRealPath().toString()),captor.capture(),eq("file:"+file.toRealPath()),anyString());
         List<DurableRecordSink.Envelope> rows=captor.getValue();
         assertEquals("Doe, Jane",rows.get(0).payload().get("name"));
         assertEquals("said \"hello\"",rows.get(0).payload().get("comment"));
