@@ -69,6 +69,19 @@ class KafkaPartitionFencingIntegrationTest {
                     "consumer-new", Map.of(0, newToken)));
             assertEquals(11L, jdbc.queryForObject("SELECT next_offset FROM ingestion_partition_offsets WHERE connector_id=?",
                     Long.class, connector));
+
+            // A larger replay window can start at the same offset after a crash.
+            // Its receipt must not suppress records that were not in the first batch.
+            sink.releaseKafkaPartition(connector, "events", 0, "consumer-new", newToken);
+            long restartedToken = sink.claimKafkaPartition(connector, "events", 0, "consumer-restarted");
+            var replayWindow = List.of(record,
+                    new DurableRecordSink.Envelope("events:0:11",
+                            Map.of("topic", "events", "partition", 0, "offset", 11, "value", "next")));
+            assertEquals(1, sink.writeKafkaBatch(connector, "events", replayWindow,
+                    "consumer-restarted", Map.of(0, restartedToken)));
+            assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM ingestion_records", Integer.class));
+            assertEquals(12L, jdbc.queryForObject("SELECT next_offset FROM ingestion_partition_offsets WHERE connector_id=?",
+                    Long.class, connector));
         }
     }
 }
