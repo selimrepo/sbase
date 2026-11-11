@@ -46,7 +46,7 @@ public class GovernedBiQueryService {
   cols.forEach(c->valid.add(Objects.toString(c.get("COLUMN_NAME"),"").toLowerCase(Locale.ROOT)));
   List<String> select=new ArrayList<>(),groups=new ArrayList<>(),aliases=new ArrayList<>();
   for(String dim:d.dimensions()){column(dim,valid);select.add(dim);groups.add(dim);aliases.add(dim);}
-  for(Metric m:d.metrics()){column(m.column(),valid);String fn=m.aggregate()==null?"COUNT":m.aggregate().toUpperCase(Locale.ROOT);if(!Set.of("COUNT","SUM","AVG","MIN","MAX","COUNT_DISTINCT").contains(fn))throw new IllegalArgumentException("Unsupported metric aggregation");String alias=identifier(m.alias());String expression=fn.equals("COUNT_DISTINCT")?"COUNT(DISTINCT "+m.column()+")":fn+"("+m.column()+")";select.add(expression+" AS "+alias);aliases.add(alias);}
+  for(Metric m:d.metrics()){String fn=m.aggregate()==null?"COUNT":m.aggregate().toUpperCase(Locale.ROOT);if(!Set.of("COUNT","SUM","AVG","MIN","MAX","COUNT_DISTINCT").contains(fn))throw new IllegalArgumentException("Unsupported metric aggregation");if(!("*".equals(m.column())&&"COUNT".equals(fn)))column(m.column(),valid);String alias=identifier(m.alias());String expression=fn.equals("COUNT_DISTINCT")?"COUNT(DISTINCT "+m.column()+")":fn+"("+m.column()+")";select.add(expression+" AS "+alias);aliases.add(alias);}
   if(select.isEmpty())throw new IllegalArgumentException("At least one dimension or metric is required");
   StringBuilder sql=new StringBuilder("SELECT ").append(String.join(",",select)).append(" FROM ").append(d.table());
   List<String> where=new ArrayList<>();if(d.filters()!=null){if(d.filters().size()>40)throw new IllegalArgumentException("At most 40 filters are allowed");for(Filter f:d.filters())where.add(filter(f,valid));}
