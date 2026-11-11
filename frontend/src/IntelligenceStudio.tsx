@@ -69,7 +69,9 @@ export function BiStudio(){
  const runReport=useMutation({mutationFn:(id:string)=>post<any>('/api/bi/reports/'+id+'/run',{}),onSuccess:setResult});
  const drillDown=useMutation({mutationFn:(args:any)=>post<any>('/api/bi/query/drill-down',args),onSuccess:setResult});
  const drillThrough=useMutation({mutationFn:(args:any)=>post<any>('/api/bi/query/drill-through',args),onSuccess:setResult});
- const createDashboard=useMutation({mutationFn:()=>post('/api/bi/dashboards',{name:dashboardName,description:'Analytical dashboard',layout:{columns:12},shared:false}),onSuccess:()=>{qc.invalidateQueries({queryKey:['bi-dashboards']});setDashboardName('')}});\n const grantReport=useMutation({mutationFn:()=>put('/api/bi/reports/'+shareReport+'/shares',{subject:shareSubject,permission:sharePermission})});\n const grantDashboard=useMutation({mutationFn:()=>put('/api/bi/dashboards/'+shareDashboard+'/shares',{subject:shareSubject,permission:sharePermission})});
+ const createDashboard=useMutation({mutationFn:()=>post('/api/bi/dashboards',{name:dashboardName,description:'Analytical dashboard',layout:{columns:12},shared:false}),onSuccess:()=>{qc.invalidateQueries({queryKey:['bi-dashboards']});setDashboardName('')}});
+ const grantReport=useMutation({mutationFn:()=>put('/api/bi/reports/'+shareReport+'/shares',{subject:shareSubject,permission:sharePermission})});
+ const grantDashboard=useMutation({mutationFn:()=>put('/api/bi/dashboards/'+shareDashboard+'/shares',{subject:shareSubject,permission:sharePermission})});
  const addWidget=useMutation({mutationFn:(dashboardId:string)=>post('/api/bi/dashboards/'+dashboardId+'/widgets',{reportId:reports.data?.[0]?.id||null,title:'Analytics widget',type:'BAR',position:{x:0,y:0,w:6,h:4},options:{}})});
  const createSchedule=useMutation({mutationFn:()=>post('/api/bi/schedules',{reportId:schedule.reportId,cronExpression:schedule.cron,timezone:schedule.timezone,outputFormat:schedule.format,deliveryTarget:schedule.target||null}),onSuccess:()=>qc.invalidateQueries({queryKey:['bi-schedules']})});
  const schedules=useQuery({queryKey:['bi-schedules'],queryFn:()=>get<any[]>('/api/bi/schedules')});
