@@ -30,7 +30,7 @@ public class AdvancedWorkspaceController {
  public record DrilldownRequest(@NotBlank String column,Object value){}
  public record EvaluationRequest(UUID experimentId,@NotBlank @Size(max=160) String name,@NotBlank String taskType,List<Double> actual,List<Double> predicted){}
  public record LineageRequest(UUID sourceDatasetId,List<String> sourceColumns,List<UUID> parentFeatureIds,@NotBlank String transformationJson){}
- public record GrantRequest(@NotBlank String subject,@NotBlank String permission){}
+ public record GrantRequest(@NotBlank @Size(max=200) String subject,@NotBlank String permission){}
  public record LifecycleRequest(@NotBlank String state){}
  public record DashboardRequest(@NotBlank @Size(max=160) String name,String description,String layoutJson){}
  public record WidgetRequest(@NotBlank String title,@NotBlank String widgetType,@NotBlank String queryJson,Integer x,Integer y,Integer width,Integer height,Integer refreshSeconds){}
@@ -93,8 +93,15 @@ public class AdvancedWorkspaceController {
 
  @GetMapping("/features/{id}/lineage") public List<Map<String,Object>> lineage(@PathVariable UUID id,Authentication a){permissions.require(a,"features:read");requireFeatureAccess(id,a,"READ");return db.queryForList("SELECT * FROM feature_lineage WHERE feature_set_id=? ORDER BY created_at DESC",id);}
  @PostMapping("/features/{id}/lineage") @ResponseStatus(HttpStatus.CREATED) public Map<String,Object> addLineage(@PathVariable UUID id,@Valid @RequestBody LineageRequest r,Authentication a){permissions.require(a,"features:write");requireFeatureAccess(id,a,"WRITE");UUID lid=UUID.randomUUID();try{db.update("INSERT INTO feature_lineage(id,feature_set_id,source_dataset_id,source_columns_json,parent_feature_ids_json,transformation_json,created_by) VALUES(?,?,?,?,?,?,?)",lid,id,r.sourceDatasetId(),json.writeValueAsString(r.sourceColumns()==null?List.of():r.sourceColumns()),json.writeValueAsString(r.parentFeatureIds()==null?List.of():r.parentFeatureIds()),r.transformationJson(),a.getName());}catch(Exception e){throw new IllegalStateException("Cannot persist feature lineage",e);}return Map.of("id",lid);}
- @PutMapping("/features/{id}/lifecycle") public void lifecycle(@PathVariable UUID id,@Valid @RequestBody LifecycleRequest r,Authentication a){permissions.require(a,"features:write");requireFeatureAccess(id,a.getName(),"WRITE");String s=r.state().toUpperCase(Locale.ROOT);if(!Set.of("ACTIVE","DEPRECATED","RETIRED").contains(s))throw new IllegalArgumentException("Lifecycle state must be ACTIVE, DEPRECATED or RETIRED");if(db.update("UPDATE feature_sets SET lifecycle_state=?,updated_at=now() WHERE id=?",s,id)==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Feature set not found");}
- @PostMapping("/features/{id}/grants") public void grant(@PathVariable UUID id,@Valid @RequestBody GrantRequest r,Authentication a){permissions.require(a,"platform:admin");String p=r.permission().toUpperCase(Locale.ROOT);if(!Set.of("READ","WRITE","ADMIN").contains(p))throw new IllegalArgumentException("Grant must be READ, WRITE or ADMIN");db.update("INSERT INTO feature_access_grants(feature_set_id,subject,permission,granted_by) VALUES(?,?,?,?) ON CONFLICT(feature_set_id,subject) DO UPDATE SET permission=EXCLUDED.permission,granted_by=EXCLUDED.granted_by,created_at=now()",id,r.subject(),p,a.getName());}
+ @PutMapping("/features/{id}/lifecycle") public void lifecycle(@PathVariable UUID id,@Valid @RequestBody LifecycleRequest r,Authentication a){permissions.require(a,"features:write");requireFeatureAccess(id,a,"WRITE");String s=r.state().toUpperCase(Locale.ROOT);if(!Set.of("ACTIVE","DEPRECATED","RETIRED").contains(s))throw new IllegalArgumentException("Lifecycle state must be ACTIVE, DEPRECATED or RETIRED");if(db.update("UPDATE feature_sets SET lifecycle_state=?,updated_at=now() WHERE id=?",s,id)==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Feature set not found");}
+ @PostMapping("/features/{id}/grants") public void grant(@PathVariable UUID id,@Valid @RequestBody GrantRequest r,Authentication a){
+  permissions.require(a,"features:write");requireFeatureOwnerOrAdmin(id,a);
+  String p=r.permission().toUpperCase(Locale.ROOT);if(!Set.of("READ","WRITE","ADMIN").contains(p))throw new IllegalArgumentException("Grant must be READ, WRITE or ADMIN");
+  db.update("INSERT INTO feature_access_grants(feature_set_id,subject,permission,granted_by) VALUES(?,?,?,?) ON CONFLICT(feature_set_id,subject) DO UPDATE SET permission=EXCLUDED.permission,granted_by=EXCLUDED.granted_by,created_at=now()",id,r.subject(),p,a.getName());
+ }
+ @GetMapping("/features/{id}/grants") public List<Map<String,Object>> grants(@PathVariable UUID id,Authentication a){permissions.require(a,"features:read");requireFeatureOwnerOrAdmin(id,a);return db.queryForList("SELECT * FROM feature_access_grants WHERE feature_set_id=? ORDER BY subject",id);}
+ @DeleteMapping("/features/{id}/grants/{subject}") public void revokeGrant(@PathVariable UUID id,@PathVariable String subject,Authentication a){permissions.require(a,"features:write");requireFeatureOwnerOrAdmin(id,a);db.update("DELETE FROM feature_access_grants WHERE feature_set_id=? AND subject=?",id,subject);}
+
  @GetMapping("/features/{id}/grants") public List<Map<String,Object>> grants(@PathVariable UUID id,Authentication a){permissions.require(a,"platform:admin");return db.queryForList("SELECT * FROM feature_access_grants WHERE feature_set_id=? ORDER BY subject",id);}
 
  @PostMapping("/dashboards") @ResponseStatus(HttpStatus.CREATED) public Map<String,Object> createDashboard(@Valid @RequestBody DashboardRequest r,Authentication a){permissions.require(a,"bi:write");UUID id=UUID.randomUUID();Instant now=Instant.now();db.update("INSERT INTO dashboards(id,name,description,layout_json,owner_subject,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",id,r.name(),r.description(),r.layoutJson()==null?"{}":r.layoutJson(),a.getName(),now,now);return Map.of("id",id,"version",1);}
@@ -131,6 +138,12 @@ public class AdvancedWorkspaceController {
  @PostMapping("/schedules/{id}/resume") public void resume(@PathVariable UUID id,Authentication a){permissions.require(a,"pipelines:write");requireScheduleOwner(id,a);db.update("UPDATE scheduled_jobs SET enabled=true,consecutive_failures=0,updated_at=now() WHERE id=?",id);}
  @GetMapping("/schedules/{id}/runs") public List<Map<String,Object>> scheduleRuns(@PathVariable UUID id,Authentication a){permissions.require(a,"pipelines:read");requireScheduleOwner(id,a);return db.queryForList("SELECT * FROM schedule_runs WHERE schedule_id=? ORDER BY created_at DESC LIMIT 200",id);}
 
+ private void requireFeatureOwnerOrAdmin(UUID id,Authentication auth){
+  String owner=db.query("SELECT owner_subject FROM feature_sets WHERE id=?",rs->rs.next()?rs.getString(1):null,id);
+  if(owner==null)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Feature set not found");
+  boolean admin=auth.getAuthorities().stream().anyMatch(a->a.getAuthority().equals("ROLE_ADMIN")||a.getAuthority().equals("PERM_platform:admin"))||permissions.has(auth.getName(),"platform:admin");
+  if(!admin&&!owner.equals(auth.getName()))throw new org.springframework.security.access.AccessDeniedException("Only the feature-set owner or platform administrator can manage grants");
+ }
  private String validateCalendar(String source){
   String value=source==null?"{}":source;
   if(value.length()>50000)throw new IllegalArgumentException("Calendar JSON is too large");
