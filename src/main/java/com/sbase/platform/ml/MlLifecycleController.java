@@ -43,7 +43,7 @@ public class MlLifecycleController {
  public Map<String,Object> deploy(@Valid @RequestBody DeployRequest r,Authentication a){require(a,"ml:deploy");return Map.of("deploymentId",ml.deploy(tenant(a),r.modelVersionId(),r.deploymentName(),a.getName()),"status","ACTIVE");}
  @PostMapping("/deployments/{id}/predict")
  public Map<String,Object> predict(@PathVariable UUID id,@Valid @RequestBody PredictionRequest r,Authentication a){require(a,"ml:predict");return ml.predict(tenant(a),id,r.features());}
- @PostMapping("/deployments/{id}/batch") @ResponseStatus(HttpStatus.ACCEPTED)
+ @PostMapping("/deployments/{id}/batch")
  public Map<String,Object> batch(@PathVariable UUID id,@Valid @RequestBody BatchRequest r,Authentication a){require(a,"ml:predict");return Map.of("batchId",ml.batchPredict(tenant(a),id,r.records()),"status","SUCCEEDED","recordCount",r.records().size());}
  @PutMapping("/model-versions/{id}/stage") @ResponseStatus(HttpStatus.NO_CONTENT)
  public void promote(@PathVariable UUID id,@RequestParam String stage,Authentication a){require(a,"ml:deploy");ml.promote(tenant(a),id,stage.toUpperCase(Locale.ROOT));}
