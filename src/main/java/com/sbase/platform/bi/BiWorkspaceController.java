@@ -25,7 +25,7 @@ public class BiWorkspaceController {
  public record DrillDownRequest(@NotNull @Valid QueryRequest definition,@NotBlank String dimension,Object value,List<String> nextDimensions){}
  public record DrillThroughRequest(@NotBlank String table,@NotEmpty List<String> columns,List<@Valid Filter> filters,@Min(1) @Max(1000) Integer limit){}
  private UUID tenant(Authentication a){return tenants.tenantId(a);}
- private void require(Authentication a,String p){permissions.require(a,p);}
+ private void require(Authentication a,String p){permissions.require(a,p);if(Set.of("ml:write","ml:deploy","bi:write").contains(p))tenants.requireWrite(a);}
  private GovernedBiQueryService.QueryDefinition definition(QueryRequest r){
   return new GovernedBiQueryService.QueryDefinition(r.table(),r.dimensions()==null?List.of():r.dimensions(),
    r.metrics().stream().map(m->new GovernedBiQueryService.Metric(m.column(),m.aggregate(),m.alias())).toList(),
