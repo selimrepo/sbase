@@ -23,7 +23,7 @@ class DorisBiAnalyticsServiceTest {
                         "storage_bytes", 4096L, "engine", "OLAP"),
                 Map.of("table_name", "orders", "estimated_rows", 300L,
                         "storage_bytes", 2048L, "engine", "OLAP")));
-        when(jdbc.queryForMap(anyString(), any(Object[].class))).thenReturn(Map.of(
+        when(jdbc.queryForMap(anyString())).thenReturn(Map.of(
                 "query_count", 42L, "avg_query_time_ms", 18L,
                 "scanned_bytes", 8192L, "scanned_rows", 1500L));
 
@@ -46,7 +46,7 @@ class DorisBiAnalyticsServiceTest {
         when(jdbc.queryForList(anyString(), any(Object[].class))).thenReturn(List.of(
                 Map.of("table_name", "events", "estimated_rows", 9L,
                         "storage_bytes", 512L, "engine", "OLAP")));
-        when(jdbc.queryForMap(anyString(), any(Object[].class)))
+        when(jdbc.queryForMap(anyString()))
                 .thenThrow(new DataAccessResourceFailureException("query audit log disabled"));
 
         Map<String, Object> summary = service.summary();
