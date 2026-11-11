@@ -49,7 +49,7 @@ class PipelineLeaseCoordinatorIntegrationTest {
 
             assertFalse(nodeA.complete(first, "node-a", "{}", 1),
                     "The dead/restarted worker must not publish a stale result");
-            assertTrue(nodeB.complete(recovered, "node-b", "{\"recovered\":true}", 1));
+            assertTrue(nodeB.complete(recovered, "node-b", null, 1));
             assertEquals("SUCCEEDED", jdbc.queryForObject(
                     "SELECT status FROM pipeline_runs WHERE id=?", String.class, runId));
             assertEquals(2, jdbc.queryForObject(
