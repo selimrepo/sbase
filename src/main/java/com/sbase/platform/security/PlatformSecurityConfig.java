@@ -14,10 +14,20 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 
 @Configuration
 public class PlatformSecurityConfig {
+
+    private final DatabaseRateLimitFilter rateLimitFilter;
+    private final com.sbase.platform.audit.AuditEventFilter auditEventFilter;
+
+    public PlatformSecurityConfig(DatabaseRateLimitFilter rateLimitFilter,
+            com.sbase.platform.audit.AuditEventFilter auditEventFilter) {
+        this.rateLimitFilter = rateLimitFilter;
+        this.auditEventFilter = auditEventFilter;
+    }
 
     @Bean
     SecurityFilterChain platformFilterChain(HttpSecurity http) throws Exception {
@@ -42,7 +52,9 @@ public class PlatformSecurityConfig {
                 .requestMatchers("/api/**").authenticated()
                 .anyRequest().permitAll())
             .oauth2ResourceServer(oauth -> oauth.jwt(jwt ->
-                jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
+                jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
+            .addFilterAfter(rateLimitFilter, BearerTokenAuthenticationFilter.class)
+            .addFilterAfter(auditEventFilter, DatabaseRateLimitFilter.class);
         return http.build();
     }
 
