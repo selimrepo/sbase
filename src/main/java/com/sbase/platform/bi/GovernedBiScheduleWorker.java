@@ -23,7 +23,7 @@ public class GovernedBiScheduleWorker {
  private final JdbcTemplate db;private final BiWorkspaceService bi;private final ObjectMapper mapper;private final java.util.concurrent.Executor executor;
  private final ObjectProvider<JavaMailSender> mail;private final String root;private final String node=UUID.randomUUID().toString();
  public GovernedBiScheduleWorker(@Qualifier("jdbcTemplate") JdbcTemplate db,BiWorkspaceService bi,ObjectMapper mapper,
-  ObjectProvider<JavaMailSender> mail,@Value("${sbase.bi.artifact-root:./data/bi-reports}") String root){
+  @Qualifier("miningExecutor") java.util.concurrent.Executor executor,ObjectProvider<JavaMailSender> mail,@Value("${sbase.bi.artifact-root:./data/bi-reports}") String root){
   this.db=db;this.bi=bi;this.mapper=mapper;this.executor=executor;this.mail=mail;this.root=root;
  }
  @Scheduled(fixedDelayString="${sbase.bi.scheduler.poll-ms:15000}")
