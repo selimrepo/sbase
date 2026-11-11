@@ -40,7 +40,7 @@ class KafkaPartitionFencingIntegrationTest {
                 CREATE TABLE ingestion_batch_receipts(
                   tenant_id UUID NOT NULL,connector_id UUID NOT NULL,topic VARCHAR(249) NOT NULL,
                   partition_id INT NOT NULL,first_offset BIGINT NOT NULL,next_offset BIGINT NOT NULL,
-                  record_count INT NOT NULL,PRIMARY KEY(tenant_id,connector_id,topic,partition_id,first_offset))
+                  record_count INT NOT NULL,PRIMARY KEY(tenant_id,connector_id,topic,partition_id,first_offset,next_offset))
                 """);
             jdbc.execute("""
                 CREATE TABLE ingestion_records(
