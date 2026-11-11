@@ -128,7 +128,7 @@ public class MlLifecycleService {
    n=s.path("regParam");if(n.isArray()){double[] v=doubles(n);if(stage instanceof LogisticRegression m){b.addGrid(m.regParam(),v);added=true;}if(stage instanceof LinearRegression m){b.addGrid(m.regParam(),v);added=true;}}
    n=s.path("maxIter");if(n.isArray()){int[] v=ints(n,1,500);if(stage instanceof LogisticRegression m){b.addGrid(m.maxIter(),v);added=true;}if(stage instanceof LinearRegression m){b.addGrid(m.maxIter(),v);added=true;}}
   }
-  return added?b.build():new ParamGridBuilder().build();
+  ParamMap[] grid=added?b.build():new ParamGridBuilder().build();if(grid.length>64)throw new IllegalArgumentException("Hyperparameter grid expands to more than 64 combinations");return grid;
  }
  private Evaluator evaluator(String task,String label){return task.equals("CLASSIFICATION")?new MulticlassClassificationEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName("accuracy"):new RegressionEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName("rmse");}
  public UUID registerModel(UUID tenant,UUID run,String name,String description,String subject) {
@@ -223,6 +223,6 @@ public class MlLifecycleService {
  private String featuresJson(List<String> f){try{return json.writeValueAsString(f);}catch(Exception e){throw new IllegalArgumentException(e);}}
  private int intParam(JsonNode n,String key,int fallback){int v=n==null?fallback:n.path(key).asInt(fallback);if(v<1||v>500)throw new IllegalArgumentException("Invalid "+key);return v;}
  private double doubleParam(JsonNode n,String key,double fallback){double v=n==null?fallback:n.path(key).asDouble(fallback);if(!Double.isFinite(v)||v<0||v>1000)throw new IllegalArgumentException("Invalid "+key);return v;}
- private int[] ints(JsonNode n,int min,int max){if(n.size()>8)throw new IllegalArgumentException("At most 8 tuning candidates per parameter");int[] a=new int[n.size()];for(int i=0;i<a.length;i++){a[i]=n.get(i).asInt();if(a[i]<min||a[i]>max)throw new IllegalArgumentException("Tuning parameter outside supported range");}return a;}
- private double[] doubles(JsonNode n){if(n.size()>8)throw new IllegalArgumentException("At most 8 tuning candidates per parameter");double[] a=new double[n.size()];for(int i=0;i<a.length;i++){a[i]=n.get(i).asDouble();if(!Double.isFinite(a[i])||a[i]<0||a[i]>1000)throw new IllegalArgumentException("Invalid tuning parameter");}return a;}
+ private int[] ints(JsonNode n,int min,int max){if(n.isEmpty())throw new IllegalArgumentException("Hyperparameter candidate arrays cannot be empty");if(n.size()>8)throw new IllegalArgumentException("At most 8 tuning candidates per parameter");int[] a=new int[n.size()];for(int i=0;i<a.length;i++){a[i]=n.get(i).asInt();if(a[i]<min||a[i]>max)throw new IllegalArgumentException("Tuning parameter outside supported range");}return a;}
+ private double[] doubles(JsonNode n){if(n.isEmpty())throw new IllegalArgumentException("Hyperparameter candidate arrays cannot be empty");if(n.size()>8)throw new IllegalArgumentException("At most 8 tuning candidates per parameter");double[] a=new double[n.size()];for(int i=0;i<a.length;i++){a[i]=n.get(i).asDouble();if(!Double.isFinite(a[i])||a[i]<0||a[i]>1000)throw new IllegalArgumentException("Invalid tuning parameter");}return a;}
 }
