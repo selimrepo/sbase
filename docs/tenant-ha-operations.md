@@ -66,3 +66,53 @@ Three broker/controller nodes use replication factor 3 and min ISR 2 for interna
 ## Load, stress and soak tests
 
 The `perf/k6` directory contains smoke, stress and 24-hour soak scenarios; see [perf/README.md](../perf/README.md) for commands and acceptance gates. The included k6 workload is an API baseline, not a replacement for dedicated Kafka ingestion, Spark pipeline, Doris analytical-query and S3 throughput benchmarks. Run all profiles in staging, capture Prometheus metrics and test broker/FE/BE loss, checkpoint recovery, DLQ replay and database restore during sustained traffic. Never run destructive tests against customer production data.
+
+
+## Throughput and application-node sizing
+
+SBase uses bounded execution rather than an unbounded task backlog. Tune each application
+replica against its CPU and memory budget; do not copy one node's pool sizes to every replica.
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `SBASE_EXECUTOR_CORE_THREADS` | 4 | Warm mining/pipeline workers |
+| `SBASE_EXECUTOR_MAX_THREADS` | 8 | Maximum concurrent background jobs |
+| `SBASE_EXECUTOR_QUEUE_CAPACITY` | 100 | Bounded in-memory handoff queue |
+| `SBASE_DB_POOL_MAX` | 20 (production) | PostgreSQL connections per app replica |
+| `DORIS_POOL_MAX` | 12 | Reused Doris FE connections per app replica |
+| `SBASE_HTTP_MAX_THREADS` | 200 | Tomcat request worker upper bound |
+
+The executor rejects when saturated instead of retaining an unbounded number of Spark jobs.
+Pipeline submissions are durable in PostgreSQL; the retry/recovery worker reclaims queued,
+retryable, or expired-lease runs after process restarts. Size the database pool against the
+database's global connection budget:
+
+`app replicas × (Postgres pool max + Doris pool max) + admin/worker reserve`
+
+PostgreSQL and Doris have separate pools. Keep the sum of PostgreSQL pools below the
+database connection limit with headroom for migrations, monitoring, and operator sessions.
+A pool size increase is not automatically a throughput increase: benchmark query latency,
+CPU, disk I/O, lock waits, and database saturation before raising it.
+
+Doris application connections now use HikariCP. For FE failover, configure the JDBC URL
+with a stable FE load-balancer/VIP or the MySQL Connector/J multi-host load-balance URL
+supported by the deployed Connector/J version. Validate failover against the exact FE
+topology; a connection pool cannot make a single FE endpoint highly available by itself.
+
+Spark pipeline execution no longer calls `count()` for every intermediate DataFrame.
+It performs one terminal count for the run summary, avoiding repeated full lineage scans.
+This means per-step record counts are reported on the terminal step; intermediate step
+counts are intentionally not materialized because doing so forces extra Spark jobs.
+
+### Operational validation
+
+Before increasing production concurrency:
+
+1. Run k6 smoke and stress profiles with realistic pipeline definitions and payload sizes.
+2. Observe `hikaricp.connections.active/idle/pending`, JVM heap/GC, executor queue depth,
+   CPU throttling, PostgreSQL lock and I/O metrics, and Doris query latency.
+3. Kill one application replica during queued and running work; confirm leases expire and
+   jobs are recovered without duplicate side effects.
+4. Restart or fail over a Doris FE while queries are active; confirm clients reconnect and
+   idempotent writes remain safe.
+5. Keep the 24-hour soak as a scheduled/manual exercise, not a mandatory per-PR gate.
