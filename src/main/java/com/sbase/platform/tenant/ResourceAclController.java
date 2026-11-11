@@ -4,7 +4,6 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-import com.sbase.platform.security.PermissionService;
 
 @RestController
 @RequestMapping("/api/access-grants")
@@ -24,7 +23,7 @@ public class ResourceAclController {
     }
     @DeleteMapping
     public void revoke(@RequestParam String resourceType,@RequestParam UUID resourceId,@RequestParam String subject,Authentication auth) {
-        permissions.require(auth,"resources:admin");
+        tenants.requireTenantAdmin(auth); tenants.requireWrite(auth);
         String type=resourceType.toUpperCase(java.util.Locale.ROOT);
         if(!type.matches("DATASET|PIPELINE")) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST,"resourceType must be DATASET or PIPELINE");
         acl.revoke(tenants.tenantId(auth),type,resourceId,subject);
