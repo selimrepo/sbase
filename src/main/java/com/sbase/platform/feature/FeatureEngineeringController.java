@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 import java.util.Map;
@@ -45,7 +46,7 @@ public class FeatureEngineeringController {
         FeatureSetRef feature = db.query("""
             SELECT id,version FROM feature_sets WHERE name=? AND tenant_id=?
             """, rs -> rs.next() ? new FeatureSetRef(rs.getObject("id", UUID.class), rs.getInt("version")) : null,
-            request.featureSetName(), tenants.tenantId(auth));
+            request.featureSetName(), tenants == null ? java.util.UUID.fromString("00000000-0000-0000-0000-000000000001") : tenants.tenantId(auth));
         if (feature == null) throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.NOT_FOUND, "Feature set not found");
 
