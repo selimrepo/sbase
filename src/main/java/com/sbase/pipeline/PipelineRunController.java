@@ -26,28 +26,21 @@ public class PipelineRunController {
     @GetMapping("/{id}/runs")
     public List<PipelineRunEntity> list(@PathVariable UUID id,Authentication auth) {
         permissions.require(auth,"pipelines:read"); pipelines.get(id,auth);
-        return execution.listRuns(id).stream().filter(run -> auth.getName().equals(run.getSubmittedBy())
-            || auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("PERM_platform:admin"))).toList();
+        return execution.listRuns(id);
     }
     @GetMapping("/runs/{runId}")
     public PipelineRunEntity get(@PathVariable UUID runId,Authentication auth) {
         permissions.require(auth,"pipelines:read"); PipelineRunEntity run=execution.getRun(runId);
-        pipelines.get(run.getPipelineId(),auth); requireOwner(run,auth); return run;
+        pipelines.get(run.getPipelineId(),auth); return run;
     }
     @PostMapping("/runs/{runId}/cancel")
     public PipelineRunEntity cancel(@PathVariable UUID runId,Authentication auth) {
         permissions.require(auth,"pipelines:write"); PipelineRunEntity run=execution.getRun(runId);
-        pipelines.get(run.getPipelineId(),auth); requireOwner(run,auth); return execution.cancel(runId);
+        pipelines.authorize(run.getPipelineId(),auth,true); return execution.cancel(runId);
     }
     @GetMapping("/runs/{runId}/steps")
     public List<java.util.Map<String,Object>> steps(@PathVariable UUID runId,Authentication auth) {
         permissions.require(auth,"pipelines:read"); PipelineRunEntity run=execution.getRun(runId);
-        pipelines.get(run.getPipelineId(),auth); requireOwner(run,auth); return execution.stepRuns(runId);
-    }
-    private void requireOwner(PipelineRunEntity run,Authentication auth) {
-        boolean admin=auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("PERM_platform:admin"))
-            || permissions.has(auth.getName(),"platform:admin");
-        if(!admin && !auth.getName().equals(run.getSubmittedBy()))
-            throw new org.springframework.security.access.AccessDeniedException("Pipeline run belongs to another subject");
+        pipelines.get(run.getPipelineId(),auth); return execution.stepRuns(runId);
     }
 }
