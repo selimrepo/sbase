@@ -34,6 +34,10 @@ services:
         mc version enable local/sbase-artifacts
         mc ilm rule add --expire-days 365 local/sbase-artifacts
         mc ilm rule add --noncurrent-expire-days 90 local/sbase-artifacts
+        mc mb --ignore-existing local/doris-backups
+        mc version enable local/doris-backups
+        mc ilm rule add --expire-days 365 local/doris-backups
+        mc ilm rule add --noncurrent-expire-days 90 local/doris-backups
     networks: [sbase-net]
     restart: "no"
 volumes:
