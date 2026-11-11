@@ -125,10 +125,6 @@ CREATE INDEX IF NOT EXISTS idx_sbase_bi_query_audit_tenant ON sbase_bi_query_aud
 ALTER TABLE sbase_ml_batch_jobs ADD COLUMN IF NOT EXISTS result_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE sbase_ml_model_versions ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_sbase_ml_model_lineage ON sbase_ml_model_versions(tenant_id,run_id);
-INSERT INTO sbase_role_permissions(role_id,permission)
-SELECT r.id,p.permission FROM sbase_roles r CROSS JOIN (VALUES
- ('ml:read'),('ml:write'),('ml:deploy'),('ml:predict'),('bi:read'),('bi:write'),('bi:query')
-) p(permission) WHERE r.name='ADMIN' ON CONFLICT DO NOTHING;
 
 ALTER TABLE sbase_ml_prediction_events ADD COLUMN IF NOT EXISTS input_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 
