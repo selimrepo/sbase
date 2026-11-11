@@ -28,18 +28,18 @@ public class DurableRecordSink {
                 try { json = mapper.writeValueAsString(record.payload()); }
                 catch (Exception e) { throw new IllegalArgumentException("Record is not JSON serializable", e); }
                 inserted += jdbc.update("""
-                    INSERT INTO ingestion_records(id,connector_id,source_key,payload,created_at)
-                    VALUES (?, ?, ?, ?::jsonb, now())
+                    INSERT INTO ingestion_records(id,connector_id,tenant_id,source_key,payload,created_at)
+                    SELECT ?,c.id,c.tenant_id,?,?::jsonb,now() FROM ingestion_connectors c WHERE c.id=?
                     ON CONFLICT (connector_id, source_key) DO NOTHING
-                    """, UUID.randomUUID(), connectorId, record.sourceKey(), json);
+                    """, UUID.randomUUID(), record.sourceKey(), json, connectorId);
             }
             if (checkpointKey != null) {
                 jdbc.update("""
-                    INSERT INTO ingestion_checkpoints(connector_id,checkpoint_key,checkpoint_value,updated_at)
-                    VALUES (?,?,?,now())
+                    INSERT INTO ingestion_checkpoints(connector_id,tenant_id,checkpoint_key,checkpoint_value,updated_at)
+                    SELECT id,tenant_id,?,?,now() FROM ingestion_connectors WHERE id=?
                     ON CONFLICT (connector_id,checkpoint_key) DO UPDATE
                     SET checkpoint_value=EXCLUDED.checkpoint_value,updated_at=now()
-                    """, connectorId, checkpointKey, checkpointValue);
+                    """, checkpointKey, checkpointValue, connectorId);
             }
             return inserted;
         });
@@ -60,10 +60,10 @@ public class DurableRecordSink {
                 if (updated > 0) return true;
             }
             return jdbc.update("""
-                INSERT INTO ingestion_checkpoints(connector_id,checkpoint_key,checkpoint_value,updated_at)
-                VALUES (?,?,?,now())
+                INSERT INTO ingestion_checkpoints(connector_id,tenant_id,checkpoint_key,checkpoint_value,updated_at)
+                SELECT id,tenant_id,?,?,now() FROM ingestion_connectors WHERE id=?
                 ON CONFLICT (connector_id,checkpoint_key) DO NOTHING
-                """, connectorId, key, newValue) > 0;
+                """, key, newValue, connectorId) > 0;
         }));
     }
 
