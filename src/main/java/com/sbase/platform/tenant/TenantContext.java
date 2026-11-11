@@ -39,6 +39,13 @@ public class TenantContext {
         if(authentication==null || !authentication.isAuthenticated()) throw new AccessDeniedException("Authentication required");
         return authentication.getName();
     }
+    public void requireWrite(Authentication authentication) {
+        UUID tenant=tenantId(authentication);
+        if(jdbc==null) return;
+        String role=jdbc.query("SELECT member_role FROM tenant_memberships WHERE tenant_id=? AND subject=? AND status='ACTIVE'",
+            rs->rs.next()?rs.getString(1):null,tenant,subject(authentication));
+        if("READ_ONLY".equals(role)) throw new AccessDeniedException("Tenant membership is read-only");
+    }
     public void requireTenant(Authentication authentication,UUID tenantId) {
         if(!tenantId(authentication).equals(tenantId)) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Resource not found");
     }
