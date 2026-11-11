@@ -11,14 +11,13 @@ import com.sbase.platform.security.PermissionService;
 public class ResourceAclController {
     private final ResourceAclService acl;
     private final TenantContext tenants;
-    private final PermissionService permissions;
-    public ResourceAclController(ResourceAclService acl,TenantContext tenants,PermissionService permissions) {
-        this.acl=acl; this.tenants=tenants; this.permissions=permissions;
+    public ResourceAclController(ResourceAclService acl,TenantContext tenants) {
+        this.acl=acl; this.tenants=tenants;
     }
     public record GrantRequest(String resourceType,UUID resourceId,String subject,String permission) {}
     @PostMapping @ResponseStatus(HttpStatus.NO_CONTENT)
     public void grant(@RequestBody GrantRequest request,Authentication auth) {
-        permissions.require(auth,"resources:admin"); tenants.requireWrite(auth);
+        tenants.requireTenantAdmin(auth); tenants.requireWrite(auth);
         String type=request.resourceType()==null?"":request.resourceType().toUpperCase(java.util.Locale.ROOT);
         if(!type.matches("DATASET|PIPELINE")) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST,"resourceType must be DATASET or PIPELINE");
         acl.grant(tenants.tenantId(auth),type,request.resourceId(),request.subject(),request.permission().toUpperCase(java.util.Locale.ROOT),tenants.subject(auth));
