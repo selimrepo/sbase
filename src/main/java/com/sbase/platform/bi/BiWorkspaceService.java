@@ -77,6 +77,9 @@ public class BiWorkspaceService {
   requireOwner("sbase_bi_dashboards",tenant,id,owner);if(!Set.of("READ","EDIT","ADMIN").contains(permission))throw new IllegalArgumentException("Invalid dashboard permission");
   db.update("INSERT INTO sbase_bi_dashboard_grants(dashboard_id,subject,permission,granted_by) VALUES(?,?,?,?) ON CONFLICT(dashboard_id,subject) DO UPDATE SET permission=EXCLUDED.permission,granted_by=EXCLUDED.granted_by,created_at=now()",id,subject,permission,owner);
  }
+ public List<Map<String,Object>> schedules(UUID tenant,String subject){
+  return db.queryForList("SELECT id,report_id,cron_expression,timezone,output_format,delivery_target,enabled,next_run_at,last_run_at,failure_count FROM sbase_bi_schedules WHERE tenant_id=? AND owner_subject=? ORDER BY next_run_at LIMIT 500",tenant,subject);
+ }
  @Transactional
  public UUID schedule(UUID tenant,String subject,UUID report,String cron,String timezone,String format,String target){
   reportRow(tenant,subject,report,"QUERY");var expression=org.springframework.scheduling.support.CronExpression.parse(cron);ZoneId zone=ZoneId.of(timezone);ZonedDateTime next=expression.next(ZonedDateTime.now(zone));if(next==null)throw new IllegalArgumentException("Cron has no next occurrence");
