@@ -23,6 +23,7 @@ public class FeatureAccessService {
     public void require(Authentication authentication, String featureSet, boolean write) {
         String subject = permissions.subject(authentication);
         java.util.UUID tenantId = tenants.tenantId(authentication);
+        if(write) tenants.requireWrite(authentication);
         permissions.require(authentication, write ? "features:write" : "features:read");
         FeatureRow row = db.query("""
             SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=? AND tenant_id=?
