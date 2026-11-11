@@ -87,3 +87,75 @@ INSERT INTO sbase_role_permissions(role_id,permission)
 SELECT r.id,p.permission FROM sbase_roles r CROSS JOIN (VALUES
   ('mining:read'),('mining:write'),('datasets:read'),('datasets:write')
 ) p(permission) WHERE r.name='DATA_ENGINEER' ON CONFLICT DO NOTHING;
+
+-- Derive tenant ownership for child records created by legacy workers/services.
+CREATE OR REPLACE FUNCTION sbase_derive_child_tenant() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_TABLE_NAME = 'pipeline_versions' THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM pipelines WHERE id=NEW.pipeline_id;
+  ELSIF TG_TABLE_NAME = 'schedule_runs' THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM scheduled_jobs WHERE id=NEW.schedule_id;
+  ELSIF TG_TABLE_NAME IN ('feature_materializations','feature_lineage','feature_access_grants') THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM feature_sets WHERE id=NEW.feature_set_id;
+  ELSIF TG_TABLE_NAME = 'model_versions' THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM registered_models WHERE id=NEW.model_id;
+  ELSIF TG_TABLE_NAME = 'model_artifacts' THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM model_versions WHERE id=NEW.model_version_id;
+  ELSIF TG_TABLE_NAME = 'model_evaluations' THEN
+    IF NEW.experiment_id IS NOT NULL THEN
+      SELECT tenant_id INTO NEW.tenant_id FROM experiments WHERE id=NEW.experiment_id;
+    END IF;
+  ELSIF TG_TABLE_NAME = 'dashboard_widgets' THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM dashboards WHERE id=NEW.dashboard_id;
+  ELSIF TG_TABLE_NAME = 'bi_report_shares' THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM bi_reports WHERE id=NEW.report_id;
+  ELSIF TG_TABLE_NAME = 'bi_report_schedules' THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM bi_reports WHERE id=NEW.report_id;
+  ELSIF TG_TABLE_NAME = 'bi_report_schedule_runs' THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM bi_report_schedules WHERE id=NEW.schedule_id;
+  ELSIF TG_TABLE_NAME IN ('ingestion_runs','ingestion_records','ingestion_checkpoints','ingestion_dead_letters') THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM ingestion_connectors WHERE id=NEW.connector_id;
+  ELSIF TG_TABLE_NAME = 'online_feature_values' THEN
+    SELECT tenant_id INTO NEW.tenant_id FROM feature_sets WHERE name=NEW.feature_set;
+  END IF;
+  IF NEW.tenant_id IS NULL THEN
+    RAISE EXCEPTION 'Unable to derive tenant_id for %', TG_TABLE_NAME;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_pipeline_versions_tenant BEFORE INSERT OR UPDATE ON pipeline_versions
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_schedule_runs_tenant BEFORE INSERT OR UPDATE ON schedule_runs
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_feature_materializations_tenant BEFORE INSERT OR UPDATE ON feature_materializations
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_feature_lineage_tenant BEFORE INSERT OR UPDATE ON feature_lineage
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_feature_access_grants_tenant BEFORE INSERT OR UPDATE ON feature_access_grants
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_model_versions_tenant BEFORE INSERT OR UPDATE ON model_versions
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_model_artifacts_tenant BEFORE INSERT OR UPDATE ON model_artifacts
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_model_evaluations_tenant BEFORE INSERT OR UPDATE ON model_evaluations
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_dashboard_widgets_tenant BEFORE INSERT OR UPDATE ON dashboard_widgets
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_bi_report_shares_tenant BEFORE INSERT OR UPDATE ON bi_report_shares
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_bi_report_schedules_tenant BEFORE INSERT OR UPDATE ON bi_report_schedules
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_bi_report_schedule_runs_tenant BEFORE INSERT OR UPDATE ON bi_report_schedule_runs
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_ingestion_runs_tenant BEFORE INSERT OR UPDATE ON ingestion_runs
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_ingestion_records_tenant BEFORE INSERT OR UPDATE ON ingestion_records
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_ingestion_checkpoints_tenant BEFORE INSERT OR UPDATE ON ingestion_checkpoints
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_ingestion_dead_letters_tenant BEFORE INSERT OR UPDATE ON ingestion_dead_letters
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_online_feature_values_tenant BEFORE INSERT OR UPDATE ON online_feature_values
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
