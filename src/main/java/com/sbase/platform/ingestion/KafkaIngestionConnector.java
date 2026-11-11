@@ -70,7 +70,7 @@ public class KafkaIngestionConnector implements IngestionConnector {
                     envelopes.add(new DurableRecordSink.Envelope(key,payload));
                     nextOffsets.put(new TopicPartition(topic,r.partition()),r.offset()+1);
                 }
-                written+=sink.write(connectorId,topic,envelopes,"kafka:"+topic,offsets(nextOffsets));
+                written+=sink.writeKafkaBatch(connectorId,topic,envelopes);
                 Map<TopicPartition,OffsetAndMetadata> commits=new HashMap<>();
                 nextOffsets.forEach((tp,off)->commits.put(tp,new OffsetAndMetadata(off)));
                 consumer.commitSync(commits);
