@@ -63,7 +63,7 @@ public class MlLifecycleService {
    VALUES(?,?,?,?,?,?,'QUEUED',CAST(? AS jsonb),CAST(? AS jsonb),?,CAST(? AS jsonb),?,?,?)
    """,id,tenant,experiment,runName,algorithm,task,parameters==null?"{}":parameters.toString(),
     searchSpace==null?"{}":searchSpace.toString(),table,featuresJson(features),label,folds,subject);
-  executor.execute(()->train(id,tenant,table,features,label,algorithm,task,folds,parameters,searchSpace));
+  try{executor.execute(()->train(id,tenant,table,features,label,algorithm,task,folds,parameters,searchSpace));}catch(RuntimeException ex){db.update("UPDATE sbase_ml_runs SET status='FAILED',error_message=?,finished_at=now() WHERE id=?",ex.getMessage(),id);throw ex;}
   return id;
  }
  private void train(UUID id,UUID tenant,String table,List<String> features,String label,String algorithm,String task,int folds,JsonNode parameters,JsonNode search) {
