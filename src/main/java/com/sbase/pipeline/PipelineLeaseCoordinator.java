@@ -33,7 +33,7 @@ public class PipelineLeaseCoordinator {
                    attempt_count=attempt_count+1, next_attempt_at=NULL,
                    lease_owner=?, lease_until=now()+(? * interval '1 second'),
                    lease_heartbeat_at=now(), fencing_token=fencing_token+1, error_message=NULL
-             WHERE id=? AND (status='QUEUED' OR (status='RETRY_WAIT' AND next_attempt_at<=now()))
+             WHERE id=? AND (status='QUEUED' OR (status='RETRY_WAIT' AND next_attempt_at<=now()) OR (status='RUNNING' AND lease_until<now()))
             RETURNING id, fencing_token, lease_until
             """, rs -> rs.next() ? new Lease(rs.getObject(1, UUID.class), rs.getLong(2), rs.getTimestamp(3).toInstant()) : null,
             workerId, leaseSeconds, runId);
