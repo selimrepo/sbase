@@ -50,14 +50,14 @@ public class PointInTimeFeatureService {
    """,rs->{if(!rs.next())return null;Map<String,Object> x=new LinkedHashMap<>();x.put("values",read(rs.getString(1)));x.put("eventTime",rs.getTimestamp(2).toInstant());x.put("featureVersion",rs.getInt(3));return x;},tenant,set,entity);
   Map<String,Object> offValues=(Map<String,Object>)offline.get("values");
   Map<String,Object> onValues=online==null?Map.of():(Map<String,Object>)online.get("values");
-  String oh=hash(offValues),nh=hash(onValues);boolean same=online!=null&&((Instant)online.get("eventTime")).compareTo(asOf)<=0&&oh.equals(nh);
+  String oh=hash(offValues),nh=hash(onValues);boolean comparable=online!=null&&((Instant)online.get("eventTime")).compareTo(asOf)<=0;boolean same=comparable&&oh.equals(nh);
   Map<String,Object> differences=new TreeMap<>();Set<String> keys=new TreeSet<>();keys.addAll(offValues.keySet());keys.addAll(onValues.keySet());
   for(String key:keys)if(!Objects.equals(offValues.get(key),onValues.get(key)))differences.put(key,Map.of("offline",String.valueOf(offValues.get(key)),"online",String.valueOf(onValues.get(key))));
   UUID id=UUID.randomUUID();db.update("""
    INSERT INTO sbase_feature_parity_checks(id,tenant_id,feature_set,entity_key,as_of,is_match,offline_hash,online_hash,differences_json)
    VALUES(?,?,?,?,?,?,?,?,CAST(? AS jsonb))
    """,id,tenant,set,entity,asOf,same,oh,online==null?null:nh,write(differences));
-  return Map.of("id",id,"matches",same,"asOf",asOf,"offline",offline,"online",online==null?Map.of():online,"differences",differences);
+  return Map.of("id",id,"matches",same,"comparable",comparable,"status",comparable?(same?"MATCH":"MISMATCH"):"ONLINE_AHEAD_OF_AS_OF","asOf",asOf,"offline",offline,"online",online==null?Map.of():online,"differences",differences);
  }
  private String hash(Map<String,Object> values){try{byte[] bytes=MessageDigest.getInstance("SHA-256").digest(write(new TreeMap<>(values)).getBytes(StandardCharsets.UTF_8));return HexFormat.of().formatHex(bytes);}catch(Exception e){throw new IllegalStateException(e);}}
  private String write(Object v){try{return mapper.writeValueAsString(v);}catch(Exception e){throw new IllegalArgumentException("Feature values are not JSON serializable",e);}}
