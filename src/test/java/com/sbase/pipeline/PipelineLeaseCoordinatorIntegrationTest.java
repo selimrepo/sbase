@@ -47,7 +47,7 @@ class PipelineLeaseCoordinatorIntegrationTest {
             assertNotNull(recovered);
             assertTrue(recovered.fencingToken() > first.fencingToken());
 
-            assertFalse(nodeA.complete(first, "node-a", "{}", 1),
+            assertFalse(nodeA.complete(first, "node-a", null, 1),
                     "The dead/restarted worker must not publish a stale result");
             assertTrue(nodeB.complete(recovered, "node-b", null, 1));
             assertEquals("SUCCEEDED", jdbc.queryForObject(
