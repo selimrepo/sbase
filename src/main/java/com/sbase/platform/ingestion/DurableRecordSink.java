@@ -50,5 +50,14 @@ public class DurableRecordSink {
             rs -> rs.next() ? rs.getString(1) : null, connectorId, key);
     }
 
+    public void saveCheckpoint(UUID connectorId, String key, String value) {
+        transactions.executeWithoutResult(status -> jdbc.update("""
+            INSERT INTO ingestion_checkpoints(connector_id,checkpoint_key,checkpoint_value,updated_at)
+            VALUES (?,?,?,now())
+            ON CONFLICT (connector_id,checkpoint_key) DO UPDATE
+            SET checkpoint_value=EXCLUDED.checkpoint_value,updated_at=now()
+            """, connectorId, key, value));
+    }
+
     public record Envelope(String sourceKey, Map<String,Object> payload) {}
 }
