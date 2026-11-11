@@ -15,7 +15,7 @@ public class AuditRetentionWorker {
     }
     @Scheduled(cron="${sbase.audit.cleanup-cron:0 20 3 * * *}", zone="UTC")
     public void purgeExpiredOperationalData() {
-        jdbc.update("DELETE FROM audit_events WHERE occurred_at < now() - (? * interval '1 day')",auditRetentionDays);
+        jdbc.update("DELETE FROM platform_audit_events WHERE occurred_at < now() - (? * interval '1 day')",auditRetentionDays);
         jdbc.update("DELETE FROM api_rate_limit_buckets WHERE updated_at < now() - interval '2 days'");
     }
 }
