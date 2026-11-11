@@ -22,7 +22,7 @@ public class DeadLetterManagementService {
             SELECT id,run_id,connector_id,connector_type,source_ref,error_message,attempt_count,
                    replay_attempts,last_replay_error,created_at
             FROM ingestion_dead_letters
-            WHERE replayed_at IS NULL AND replay_started_at IS NULL
+            WHERE replayed_at IS NULL AND (replay_started_at IS NULL OR replay_started_at < now()-interval '15 minutes')
             ORDER BY created_at ASC
             LIMIT ?
             """,bounded);
