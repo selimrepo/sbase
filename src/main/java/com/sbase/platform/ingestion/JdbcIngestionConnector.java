@@ -71,7 +71,7 @@ public class JdbcIngestionConnector implements IngestionConnector {
 
         // Advance only after the destination transaction commits. A crash before this update replays
         // the previous window; target-side unique keys/upserts should make that replay idempotent.
-        if(incremental && maxWatermark!=null) checkpoints.saveCheckpoint(connectorId,checkpointKey,maxWatermark.toString());
+        if(incremental && maxWatermark!=null) checkpoints.saveCheckpoint(connectorId,checkpointKey,serializeWatermark(maxWatermark));
         return new ConnectorResult(read,written,incremental
             ? "Incremental JDBC load completed; watermark="+(maxWatermark==null?watermark:maxWatermark)
             : "Full JDBC load completed");
@@ -87,7 +87,7 @@ public class JdbcIngestionConnector implements IngestionConnector {
             case "long","integer" -> Long.valueOf(value);
             case "decimal" -> new java.math.BigDecimal(value);
             case "timestamp" -> Timestamp.from(Instant.parse(value));
-            case "date" -> Date.valueOf(LocalDate.parse(value));
+            case "date" -> java.sql.Date.valueOf(LocalDate.parse(value));
             default -> value;
         };
     }
@@ -97,7 +97,7 @@ public class JdbcIngestionConnector implements IngestionConnector {
         return a.toString().compareTo(b.toString());
     }
     private static int successfulCount(int[] counts) { return successful(counts); }
-    private static String safeIdentifier(String s) {
+    private static String serializeWatermark(Object value) {\n        if(value instanceof Timestamp timestamp) return timestamp.toInstant().toString();\n        if(value instanceof java.sql.Date date) return date.toLocalDate().toString();\n        return value.toString();\n    }\n    private static String safeIdentifier(String s) {
         if(!s.matches("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?")) throw new IllegalArgumentException("Unsafe SQL identifier: "+s);
         return s;
     }
