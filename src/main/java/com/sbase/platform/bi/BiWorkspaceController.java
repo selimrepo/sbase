@@ -51,6 +51,7 @@ public class BiWorkspaceController {
  public Map<String,Object> addWidget(@PathVariable UUID id,@Valid @RequestBody WidgetRequest r,Authentication a){require(a,"bi:write");return Map.of("id",bi.addWidget(tenant(a),a.getName(),id,r.reportId(),r.title(),r.type().toUpperCase(Locale.ROOT),r.position(),r.options()));}
  @PutMapping("/dashboards/{id}/shares") @ResponseStatus(HttpStatus.NO_CONTENT)
  public void shareDashboard(@PathVariable UUID id,@Valid @RequestBody ShareRequest r,Authentication a){require(a,"bi:write");bi.shareDashboard(tenant(a),a.getName(),id,r.subject(),r.permission().toUpperCase(Locale.ROOT));}
+ @GetMapping("/schedules") public List<Map<String,Object>> schedules(Authentication a){require(a,"bi:read");return bi.schedules(tenant(a),a.getName());}
  @PostMapping("/schedules") @ResponseStatus(HttpStatus.CREATED)
  public Map<String,Object> schedule(@Valid @RequestBody ScheduleRequest r,Authentication a){require(a,"bi:write");return Map.of("id",bi.schedule(tenant(a),a.getName(),r.reportId(),r.cronExpression(),r.timezone(),r.outputFormat().toUpperCase(Locale.ROOT),r.deliveryTarget()==null?"":r.deliveryTarget()));}
 }
