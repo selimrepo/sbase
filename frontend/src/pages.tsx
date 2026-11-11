@@ -1,6 +1,6 @@
 import {useState} from 'react'
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query'
-import {Activity,AlertTriangle,ArrowRight,Boxes,CheckCircle2,Clock3,Database,GitBranch,Layers3,LoaderCircle,Plus,RefreshCw,Server,ShieldCheck,Sparkles,Workflow} from 'lucide-react'
+import {Activity,AlertTriangle,ArrowRight,Boxes,CheckCircle2,Clock3,Database,GitBranch,Gauge,Layers3,LoaderCircle,Plus,RefreshCw,Server,ShieldCheck,Sparkles,Workflow} from 'lucide-react'
 import {Bar,BarChart,CartesianGrid,ResponsiveContainer,Tooltip,XAxis,YAxis} from 'recharts'
 import {get,post,errorText,date,type Dataset,type Pipeline,type Job} from './api'
 const n=(v?:number)=>Number(v||0).toLocaleString()
