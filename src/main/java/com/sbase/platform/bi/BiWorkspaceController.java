@@ -22,6 +22,8 @@ public class BiWorkspaceController {
  public record DashboardRequest(@NotBlank @Size(max=160) String name,String description,Map<String,Object> layout,boolean shared){}
  public record WidgetRequest(UUID reportId,@NotBlank @Size(max=160) String title,@NotBlank String type,Map<String,Object> position,Map<String,Object> options){}
  public record ScheduleRequest(@NotNull UUID reportId,@NotBlank String cronExpression,@NotBlank String timezone,@NotBlank String outputFormat,String deliveryTarget){}
+ public record DrillDownRequest(@NotNull @Valid QueryRequest definition,@NotBlank String dimension,Object value,List<String> nextDimensions){}
+ public record DrillThroughRequest(@NotBlank String table,@NotEmpty List<String> columns,List<@Valid Filter> filters,@Min(1) @Max(1000) Integer limit){}
  private UUID tenant(Authentication a){return tenants.tenantId(a);}
  private void require(Authentication a,String p){permissions.require(a,p);}
  private GovernedBiQueryService.QueryDefinition definition(QueryRequest r){
@@ -32,6 +34,8 @@ public class BiWorkspaceController {
  }
  @GetMapping("/catalog/tables") public List<Map<String,Object>> tables(Authentication a){require(a,"bi:read");return bi.tables();}
  @PostMapping("/query") public Map<String,Object> query(@Valid @RequestBody QueryRequest r,Authentication a){require(a,"bi:query");return bi.query(tenant(a),a.getName(),definition(r));}
+ @PostMapping("/query/drill-down") public Map<String,Object> drillDown(@Valid @RequestBody DrillDownRequest r,Authentication a){require(a,"bi:query");return bi.drillDown(tenant(a),a.getName(),definition(r.definition()),r.dimension(),r.value(),r.nextDimensions());}
+ @PostMapping("/query/drill-through") public Map<String,Object> drillThrough(@Valid @RequestBody DrillThroughRequest r,Authentication a){require(a,"bi:query");List<GovernedBiQueryService.Filter> filters=r.filters()==null?List.of():r.filters().stream().map(f->new GovernedBiQueryService.Filter(f.column(),f.operator(),f.value())).toList();return bi.drillThrough(tenant(a),a.getName(),r.table(),r.columns(),filters,r.limit());}
  @PostMapping("/reports") @ResponseStatus(HttpStatus.CREATED)
  public Map<String,Object> createReport(@Valid @RequestBody ReportRequest r,Authentication a){require(a,"bi:write");return Map.of("id",bi.createReport(tenant(a),a.getName(),r.name(),r.description(),definition(r.definition())));}
  @GetMapping("/reports") public List<Map<String,Object>> reports(Authentication a){require(a,"bi:read");return bi.reports(tenant(a),a.getName());}
@@ -42,6 +46,7 @@ public class BiWorkspaceController {
  public Map<String,Object> createDashboard(@Valid @RequestBody DashboardRequest r,Authentication a){require(a,"bi:write");return Map.of("id",bi.createDashboard(tenant(a),a.getName(),r.name(),r.description(),r.layout(),r.shared()));}
  @GetMapping("/dashboards") public List<Map<String,Object>> dashboards(Authentication a){require(a,"bi:read");return bi.dashboards(tenant(a),a.getName());}
  @GetMapping("/dashboards/{id}/widgets") public List<Map<String,Object>> widgets(@PathVariable UUID id,Authentication a){require(a,"bi:read");return bi.widgets(tenant(a),a.getName(),id);}
+ @GetMapping("/dashboards/{id}/data") public List<Map<String,Object>> dashboardData(@PathVariable UUID id,Authentication a){require(a,"bi:query");return bi.dashboardData(tenant(a),a.getName(),id);}
  @PostMapping("/dashboards/{id}/widgets") @ResponseStatus(HttpStatus.CREATED)
  public Map<String,Object> addWidget(@PathVariable UUID id,@Valid @RequestBody WidgetRequest r,Authentication a){require(a,"bi:write");return Map.of("id",bi.addWidget(tenant(a),a.getName(),id,r.reportId(),r.title(),r.type().toUpperCase(Locale.ROOT),r.position(),r.options()));}
  @PutMapping("/dashboards/{id}/shares") @ResponseStatus(HttpStatus.NO_CONTENT)
