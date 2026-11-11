@@ -61,7 +61,7 @@ class AdvancedPlatformIntegrationTest {
     private PermissionService permissions() { return new PermissionService(db); }
     private TestingAuthenticationToken auth(String subject, String... authorities) {
         return new TestingAuthenticationToken(subject, "n/a",
-            java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toArray(SimpleGrantedAuthority[]::new));
+            java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toList());
     }
 
     @Test
@@ -162,7 +162,7 @@ class AdvancedPlatformIntegrationTest {
         List<Map<String,Object>> content = (List<Map<String,Object>>) page.get("content");
         assertThat(content).hasSize(1);
         assertThat(content.get(0).get("can_query")).isEqualTo(true);
-        assertThat(content.getFirst().get("can_manage")).isEqualTo(false);
+        assertThat(content.get(0).get("can_manage")).isEqualTo(false);
         assertThat(page.get("totalElements")).isEqualTo(1);
     }
 
