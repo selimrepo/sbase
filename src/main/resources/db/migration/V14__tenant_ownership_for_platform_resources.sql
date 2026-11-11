@@ -91,7 +91,13 @@ SELECT r.id,p.permission FROM sbase_roles r CROSS JOIN (VALUES
 -- Derive tenant ownership for child records created by legacy workers/services.
 CREATE OR REPLACE FUNCTION sbase_derive_child_tenant() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_TABLE_NAME = 'pipeline_versions' THEN
+  IF TG_TABLE_NAME = 'experiments' THEN
+    IF NEW.dataset_id IS NOT NULL THEN SELECT tenant_id INTO NEW.tenant_id FROM datasets WHERE id=NEW.dataset_id; END IF;
+  ELSIF TG_TABLE_NAME = 'feature_sets' THEN
+    IF NEW.dataset_id IS NOT NULL THEN SELECT tenant_id INTO NEW.tenant_id FROM datasets WHERE id=NEW.dataset_id; END IF;
+  ELSIF TG_TABLE_NAME = 'scheduled_jobs' THEN
+    IF NEW.pipeline_id IS NOT NULL THEN SELECT tenant_id INTO NEW.tenant_id FROM pipelines WHERE id=NEW.pipeline_id; END IF;
+  ELSIF TG_TABLE_NAME = 'pipeline_versions' THEN
     SELECT tenant_id INTO NEW.tenant_id FROM pipelines WHERE id=NEW.pipeline_id;
   ELSIF TG_TABLE_NAME = 'schedule_runs' THEN
     SELECT tenant_id INTO NEW.tenant_id FROM scheduled_jobs WHERE id=NEW.schedule_id;
@@ -154,4 +160,11 @@ FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
 CREATE TRIGGER trg_ingestion_checkpoints_tenant BEFORE INSERT OR UPDATE ON ingestion_checkpoints
 FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
 CREATE TRIGGER trg_ingestion_dead_letters_tenant BEFORE INSERT OR UPDATE ON ingestion_dead_letters
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+
+CREATE TRIGGER trg_experiments_tenant BEFORE INSERT OR UPDATE ON experiments
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_feature_sets_tenant BEFORE INSERT OR UPDATE ON feature_sets
+FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
+CREATE TRIGGER trg_scheduled_jobs_tenant BEFORE INSERT OR UPDATE ON scheduled_jobs
 FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
