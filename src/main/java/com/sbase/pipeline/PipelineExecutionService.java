@@ -236,9 +236,9 @@ public class PipelineExecutionService {
         PipelineRunEntity run = runs.findById(runId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline run not found"));
         FeatureOwner feature = jdbc.query("""
-            SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=?
+            SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=? AND tenant_id=?
             """, rs -> rs.next() ? new FeatureOwner(rs.getObject("id", UUID.class),
-                rs.getString("lifecycle_state"), rs.getString("owner_subject")) : null, featureSet);
+                rs.getString("lifecycle_state"), rs.getString("owner_subject")) : null, featureSet, run.getTenantId());
         if (feature == null) throw new IllegalArgumentException("Unknown feature set: " + featureSet);
         if (!"ACTIVE".equalsIgnoreCase(feature.lifecycle()))
             throw new org.springframework.security.access.AccessDeniedException("Feature set is not active for materialization");
@@ -404,7 +404,11 @@ public class PipelineExecutionService {
         }
         Column[] featureExpressions = Arrays.stream(featureColumns).map(org.apache.spark.sql.functions::col).toArray(Column[]::new);
         Column eventTime = eventTimeColumn.isBlank() ? lit(null).cast(DataTypes.TimestampType) : col(eventTimeColumn).cast(DataTypes.TimestampType);
+        UUID tenantId = runs.findById(runId)
+            .map(PipelineRunEntity::getTenantId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline run not found"));
         Dataset<Row> staged = latest.select(
+            lit(tenantId.toString()).alias("tenant_id"),
             lit(featureSet).alias("feature_set"),
             col(entityKeyColumn).cast(DataTypes.StringType).alias("entity_key"),
             lit(featureVersion).alias("feature_version"),
@@ -419,7 +423,7 @@ public class PipelineExecutionService {
         try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgresUrl, postgresUser, postgresPassword);
              java.sql.Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE IF NOT EXISTS " + stageName + " (" +
-                "feature_set VARCHAR(160) NOT NULL, entity_key VARCHAR(512) NOT NULL, " +
+                "tenant_id UUID NOT NULL, feature_set VARCHAR(160) NOT NULL, entity_key VARCHAR(512) NOT NULL, " +
                 "feature_version INTEGER NOT NULL, feature_values TEXT NOT NULL, event_time TIMESTAMPTZ)");
             statement.executeUpdate("TRUNCATE TABLE " + stageName);
         } catch (java.sql.SQLException ex) {
@@ -435,8 +439,8 @@ public class PipelineExecutionService {
             try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgresUrl, postgresUser, postgresPassword);
                  java.sql.Statement statement = connection.createStatement()) {
                 connection.setAutoCommit(false);
-                statement.executeUpdate("INSERT INTO online_feature_values(feature_set, entity_key, feature_version, feature_values, event_time, materialized_at) " +
-                    "SELECT feature_set, entity_key, feature_version, feature_values::jsonb, COALESCE(event_time, now()), now() FROM " + stageName +
+                statement.executeUpdate("INSERT INTO online_feature_values(tenant_id, feature_set, entity_key, feature_version, feature_values, event_time, materialized_at) " +
+                    "SELECT tenant_id::uuid, feature_set, entity_key, feature_version, feature_values::jsonb, COALESCE(event_time, now()), now() FROM " + stageName +
                     " ON CONFLICT(feature_set, entity_key) DO UPDATE SET feature_version=EXCLUDED.feature_version, " +
                     "feature_values=EXCLUDED.feature_values, event_time=EXCLUDED.event_time, materialized_at=now() " +
                     "WHERE EXCLUDED.event_time >= online_feature_values.event_time");
