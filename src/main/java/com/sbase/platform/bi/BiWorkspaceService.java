@@ -14,6 +14,8 @@ public class BiWorkspaceService {
  public BiWorkspaceService(@Qualifier("jdbcTemplate") JdbcTemplate db,ObjectMapper mapper,GovernedBiQueryService queries){this.db=db;this.mapper=mapper;this.queries=queries;}
  public List<Map<String,Object>> tables(){return queries.tables();}
  public Map<String,Object> query(UUID tenant,String subject,GovernedBiQueryService.QueryDefinition d){return queries.execute(tenant,subject,d);}
+ public Map<String,Object> drillDown(UUID tenant,String subject,GovernedBiQueryService.QueryDefinition d,String dimension,Object value,List<String> nextDimensions){return queries.drillDown(tenant,subject,d,dimension,value,nextDimensions);}
+ public Map<String,Object> drillThrough(UUID tenant,String subject,String table,List<String> columns,List<GovernedBiQueryService.Filter> filters,Integer limit){return queries.drillThrough(tenant,subject,table,columns,filters,limit);}
  @Transactional
  public UUID createReport(UUID tenant,String subject,String name,String description,GovernedBiQueryService.QueryDefinition definition){
   UUID id=UUID.randomUUID();db.update("INSERT INTO sbase_bi_reports(id,tenant_id,name,description,definition_json,owner_subject) VALUES(?,?,?,?,CAST(? AS jsonb),?)",id,tenant,name,description,write(definition),subject);return id;
