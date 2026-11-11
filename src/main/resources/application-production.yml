@@ -1,5 +1,11 @@
 server:
   port: 8080
+  tomcat:
+    threads:
+      max: ${SBASE_HTTP_MAX_THREADS:200}
+      min-spare: ${SBASE_HTTP_MIN_SPARE_THREADS:20}
+    max-connections: ${SBASE_HTTP_MAX_CONNECTIONS:8192}
+    accept-count: ${SBASE_HTTP_ACCEPT_COUNT:200}
   shutdown: graceful
   forward-headers-strategy: framework
   compression:
@@ -23,6 +29,8 @@ spring:
       validation-timeout: 5000
       idle-timeout: 600000
       max-lifetime: 1800000
+      keepalive-time: 300000
+      leak-detection-threshold: ${SBASE_DB_LEAK_DETECTION_MS:0}
   jpa:
     open-in-view: false
     hibernate:
@@ -60,6 +68,19 @@ management:
     tags:
       application: sbase
       environment: production
+sbase:
+  execution:
+    core-threads: ${SBASE_EXECUTOR_CORE_THREADS:4}
+    max-threads: ${SBASE_EXECUTOR_MAX_THREADS:8}
+    queue-capacity: ${SBASE_EXECUTOR_QUEUE_CAPACITY:100}
+    keep-alive-seconds: ${SBASE_EXECUTOR_KEEP_ALIVE_SECONDS:60}
+  doris:
+    pool:
+      maximum-pool-size: ${DORIS_POOL_MAX:12}
+      minimum-idle: ${DORIS_POOL_MIN:2}
+      connection-timeout: ${DORIS_POOL_CONNECTION_TIMEOUT_MS:5000}
+      validation-timeout: ${DORIS_POOL_VALIDATION_TIMEOUT_MS:3000}
+      max-lifetime: ${DORIS_POOL_MAX_LIFETIME_MS:1800000}
 logging:
   level:
     root: INFO

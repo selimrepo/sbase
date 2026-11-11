@@ -12,8 +12,11 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:sbase}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 15
-      minimum-idle: 2
+      maximum-pool-size: ${SBASE_DB_POOL_MAX:15}
+      minimum-idle: ${SBASE_DB_POOL_MIN:2}
+      connection-timeout: ${SBASE_DB_CONNECTION_TIMEOUT_MS:10000}
+      validation-timeout: 5000
+      max-lifetime: 1800000
   jpa:
     open-in-view: false
     hibernate:
@@ -46,14 +49,25 @@ sbase:
   spark:
     master: ${SPARK_MASTER:local[*]}
     app-name: sbase-data-mining-hub
-    shuffle-partitions: 8
+    shuffle-partitions: ${SPARK_SHUFFLE_PARTITIONS:8}
   doris:
+    pool:
+      maximum-pool-size: ${DORIS_POOL_MAX:12}
+      minimum-idle: ${DORIS_POOL_MIN:2}
+      connection-timeout: ${DORIS_POOL_CONNECTION_TIMEOUT_MS:5000}
+      validation-timeout: ${DORIS_POOL_VALIDATION_TIMEOUT_MS:3000}
+      max-lifetime: ${DORIS_POOL_MAX_LIFETIME_MS:1800000}
     jdbc-url: ${DORIS_JDBC_URL:jdbc:mysql://localhost:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true}
     username: ${DORIS_USERNAME:root}
     password: ${DORIS_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
     database: ${DORIS_DATABASE:analytics}
     allowed-tables: ${DORIS_ALLOWED_TABLES:}
+  execution:
+    core-threads: ${SBASE_EXECUTOR_CORE_THREADS:4}
+    max-threads: ${SBASE_EXECUTOR_MAX_THREADS:8}
+    queue-capacity: ${SBASE_EXECUTOR_QUEUE_CAPACITY:100}
+    keep-alive-seconds: ${SBASE_EXECUTOR_KEEP_ALIVE_SECONDS:60}
   jobs:
     max-concurrent: 2
     retention-hours: 168

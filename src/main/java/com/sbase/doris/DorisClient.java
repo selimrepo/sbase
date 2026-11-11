@@ -2,20 +2,24 @@ package com.sbase.doris;
 
 import com.sbase.config.DorisProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Qualifier;
+
+import javax.sql.DataSource;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
 
 @Component
 public class DorisClient {
     private final DorisProperties properties;
+    private final DataSource dataSource;
 
-    public DorisClient(DorisProperties properties) {
+    public DorisClient(DorisProperties properties, @Qualifier("dorisDataSource") DataSource dataSource) {
         this.properties = properties;
+        this.dataSource = dataSource;
     }
 
     public Connection openConnection() throws SQLException {
-        return DriverManager.getConnection(properties.jdbcUrl(), properties.username(), properties.password());
+        return dataSource.getConnection();
     }
 
     public boolean isHealthy() {

@@ -113,6 +113,7 @@ public class PipelineExecutionService {
             Dataset<Row> current = null;
             long processed = 0;
             List<Map<String, Object>> stepResults = new ArrayList<>();
+            String lastStepId = null;
             for (String id : ordered) {
                 if (runs.findById(runId).map(r -> "CANCELLED".equals(r.getStatus())).orElse(true)) {
                     spark.sparkContext().cancelJobGroup(jobGroup);
@@ -140,10 +141,9 @@ public class PipelineExecutionService {
                     outputs.put(id, result);
                     current = result;
                     schema = mapper.writeValueAsString(Arrays.asList(result.columns()));
-                    if (!"doris_write".equals(type)) {
-                        stepRecords = result.count();
-                        processed = stepRecords;
-                    }
+                    // Spark DataFrames are lazy. Counting every intermediate step forces a
+                    // complete Spark action per node and repeatedly scans the same lineage.
+                    // The terminal dataset is counted once after the graph has executed.
                 }
                 long duration = Duration.ofNanos(System.nanoTime() - stepStartedNanos).toMillis();
                 jdbc.update("""
@@ -154,7 +154,25 @@ public class PipelineExecutionService {
                     """, duration, stepRecords, schema, runId, id, run.getAttemptCount());
                 stepResults.add(Map.of("stepId", id, "type", type, "status", "SUCCEEDED",
                     "durationMs", duration, "recordsProcessed", stepRecords));
+                lastStepId = id;
                 currentStepId = null;
+            }
+            // One terminal count preserves the run-level record metric without launching
+            // an extra Spark job for every transform/filter/join in the pipeline.
+            if (current != null) {
+                processed = current.count();
+                if (lastStepId != null) {
+                    jdbc.update("""
+                        UPDATE pipeline_step_runs SET records_processed=?
+                         WHERE pipeline_run_id=? AND step_id=? AND attempt=?
+                        """, processed, runId, lastStepId, run.getAttemptCount());
+                    if (!stepResults.isEmpty()) {
+                        int last = stepResults.size() - 1;
+                        Map<String, Object> terminal = new LinkedHashMap<>(stepResults.get(last));
+                        terminal.put("recordsProcessed", processed);
+                        stepResults.set(last, terminal);
+                    }
+                }
             }
             Map<String, Object> summary = new LinkedHashMap<>();
             summary.put("steps", stepResults);
