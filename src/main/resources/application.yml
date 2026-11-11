@@ -69,3 +69,15 @@ sbase:
     access-key: ${S3_ACCESS_KEY:}
     secret-key: ${S3_SECRET_KEY:}
     bucket: ${S3_BUCKET:sbase-artifacts}
+
+  ml:
+    allowed-tables: ${SBASE_ML_ALLOWED_TABLES:${DORIS_ALLOWED_TABLES:}}
+    artifact-root: ${SBASE_ML_ARTIFACT_ROOT:./data/ml-artifacts}
+  bi:
+    max-concurrent-queries: ${SBASE_BI_MAX_CONCURRENT:4}
+    cache-ttl-ms: ${SBASE_BI_CACHE_TTL_MS:30000}
+    max-rows: ${SBASE_BI_MAX_ROWS:5000}
+    max-estimated-cost: ${SBASE_BI_MAX_COST:100000}
+    artifact-root: ${SBASE_BI_ARTIFACT_ROOT:./data/bi-reports}
+    scheduler:
+      poll-ms: ${SBASE_BI_SCHEDULER_POLL_MS:15000}
