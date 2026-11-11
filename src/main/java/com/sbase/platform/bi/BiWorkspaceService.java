@@ -55,6 +55,15 @@ public class BiWorkspaceService {
    WHERE d.id=? AND d.tenant_id=? ORDER BY w.created_at
    """,dashboard,tenant);
  }
+ public List<Map<String,Object>> dashboardData(UUID tenant,String subject,UUID dashboard){
+  List<Map<String,Object>> result=new ArrayList<>();
+  for(Map<String,Object> widget:widgets(tenant,subject,dashboard)){
+   Map<String,Object> item=new LinkedHashMap<>(widget);Object reportId=widget.get("report_id");
+   if(reportId!=null){try{item.put("data",executeReport(tenant,subject,(UUID)reportId));}catch(Exception ex){item.put("dataError",ex.getMessage());}}
+   result.add(item);
+  }
+  return result;
+ }
  @Transactional
  public UUID addWidget(UUID tenant,String subject,UUID dashboard,UUID report,String title,String type,Map<String,Object> position,Map<String,Object> options){
   dashboardRow(tenant,subject,dashboard,"EDIT");
