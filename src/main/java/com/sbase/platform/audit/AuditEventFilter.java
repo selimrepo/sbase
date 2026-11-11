@@ -32,6 +32,7 @@ public class AuditEventFilter extends OncePerRequestFilter {
             }
             String requestId=request.getHeader("X-Request-ID");
             if(requestId==null || requestId.isBlank()) requestId=UUID.randomUUID().toString();
+            response.setHeader("X-Request-ID",requestId);
             String outcome=response.getStatus()<400 ? "SUCCESS" : "FAILURE";
             jdbc.update("""
                 INSERT INTO audit_events(tenant_id,subject,action,resource_type,resource_id,outcome,request_id,source_ip,user_agent,details)
