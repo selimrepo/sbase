@@ -71,7 +71,7 @@ sbase:
     bucket: ${S3_BUCKET:sbase-artifacts}
 
   ml:
-    allowed-tables: ${SBASE_ML_ALLOWED_TABLES:${DORIS_ALLOWED_TABLES:}}
+    allowed-tables: ${SBASE_ML_ALLOWED_TABLES:}
     artifact-root: ${SBASE_ML_ARTIFACT_ROOT:./data/ml-artifacts}
   bi:
     max-concurrent-queries: ${SBASE_BI_MAX_CONCURRENT:4}
