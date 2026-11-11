@@ -30,7 +30,7 @@ public class DurableRecordSink {
         return transactions.execute(status -> {
             long inserted = 0;
             if (!encoded.isEmpty()) {
-                int[] counts = jdbc.batchUpdate("""
+                int[][] counts = jdbc.batchUpdate("""
                     INSERT INTO ingestion_records(id,connector_id,tenant_id,source_key,payload,created_at)
                     SELECT ?,c.id,c.tenant_id,?,?::jsonb,now() FROM ingestion_connectors c WHERE c.id=?
                     ON CONFLICT (connector_id, source_key) DO NOTHING
@@ -40,9 +40,11 @@ public class DurableRecordSink {
                         statement.setString(3, record.payloadJson());
                         statement.setObject(4, connectorId);
                     });
-                for (int count : counts) {
-                    if (count > 0) inserted += count;
-                    else if (count == java.sql.Statement.SUCCESS_NO_INFO) inserted++;
+                for (int[] batch : counts) {
+                    for (int count : batch) {
+                        if (count > 0) inserted += count;
+                        else if (count == java.sql.Statement.SUCCESS_NO_INFO) inserted++;
+                    }
                 }
             }
             if (checkpointKey != null) {
