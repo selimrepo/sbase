@@ -90,7 +90,7 @@ public class MlLifecycleService {
     CrossValidatorModel cvModel=cv.fit(train);
     fitted=(PipelineModel)cvModel.bestModel();
     best.put("crossValidationMetrics",Arrays.stream(cvModel.avgMetrics()).boxed().toList());
-    best.put("bestAverageMetric",Arrays.stream(cvModel.avgMetrics()).min().orElse(0));
+    best.put("bestAverageMetric",task.equals("CLASSIFICATION")?Arrays.stream(cvModel.avgMetrics()).max().orElse(0):Arrays.stream(cvModel.avgMetrics()).min().orElse(0));
     best.put("bestEstimatorParameters",cvModel.bestModel().stages()[1].extractParamMap().toString());
    } else fitted=pipeline.fit(train);
    double metric=evaluator(task,label).evaluate(fitted.transform(test));
@@ -98,12 +98,18 @@ public class MlLifecycleService {
    Path target=Paths.get(artifactRoot).resolve(tenant.toString()).resolve(id.toString()).toAbsolutePath();
    Files.createDirectories(target.getParent());fitted.write().overwrite().save(target.toString());
    Map<String,Object> metrics=new LinkedHashMap<>();metrics.put(metricName,metric);metrics.put("trainingRows",train.count());metrics.put("validationRows",test.count());metrics.put("crossValidationFolds",folds);
-   db.update("UPDATE sbase_ml_runs SET status='SUCCEEDED',metrics_json=CAST(? AS jsonb),best_parameters_json=CAST(? AS jsonb),artifact_uri=?,finished_at=now() WHERE id=?",
-    json.writeValueAsString(metrics),json.writeValueAsString(best),target.toUri().toString(),id);
+   Map<String,Object> baseline=featureBaseline(data,features);
+   db.update("UPDATE sbase_ml_runs SET status='SUCCEEDED',metrics_json=CAST(? AS jsonb),best_parameters_json=CAST(? AS jsonb),feature_baseline_json=CAST(? AS jsonb),artifact_uri=?,finished_at=now() WHERE id=?",
+    json.writeValueAsString(metrics),json.writeValueAsString(best),json.writeValueAsString(baseline),target.toUri().toString(),id);
   } catch(Exception ex) {
    String msg=ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage();
    db.update("UPDATE sbase_ml_runs SET status='FAILED',error_message=?,finished_at=now() WHERE id=?",msg.substring(0,Math.min(msg.length(),4000)),id);
   }
+ }
+ private Map<String,Object> featureBaseline(Dataset<Row> data,List<String> features) {
+  List<Column> expressions=new ArrayList<>();for(String feature:features){expressions.add(avg(col(feature)).alias(feature+"__mean"));expressions.add(stddev(col(feature)).alias(feature+"__stddev"));}
+  Column[] all=expressions.toArray(Column[]::new);Row row=data.agg(all[0],Arrays.copyOfRange(all,1,all.length)).first();
+  Map<String,Object> result=new TreeMap<>();for(int i=0;i<features.size();i++){Object mean=row.get(i*2),std=row.get(i*2+1);result.put(features.get(i),Map.of("mean",mean instanceof Number n?n.doubleValue():0.0,"stddev",std instanceof Number n?n.doubleValue():0.0));}return result;
  }
  private PipelineStage estimator(String algorithm,String label,JsonNode p) {
   return switch(algorithm) {
@@ -126,12 +132,12 @@ public class MlLifecycleService {
  }
  private Evaluator evaluator(String task,String label){return task.equals("CLASSIFICATION")?new MulticlassClassificationEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName("accuracy"):new RegressionEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName("rmse");}
  public UUID registerModel(UUID tenant,UUID run,String name,String description,String subject) {
-  Map<String,Object> r=db.queryForMap("SELECT artifact_uri,algorithm,task_type,metrics_json,feature_columns_json,label_column FROM sbase_ml_runs WHERE id=? AND tenant_id=? AND status='SUCCEEDED'",run,tenant);
+  Map<String,Object> r=db.queryForMap("SELECT artifact_uri,algorithm,task_type,metrics_json,feature_columns_json,label_column,feature_baseline_json FROM sbase_ml_runs WHERE id=? AND tenant_id=? AND status='SUCCEEDED'",run,tenant);
   UUID model=db.query("SELECT id FROM sbase_ml_models WHERE tenant_id=? AND name=?",(rs)->rs.next()?rs.getObject(1,UUID.class):null,tenant,name);
   if(model==null){model=UUID.randomUUID();db.update("INSERT INTO sbase_ml_models(id,tenant_id,name,description,owner_subject) VALUES(?,?,?,?,?)",model,tenant,name,description,subject);}
   Integer version=db.queryForObject("SELECT COALESCE(MAX(version),0)+1 FROM sbase_ml_model_versions WHERE model_id=?",Integer.class,model);
-  db.update("INSERT INTO sbase_ml_model_versions(id,tenant_id,model_id,run_id,version,artifact_uri,framework,algorithm,task_type,metrics_json,signature_json,created_by) VALUES(?,?,?,?,?,?,'Spark MLlib',?,?,CAST(? AS jsonb),CAST(? AS jsonb),?)",
-    UUID.randomUUID(),tenant,model,run,version,r.get("artifact_uri"),r.get("algorithm"),r.get("task_type"),r.get("metrics_json").toString(),signatureJson(r.get("feature_columns_json").toString(),r.get("label_column")),subject);
+  db.update("INSERT INTO sbase_ml_model_versions(id,tenant_id,model_id,run_id,version,artifact_uri,framework,algorithm,task_type,metrics_json,signature_json,feature_baseline_json,created_by) VALUES(?,?,?,?,?,?,'Spark MLlib',?,?,CAST(? AS jsonb),CAST(? AS jsonb),CAST(? AS jsonb),?)",
+    UUID.randomUUID(),tenant,model,run,version,r.get("artifact_uri"),r.get("algorithm"),r.get("task_type"),r.get("metrics_json").toString(),signatureJson(r.get("feature_columns_json").toString(),r.get("label_column")),r.get("feature_baseline_json").toString(),subject);
   return model;
  }
  public List<Map<String,Object>> compare(UUID tenant,UUID experiment) {
@@ -146,7 +152,7 @@ public class MlLifecycleService {
  public Map<String,Object> predict(UUID tenant,UUID deployment,Map<String,Object> input) {
   long start=System.nanoTime();boolean ok=false,found=false;Map<String,Object> result=new LinkedHashMap<>();
   try {
-   Map<String,Object> m=db.queryForMap("SELECT v.artifact_uri,v.signature_json,d.id FROM sbase_ml_deployments d JOIN sbase_ml_model_versions v ON v.id=d.model_version_id WHERE d.id=? AND d.tenant_id=? AND d.status='ACTIVE'",deployment,tenant);found=true;
+   Map<String,Object> m=db.queryForMap("SELECT v.artifact_uri,v.signature_json,v.feature_baseline_json,d.id FROM sbase_ml_deployments d JOIN sbase_ml_model_versions v ON v.id=d.model_version_id WHERE d.id=? AND d.tenant_id=? AND d.status='ACTIVE'",deployment,tenant);found=true;
    @SuppressWarnings("unchecked") Map<String,Object> signature=json.readValue(m.get("signature_json").toString(),Map.class);
    List<String> cols=(List<String>)signature.getOrDefault("features",List.of());
    if(cols.isEmpty())throw new IllegalStateException("Model signature is missing feature columns");
@@ -167,7 +173,18 @@ public class MlLifecycleService {
  }
  public Map<String,Object> monitor(UUID tenant,UUID deployment) {
   Map<String,Object> metrics=db.queryForMap("SELECT count(*) AS requests,count(*) FILTER(WHERE succeeded) AS successes,count(*) FILTER(WHERE NOT succeeded) AS failures,COALESCE(avg(latency_ms),0) AS avg_latency_ms,COALESCE(percentile_cont(0.95) WITHIN GROUP(ORDER BY latency_ms),0) AS p95_latency_ms,MAX(created_at) AS last_prediction_at FROM sbase_ml_prediction_events WHERE tenant_id=? AND deployment_id=? AND created_at>=now()-interval '24 hours'",tenant,deployment);
-  metrics.put("recentInputSamples",db.queryForList("SELECT input_json FROM sbase_ml_prediction_events WHERE tenant_id=? AND deployment_id=? ORDER BY created_at DESC LIMIT 20",tenant,deployment));
+  List<Map<String,Object>> raw=db.queryForList("SELECT input_json FROM sbase_ml_prediction_events WHERE tenant_id=? AND deployment_id=? AND succeeded=true ORDER BY created_at DESC LIMIT 200",tenant,deployment);
+  metrics.put("recentInputSamples",raw.size());
+  try {
+   Map<String,Object> version=db.queryForMap("SELECT v.feature_baseline_json FROM sbase_ml_deployments d JOIN sbase_ml_model_versions v ON v.id=d.model_version_id WHERE d.id=? AND d.tenant_id=?",deployment,tenant);
+   Map<String,Map<String,Number>> baseline=json.readValue(version.get("feature_baseline_json").toString(),Map.class);
+   Map<String,List<Double>> observed=new TreeMap<>();
+   for(Map<String,Object> event:raw){Object payload=event.get("input_json");Map<String,Object> values=payload instanceof Map<?,?> m?(Map<String,Object>)m:json.readValue(payload.toString(),Map.class);
+    for(var entry:values.entrySet())if(entry.getValue() instanceof Number n)observed.computeIfAbsent(entry.getKey(),k->new ArrayList<>()).add(n.doubleValue());}
+   Map<String,Object> drift=new TreeMap<>();List<String> drifted=new ArrayList<>();
+   for(var entry:baseline.entrySet()){List<Double> samples=observed.get(entry.getKey());if(samples==null||samples.isEmpty())continue;double mean=samples.stream().mapToDouble(Double::doubleValue).average().orElse(0);double baseMean=entry.getValue().getOrDefault("mean",0).doubleValue();double std=Math.max(1e-9,entry.getValue().getOrDefault("stddev",0).doubleValue());double z=Math.abs(mean-baseMean)/std;drift.put(entry.getKey(),Map.of("trainingMean",baseMean,"servingMean",mean,"zScore",z,"samples",samples.size()));if(z>=3.0)drifted.add(entry.getKey());}
+   metrics.put("featureDrift",drift);metrics.put("driftedFeatures",drifted);
+  }catch(Exception ex){metrics.put("featureDriftAvailable",false);}
   return metrics;
  }
  @Transactional
