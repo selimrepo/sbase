@@ -123,8 +123,12 @@ class AdvancedPlatformIntegrationTest {
         access.require(analyst, "customer_features_it", true);
 
         SparkFeatureEngineeringService spark = mock(SparkFeatureEngineeringService.class);
+        com.sbase.platform.tenant.TenantContext tenants =
+            mock(com.sbase.platform.tenant.TenantContext.class);
+        when(tenants.tenantId(owner)).thenReturn(
+            UUID.fromString("00000000-0000-0000-0000-000000000001"));
         FeatureEngineeringController materializer = new FeatureEngineeringController(
-            spark, access, db, new ObjectMapper());
+            spark, access, db, new ObjectMapper(), tenants);
         var request = new FeatureEngineeringController.MaterializeRequest(
             "customer_features_it", "s3://input/customer", "s3://output/customer",
             List.of(new FeatureEngineeringController.Operation("bucketize", "score", "score_bucket", 10)));
