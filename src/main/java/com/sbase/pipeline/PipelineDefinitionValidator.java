@@ -108,7 +108,7 @@ public class PipelineDefinitionValidator {
         JsonNode deps = step.path("dependsOn");
         if (!deps.isMissingNode()) {
             if (!deps.isArray() || deps.size() > (Set.of("join", "union").contains(type) ? 2 : 1))
-                throw invalid("dependsOn must contain at most two steps; only join accepts two inputs");
+                throw invalid("dependsOn must contain at most two steps; join and union accept two inputs");
             if (Set.of("join", "union").contains(type) && deps.size() != 2)
                 throw invalid("Join requires exactly two dependencies");
             if (!Set.of("join", "union").contains(type) && deps.size() == 2)

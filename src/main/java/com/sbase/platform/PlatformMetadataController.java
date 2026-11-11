@@ -17,9 +17,15 @@ import java.util.*;
 @RequestMapping("/api/platform")
 public class PlatformMetadataController {
     private final JdbcTemplate db;
+    private final com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics;
+    private final com.sbase.platform.security.PermissionService permissions;
 
-    public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db) {
+    public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db,
+                                       com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics,
+                                       com.sbase.platform.security.PermissionService permissions) {
         this.db = db;
+        this.dorisAnalytics = dorisAnalytics;
+        this.permissions = permissions;
     }
 
     public record Experiment(@NotBlank @Size(max=160) String name, String description, UUID datasetId,
@@ -75,33 +81,45 @@ public class PlatformMetadataController {
 
     @PostMapping("/features")
     @ResponseStatus(HttpStatus.CREATED)
-    public Map<String,Object> feature(@Valid @RequestBody FeatureSet r) {
+    public Map<String,Object> feature(@Valid @RequestBody FeatureSet r, Authentication auth) {
+        permissions.require(auth, "features:write");
         UUID id=UUID.randomUUID(); Instant now=Instant.now();
-        db.update("INSERT INTO feature_sets(id,name,description,dataset_id,entity_key,feature_schema_json,transformation_json,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,1,?,?)",
-                id,r.name(),r.description(),r.datasetId(),r.entityKey(),r.schemaJson(),r.transformationJson(),now,now);
+        db.update("INSERT INTO feature_sets(id,name,description,dataset_id,entity_key,feature_schema_json,transformation_json,version,created_at,updated_at,owner_subject) VALUES(?,?,?,?,?,?,?,1,?,?,?)",
+                id,r.name(),r.description(),r.datasetId(),r.entityKey(),r.schemaJson(),r.transformationJson(),now,now,auth.getName());
         return Map.of("id",id,"version",1);
     }
 
     @GetMapping("/features")
-    public List<Map<String,Object>> features() {
-        return db.queryForList("SELECT * FROM feature_sets ORDER BY updated_at DESC LIMIT 500");
+    public List<Map<String,Object>> features(Authentication auth) {
+        permissions.require(auth, "features:read");
+        boolean admin=auth.getAuthorities().stream().anyMatch(x->x.getAuthority().equals("ROLE_ADMIN")||x.getAuthority().equals("PERM_platform:admin"))||permissions.has(auth.getName(),"platform:admin");
+        return db.queryForList("""
+            SELECT f.* FROM feature_sets f
+             WHERE ?=TRUE OR f.owner_subject=? 
+                OR EXISTS(SELECT 1 FROM feature_access_grants g WHERE g.feature_set_id=f.id AND g.subject=? AND g.permission IN ('READ','WRITE','ADMIN'))
+                OR (f.owner_subject IS NULL AND NOT EXISTS(SELECT 1 FROM feature_access_grants g WHERE g.feature_set_id=f.id))
+             ORDER BY f.updated_at DESC LIMIT 500
+            """,admin,auth.getName(),auth.getName());
     }
 
     @PostMapping("/schedules")
     @ResponseStatus(HttpStatus.CREATED)
-    public Map<String,Object> schedule(@Valid @RequestBody Schedule r) {
+    public Map<String,Object> schedule(@Valid @RequestBody Schedule r, Authentication auth) {
+        permissions.require(auth, "pipelines:write");
         var cron=org.springframework.scheduling.support.CronExpression.parse(r.cronExpression());
         var next=cron.next(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
         if(next==null) throw new IllegalArgumentException("Cron expression has no next execution time");
         UUID id=UUID.randomUUID();
-        db.update("INSERT INTO scheduled_jobs(id,name,pipeline_id,cron_expression,next_run_at,created_at) VALUES(?,?,?,?,?,?)",
-                id,r.name(),r.pipelineId(),r.cronExpression(),next.toInstant(java.time.ZoneOffset.UTC),Instant.now());
+        db.update("INSERT INTO scheduled_jobs(id,name,pipeline_id,cron_expression,next_run_at,created_at,created_by) VALUES(?,?,?,?,?,?,?)",
+                id,r.name(),r.pipelineId(),r.cronExpression(),next.toInstant(java.time.ZoneOffset.UTC),Instant.now(),auth.getName());
         return Map.of("id",id,"enabled",true,"nextRunAt",next.toInstant(java.time.ZoneOffset.UTC));
     }
 
     @GetMapping("/schedules")
-    public List<Map<String,Object>> schedules() {
-        return db.queryForList("SELECT * FROM scheduled_jobs ORDER BY created_at DESC LIMIT 500");
+    public List<Map<String,Object>> schedules(Authentication auth) {
+        permissions.require(auth, "pipelines:read");
+        boolean admin=auth.getAuthorities().stream().anyMatch(x->x.getAuthority().equals("ROLE_ADMIN")||x.getAuthority().equals("PERM_platform:admin"));
+        return db.queryForList("SELECT * FROM scheduled_jobs WHERE ?=TRUE OR created_by=? ORDER BY created_at DESC LIMIT 500",admin,auth.getName());
     }
 
     @PostMapping("/dashboards")
@@ -120,9 +138,12 @@ public class PlatformMetadataController {
 
     @GetMapping("/bi/summary")
     public Map<String,Object> summary() {
-        Map<String,Object> result=new LinkedHashMap<>();
+        Map<String,Object> metadata=new LinkedHashMap<>();
         for(String table:List.of("datasets","pipelines","experiments","registered_models","feature_sets","scheduled_jobs"))
-            result.put(table,db.queryForObject("SELECT COUNT(*) FROM "+table,Long.class));
+            metadata.put(table,db.queryForObject("SELECT COUNT(*) FROM "+table,Long.class));
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("metadata",metadata);
+        result.put("analytics",dorisAnalytics.summary());
         return result;
     }
 }

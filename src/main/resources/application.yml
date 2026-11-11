@@ -52,6 +52,7 @@ sbase:
     username: ${DORIS_USERNAME:root}
     password: ${DORIS_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    database: ${DORIS_DATABASE:analytics}
     allowed-tables: ${DORIS_ALLOWED_TABLES:}
   jobs:
     max-concurrent: 2

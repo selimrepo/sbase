@@ -48,4 +48,16 @@ class PipelineRunEntityTest {
         assertNull(run.getNextAttemptAt());
     }
 
+    @Test
+    void recordsSubmitterAndSupportsCancellation() {
+        PipelineRunEntity run = new PipelineRunEntity(UUID.randomUUID(), 2, "{\"steps\":[]}", "analyst-42");
+        assertEquals("analyst-42", run.getSubmittedBy());
+        run.start();
+        run.cancel();
+        assertEquals("CANCELLED", run.getStatus());
+        assertEquals("Cancelled by user", run.getErrorMessage());
+        assertNotNull(run.getFinishedAt());
+        assertNull(run.getLeaseUntil());
+    }
+
 }
