@@ -57,7 +57,7 @@ public class PointInTimeFeatureService {
    INSERT INTO sbase_feature_parity_checks(id,tenant_id,feature_set,entity_key,as_of,is_match,offline_hash,online_hash,differences_json)
    VALUES(?,?,?,?,?,?,?,?,CAST(? AS jsonb))
    """,id,tenant,set,entity,asOf,same,oh,online==null?null:nh,write(differences));
-  return Map.of("id",id,"matches",same,"comparable",comparable,"status",comparable?(same?"MATCH":"MISMATCH"):"ONLINE_AHEAD_OF_AS_OF","asOf",asOf,"offline",offline,"online",online==null?Map.of():online,"differences",differences);
+  return Map.of("id",id,"matches",same,"comparable",comparable,"status",online==null?"ONLINE_MISSING":comparable?(same?"MATCH":"MISMATCH"):"ONLINE_AHEAD_OF_AS_OF","asOf",asOf,"offline",offline,"online",online==null?Map.of():online,"differences",differences);
  }
  private String hash(Map<String,Object> values){try{byte[] bytes=MessageDigest.getInstance("SHA-256").digest(write(new TreeMap<>(values)).getBytes(StandardCharsets.UTF_8));return HexFormat.of().formatHex(bytes);}catch(Exception e){throw new IllegalStateException(e);}}
  private String write(Object v){try{return mapper.writeValueAsString(v);}catch(Exception e){throw new IllegalArgumentException("Feature values are not JSON serializable",e);}}
