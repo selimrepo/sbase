@@ -114,4 +114,18 @@ class PipelineRunRepositoryIntegrationTest {
         assertThat(runs.recoverExpired(run.getId())).isZero();
     }
 
+    @Test
+    void scopesPipelineAndRunPersistenceToTenant() {
+        java.util.UUID tenantA=java.util.UUID.randomUUID();
+        java.util.UUID tenantB=java.util.UUID.randomUUID();
+        jdbc.update("INSERT INTO tenants(id,slug,display_name,status) VALUES(?,?,?,'ACTIVE')",tenantA,"tenant-a-it","Tenant A");
+        jdbc.update("INSERT INTO tenants(id,slug,display_name,status) VALUES(?,?,?,'ACTIVE')",tenantB,"tenant-b-it","Tenant B");
+        PipelineEntity pipeline=pipelines.saveAndFlush(new PipelineEntity(tenantA,"alice","tenant A pipeline","tenant boundary test",
+            "{\"steps\":[{\"id\":\"source\",\"type\":\"doris_read\",\"table\":\"analytics.events\"}]}",true));
+        PipelineRunEntity run=runs.saveAndFlush(new PipelineRunEntity(tenantA,pipeline.getId(),pipeline.getVersion(),pipeline.getDefinitionJson(),"alice"));
+        assertThat(pipelines.findByIdAndTenantId(pipeline.getId(),tenantA)).isPresent();
+        assertThat(pipelines.findByIdAndTenantId(pipeline.getId(),tenantB)).isEmpty();
+        assertThat(runs.findById(run.getId())).get().extracting(PipelineRunEntity::getTenantId).isEqualTo(tenantA);
+    }
+
 }
