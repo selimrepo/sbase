@@ -83,7 +83,7 @@ public class MlLifecycleService {
    PipelineModel fitted;
    Map<String,Object> best=new LinkedHashMap<>();
    if(folds>1) {
-    CrossValidator cv=new CrossValidator().setEstimator(pipeline).setEvaluator(evaluator(task)).setNumFolds(folds).setParallelism(1).setSeed(42L);
+    CrossValidator cv=new CrossValidator().setEstimator(pipeline).setEvaluator(evaluator(task,label)).setNumFolds(folds).setParallelism(1).setSeed(42L);
     ParamMap[] grid=parameterGrid(algorithm,search);
     cv.setEstimatorParamMaps(grid);
     CrossValidatorModel cvModel=cv.fit(train);
@@ -91,7 +91,7 @@ public class MlLifecycleService {
     best.put("crossValidationMetrics",Arrays.stream(cvModel.avgMetrics()).boxed().toList());
     best.put("bestAverageMetric",Arrays.stream(cvModel.avgMetrics()).min().orElse(0));
    } else fitted=pipeline.fit(train);
-   double metric=evaluator(task).evaluate(fitted.transform(test));
+   double metric=evaluator(task,label).evaluate(fitted.transform(test));
    String metricName=task.equals("CLASSIFICATION")?"accuracy":"rmse";
    Path target=Paths.get(artifactRoot).resolve(tenant.toString()).resolve(id.toString()).toAbsolutePath();
    Files.createDirectories(target.getParent());fitted.write().overwrite().save(target.toString());
@@ -122,14 +122,14 @@ public class MlLifecycleService {
   }
   return added?b.build():new ParamGridBuilder().build();
  }
- private Evaluator evaluator(String task){return task.equals("CLASSIFICATION")?new MulticlassClassificationEvaluator().setLabelCol("label").setPredictionCol("prediction").setMetricName("accuracy"):new RegressionEvaluator().setLabelCol("label").setPredictionCol("prediction").setMetricName("rmse");}
+ private Evaluator evaluator(String task,String label){return task.equals("CLASSIFICATION")?new MulticlassClassificationEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName("accuracy"):new RegressionEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName("rmse");}
  public UUID registerModel(UUID tenant,UUID run,String name,String description,String subject) {
-  Map<String,Object> r=db.queryForMap("SELECT artifact_uri,algorithm,task_type,metrics_json FROM sbase_ml_runs WHERE id=? AND tenant_id=? AND status='SUCCEEDED'",run,tenant);
+  Map<String,Object> r=db.queryForMap("SELECT artifact_uri,algorithm,task_type,metrics_json,feature_columns_json,label_column FROM sbase_ml_runs WHERE id=? AND tenant_id=? AND status='SUCCEEDED'",run,tenant);
   UUID model=db.query("SELECT id FROM sbase_ml_models WHERE tenant_id=? AND name=?",(rs)->rs.next()?rs.getObject(1,UUID.class):null,tenant,name);
   if(model==null){model=UUID.randomUUID();db.update("INSERT INTO sbase_ml_models(id,tenant_id,name,description,owner_subject) VALUES(?,?,?,?,?)",model,tenant,name,description,subject);}
   Integer version=db.queryForObject("SELECT COALESCE(MAX(version),0)+1 FROM sbase_ml_model_versions WHERE model_id=?",Integer.class,model);
-  db.update("INSERT INTO sbase_ml_model_versions(id,tenant_id,model_id,run_id,version,artifact_uri,framework,algorithm,task_type,metrics_json,created_by) VALUES(?,?,?,?,?,?,'Spark MLlib',?,?,CAST(? AS jsonb),?)",
-    UUID.randomUUID(),tenant,model,run,version,r.get("artifact_uri"),r.get("algorithm"),r.get("task_type"),r.get("metrics_json").toString(),subject);
+  db.update("INSERT INTO sbase_ml_model_versions(id,tenant_id,model_id,run_id,version,artifact_uri,framework,algorithm,task_type,metrics_json,signature_json,created_by) VALUES(?,?,?,?,?,?,'Spark MLlib',?,?,CAST(? AS jsonb),CAST(? AS jsonb),?)",
+    UUID.randomUUID(),tenant,model,run,version,r.get("artifact_uri"),r.get("algorithm"),r.get("task_type"),r.get("metrics_json").toString(),json.writeValueAsString(Map.of("features",json.readValue(r.get("feature_columns_json").toString(),List.class),"label",r.get("label_column"))),subject);
   return model;
  }
  public List<Map<String,Object>> compare(UUID tenant,UUID experiment) {
