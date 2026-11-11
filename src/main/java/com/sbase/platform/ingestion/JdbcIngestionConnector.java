@@ -94,13 +94,24 @@ public class JdbcIngestionConnector implements IngestionConnector {
             default -> value;
         };
     }
+    private static Timestamp parseTimestamp(String value) {
+        try {
+            return Timestamp.from(Instant.parse(value));
+        } catch (java.time.format.DateTimeParseException ignored) {
+            try {
+                return Timestamp.from(java.time.OffsetDateTime.parse(value).toInstant());
+            } catch (java.time.format.DateTimeParseException alsoIgnored) {
+                return Timestamp.valueOf(LocalDateTime.parse(value.replace(' ', 'T')));
+            }
+        }
+    }
     @SuppressWarnings({"rawtypes","unchecked"})
     private static int compare(Object a,Object b) {
         if(a instanceof Comparable c && a.getClass().isInstance(b)) return c.compareTo(b);
         return a.toString().compareTo(b.toString());
     }
     private static String serializeWatermark(Object value) {
-        if(value instanceof Timestamp timestamp) return timestamp.toInstant().toString();
+        if(value instanceof Timestamp timestamp) return timestamp.toLocalDateTime().toString();
         if(value instanceof java.sql.Date date) return date.toLocalDate().toString();
         return value.toString();
     }
