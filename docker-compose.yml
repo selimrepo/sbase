@@ -25,7 +25,7 @@ services:
     image: sbase:latest
     container_name: sbase
     ports:
-      - "8080:8080"
+      - "${SBASE_BIND_ADDRESS:-127.0.0.1}:8080:8080"
     expose:
       - "7078"
       - "7079"
@@ -260,14 +260,14 @@ services:
     restart: unless-stopped
 
   sbase-node-2:
-    profiles: ["app-ha"]
+    profiles: ["app-ha", "doris-fe-ha", "doris-ha"]
     build:
       context: .
       dockerfile: Dockerfile
     image: sbase:latest
     container_name: sbase-node-2
     ports:
-      - "8082:8080"
+      - "127.0.0.1:8082:8080"
     expose:
       - "7078"
       - "7079"
@@ -302,14 +302,14 @@ services:
     restart: unless-stopped
 
   doris-fe-2:
-    profiles: ["doris-fe-ha"]
+    profiles: ["app-ha", "doris-fe-ha", "doris-ha"]
     image: apache/doris:doris-fe-2.1.7
     hostname: doris-fe-2
     environment:
       FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010},fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
       FE_ID: 2
     ports:
-      - "9031:9030"
+      - "127.0.0.1:9031:9030"
     volumes:
       - doris-fe2-meta:/opt/apache-doris/fe/doris-meta
       - doris-fe2-log:/opt/apache-doris/fe/log
@@ -335,7 +335,7 @@ services:
       FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010},fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
       FE_ID: 3
     ports:
-      - "9032:9030"
+      - "127.0.0.1:9032:9030"
     volumes:
       - doris-fe3-meta:/opt/apache-doris/fe/doris-meta
       - doris-fe3-log:/opt/apache-doris/fe/log
@@ -500,7 +500,7 @@ services:
       doris-be:
         condition: service_healthy
     environment:
-      DORIS_USERNAME: ${DORIS_USERNAME:-sbase_app}
+      DORIS_USER: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
     profiles: ["doris-ha"]
     volumes:
@@ -516,25 +516,6 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
-
-  postgres-data:
-  doris-fe-meta:
-  doris-fe-log:
-  doris-be-storage:
-  doris-be-log:
-  doris-fe2-meta:
-  doris-fe2-log:
-  doris-fe3-meta:
-  doris-fe3-log:
-  doris-be2-storage:
-  doris-be2-log:
-  doris-be3-storage:
-  doris-be3-log:
-  kafka-1-data:
-  kafka-2-data:
-  kafka-3-data:
-  minio-data:
-  prometheus-data:
 
 volumes:
   postgres-data:

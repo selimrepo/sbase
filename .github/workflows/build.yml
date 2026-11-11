@@ -59,11 +59,12 @@ jobs:
           JWT_ISSUER_URI: https://identity.example.test/realms/sbase
           JWT_JWK_SET_URI: https://identity.example.test/realms/sbase/protocol/openid-connect/certs
         run: |
+          docker compose config --quiet
           docker compose --profile app-ha --profile doris-fe-ha config --quiet
-          MINIO_ROOT_USER=ci-minio MINIO_ROOT_PASSWORD=ci-minio-password docker compose --profile app-ha --profile doris-fe-ha config --quiet
-          docker compose --profile app-ha --profile doris-fe-ha config --quiet
-          docker compose --profile app-ha --profile doris-fe-ha config --quiet
-          DORIS_FE_SERVERS=fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010 docker compose --profile app-ha --profile doris-fe-ha --profile doris-ha --profile observability config --quiet
+          docker compose --profile app-ha --profile doris-fe-ha --profile observability config --quiet
+          MINIO_ROOT_USER=ci-minio MINIO_ROOT_PASSWORD=ci-minio-password docker compose --profile object-storage config --quiet
+          docker compose --profile kafka config --quiet
+          docker compose --profile app-ha --profile doris-fe-ha --profile doris-ha config --quiet
       - name: Configure host kernel for Doris BE
         run: |
           sudo sysctl -w vm.max_map_count=2000000
