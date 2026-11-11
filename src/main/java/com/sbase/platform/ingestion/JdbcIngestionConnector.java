@@ -71,7 +71,10 @@ public class JdbcIngestionConnector implements IngestionConnector {
 
         // Advance only after the destination transaction commits. A crash before this update replays
         // the previous window; target-side unique keys/upserts should make that replay idempotent.
-        if(incremental && maxWatermark!=null) checkpoints.saveCheckpoint(connectorId,checkpointKey,serializeWatermark(maxWatermark));
+        if(incremental && maxWatermark!=null) {
+            boolean advanced=checkpoints.compareAndSetCheckpoint(connectorId,checkpointKey,watermark,serializeWatermark(maxWatermark));
+            if(!advanced) return new ConnectorResult(read,written,"Incremental JDBC batch committed; checkpoint was advanced concurrently by another run");
+        }
         return new ConnectorResult(read,written,incremental
             ? "Incremental JDBC load completed; watermark="+(maxWatermark==null?watermark:maxWatermark)
             : "Full JDBC load completed");
