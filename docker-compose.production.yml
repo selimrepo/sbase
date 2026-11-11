@@ -6,10 +6,6 @@ services:
     ports: !reset []
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique POSTGRES_PASSWORD}
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /var/run/postgresql
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     mem_limit: 2g
@@ -56,8 +52,6 @@ services:
     mem_limit: 8g
     cpus: 8.0
 
-  doris-init:
-    profiles: ["init"]
 
   prometheus:
     image: prom/prometheus:v3.1.0
