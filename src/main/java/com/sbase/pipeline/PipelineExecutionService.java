@@ -221,7 +221,9 @@ public class PipelineExecutionService {
         };
     }
 
-    private record FeatureOwner(UUID id, String lifecycle, String owner) { }\n\n    public boolean pipelineWritesFeatures(UUID pipelineId) {
+    private record FeatureOwner(UUID id, String lifecycle, String owner) { }
+
+    public boolean pipelineWritesFeatures(UUID pipelineId) {
         PipelineEntity pipeline = pipelines.findById(pipelineId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline not found"));
         JsonNode definition = validator.parseAndValidate(pipeline.getDefinitionJson());

@@ -16,7 +16,9 @@ public class FeatureAccessService {
         this.permissions = permissions;
     }
 
-    private record FeatureRow(java.util.UUID id, String lifecycle, String owner) { }\n\n    public void require(Authentication authentication, String featureSet, boolean write) {
+    private record FeatureRow(java.util.UUID id, String lifecycle, String owner) { }
+
+    public void require(Authentication authentication, String featureSet, boolean write) {
         String subject = permissions.subject(authentication);
         permissions.require(authentication, write ? "features:write" : "features:read");
         FeatureRow row = db.query("""
