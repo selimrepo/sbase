@@ -20,7 +20,7 @@ services:
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase-node-2
       SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
-      DORIS_JDBC_URL: ${DORIS_JDBC_URL:-jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true}
+      DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000&loadBalanceHostRemovalGracePeriod=15000
       DORIS_USERNAME: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
       JAVA_TOOL_OPTIONS: -Xms512m -Xmx2g
