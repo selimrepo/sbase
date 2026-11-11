@@ -115,8 +115,6 @@ BEGIN
     SELECT tenant_id INTO NEW.tenant_id FROM bi_report_schedules WHERE id=NEW.schedule_id;
   ELSIF TG_TABLE_NAME IN ('ingestion_runs','ingestion_records','ingestion_checkpoints','ingestion_dead_letters') THEN
     SELECT tenant_id INTO NEW.tenant_id FROM ingestion_connectors WHERE id=NEW.connector_id;
-  ELSIF TG_TABLE_NAME = 'online_feature_values' THEN
-    SELECT tenant_id INTO NEW.tenant_id FROM feature_sets WHERE name=NEW.feature_set;
   END IF;
   IF NEW.tenant_id IS NULL THEN
     RAISE EXCEPTION 'Unable to derive tenant_id for %', TG_TABLE_NAME;
@@ -156,6 +154,4 @@ FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
 CREATE TRIGGER trg_ingestion_checkpoints_tenant BEFORE INSERT OR UPDATE ON ingestion_checkpoints
 FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
 CREATE TRIGGER trg_ingestion_dead_letters_tenant BEFORE INSERT OR UPDATE ON ingestion_dead_letters
-FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
-CREATE TRIGGER trg_online_feature_values_tenant BEFORE INSERT OR UPDATE ON online_feature_values
 FOR EACH ROW EXECUTE FUNCTION sbase_derive_child_tenant();
