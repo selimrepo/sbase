@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.http.HttpMethod;
@@ -24,6 +25,9 @@ public class PlatformSecurityConfig {
     private final DatabaseRateLimitFilter rateLimitFilter;
     private final com.sbase.platform.audit.AuditEventFilter auditEventFilter;
 
+    public PlatformSecurityConfig() { this.rateLimitFilter = null; this.auditEventFilter = null; }
+
+    @Autowired
     public PlatformSecurityConfig(DatabaseRateLimitFilter rateLimitFilter,
             com.sbase.platform.audit.AuditEventFilter auditEventFilter) {
         this.rateLimitFilter = rateLimitFilter;
