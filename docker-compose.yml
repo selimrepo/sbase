@@ -108,6 +108,9 @@ services:
         condition: service_healthy
       doris-be:
         condition: service_healthy
+    environment:
+      DORIS_USERNAME: ${DORIS_USERNAME:-sbase_app}
+      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -171,6 +174,22 @@ services:
         done
 
         mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
+        if [ -n "$DORIS_PASSWORD" ]; then
+          case "$DORIS_USERNAME" in
+            ''|*[!a-zA-Z0-9_]*)
+              echo "DORIS_USERNAME may contain only letters, digits and underscores."
+              exit 1
+              ;;
+          esac
+          case "$DORIS_PASSWORD" in
+            *"'"*|*"\\"*)
+              echo "DORIS_PASSWORD must not contain a single quote or backslash for bootstrap SQL."
+              exit 1
+              ;;
+          esac
+          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE USER IF NOT EXISTS '$DORIS_USERNAME' IDENTIFIED BY '$DORIS_PASSWORD'"
+          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "GRANT ALL PRIVILEGES ON analytics.* TO '$DORIS_USERNAME'"
+        fi
 
         # SHOW BACKENDS can report an alive BE before FE's RPC blacklist clears.
         # A real OLAP table creation is the authoritative tablet-placement check.
