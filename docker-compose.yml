@@ -258,7 +258,7 @@ services:
     image: apache/doris:doris-be-2.1.7
     security_opt: ["no-new-privileges:true"]
     mem_limit: 8g
-    cpus: 8.0
+    cpus: 4.0
 
 
     container_name: sbase-doris-be
