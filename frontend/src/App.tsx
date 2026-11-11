@@ -3,7 +3,7 @@ import {NavLink,Route,Routes,useLocation} from 'react-router-dom'
 import {Activity,Bell,BarChart3,BrainCircuit,ChevronDown,Clock3,Database,FlaskConical,Gauge,LayoutDashboard,Menu,Network,Search,Settings2,SlidersHorizontal,Sparkles,Workflow,X} from 'lucide-react'
 import {useQuery} from '@tanstack/react-query'
 import {get} from './api'
-import {Home,Datasets,Pipelines,Mining,Experiments,Features,Schedules,System} from './pages'
+import {Home,Datasets,Pipelines,Mining,Schedules,System} from './pages'
 import AdvancedStudio from './AdvancedStudio'
 import {MLStudio,BiStudio,FeatureParity} from './IntelligenceStudio'
 type NavItem=readonly [string,string,typeof LayoutDashboard]
