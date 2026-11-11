@@ -11,6 +11,7 @@ set -Eeuo pipefail
 : "${DORIS_S3_REGION:=us-east-1}"
 : "${DORIS_DATABASE:=analytics}"
 : "${SNAPSHOT_LABEL:?Set SNAPSHOT_LABEL to a completed backup}"
+: "${DORIS_BACKUP_TIMESTAMP:?Set DORIS_BACKUP_TIMESTAMP from SHOW BACKUP output}"
 : "${RESTORE_TABLES:?Set comma-separated RESTORE_TABLES}"
 [[ "${SNAPSHOT_LABEL}" =~ ^[A-Za-z0-9_]+$ && "${DORIS_DATABASE}" =~ ^[A-Za-z0-9_]+$ ]] || exit 2
 [[ "${CONFIRM_DORIS_RESTORE:-}" == "YES" ]] || { echo "Destructive restore; set CONFIRM_DORIS_RESTORE=YES" >&2; exit 1; }
@@ -33,6 +34,6 @@ PROPERTIES (
 );
 RESTORE SNAPSHOT $DORIS_DATABASE.$SNAPSHOT_LABEL
 FROM sbase_s3_repo ON ($TABLE_SQL)
-PROPERTIES ("backup_timestamp"="","replication_num"="3","timeout"="3600");
+PROPERTIES ("backup_timestamp"="$DORIS_BACKUP_TIMESTAMP","replication_num"="3","timeout"="3600");
 SQL
 echo "Restore submitted. Verify SHOW RESTORE FROM $DORIS_DATABASE and validate row counts/checksums."
