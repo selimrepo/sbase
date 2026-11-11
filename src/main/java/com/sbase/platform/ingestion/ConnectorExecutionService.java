@@ -166,7 +166,7 @@ public class ConnectorExecutionService {
                     now()+make_interval(secs=>LEAST(900,5*power(2,LEAST(7,?))::int)) ELSE NULL END,
                     error_message=?,finished_at=CASE WHEN ? THEN NULL ELSE now() END,
                     lease_owner=NULL,lease_until=NULL
-                 WHERE id=? AND tenant_id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=?
+                 WHERE id=? AND tenant_id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now()
                 """, retry ? "RETRY_WAIT" : "FAILED", retry, run.attempt(), message, retry,
                     run.id(), run.tenantId(), workerId, run.fencingToken());
         } catch (Exception persistenceFailure) {
