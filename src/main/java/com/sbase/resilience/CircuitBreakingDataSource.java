@@ -43,7 +43,7 @@ public final class CircuitBreakingDataSource implements DataSource, AutoCloseabl
         SQLException last = null;
         for (int attempt = 0; attempt <= acquisitionRetries; attempt++) {
             try {
-                Connection connection = breaker.execute(() -> {
+                Connection connection = breaker.executeAcquisition(() -> {
                     try { return supplier.get(); }
                     catch (SQLException e) { throw new JdbcFailure(e); }
                 });
