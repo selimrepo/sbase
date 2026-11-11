@@ -45,5 +45,9 @@ public class MlLifecycleController {
  public Map<String,Object> predict(@PathVariable UUID id,@Valid @RequestBody PredictionRequest r,Authentication a){require(a,"ml:predict");return ml.predict(tenant(a),id,r.features());}
  @PostMapping("/deployments/{id}/batch") @ResponseStatus(HttpStatus.ACCEPTED)
  public Map<String,Object> batch(@PathVariable UUID id,@Valid @RequestBody BatchRequest r,Authentication a){require(a,"ml:predict");return Map.of("batchId",ml.batchPredict(tenant(a),id,r.records()),"status","SUCCEEDED","recordCount",r.records().size());}
+ @PutMapping("/model-versions/{id}/stage") @ResponseStatus(HttpStatus.NO_CONTENT)
+ public void promote(@PathVariable UUID id,@RequestParam String stage,Authentication a){require(a,"ml:deploy");ml.promote(tenant(a),id,stage.toUpperCase(Locale.ROOT));}
+ @GetMapping("/model-versions/{id}/lineage") public Map<String,Object> lineage(@PathVariable UUID id,Authentication a){require(a,"ml:read");return ml.lineage(tenant(a),id);}
+ @GetMapping("/batches/{id}") public Map<String,Object> batch(@PathVariable UUID id,Authentication a){require(a,"ml:read");return ml.batchResult(tenant(a),id);}
  @GetMapping("/deployments/{id}/monitoring") public Map<String,Object> monitor(@PathVariable UUID id,Authentication a){require(a,"ml:read");return ml.monitor(tenant(a),id);}
 }
