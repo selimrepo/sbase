@@ -140,7 +140,7 @@ services:
 
   doris-init:
     image: mysql:8.4
-    container_name: sbase-doris-ha-init
+    container_name: sbase-doris-init
     depends_on:
       doris-fe:
         condition: service_healthy
@@ -334,7 +334,7 @@ services:
     image: apache/doris:doris-fe-2.1.7
     hostname: doris-fe-2
     environment:
-      FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010},fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
       FE_ID: 2
     ports:
       - "127.0.0.1:9031:9030"
@@ -356,11 +356,11 @@ services:
     restart: unless-stopped
 
   doris-fe-3:
-    profiles: ["doris-fe-ha"]
+    profiles: ["app-ha", "doris-fe-ha", "doris-ha"]
     image: apache/doris:doris-fe-2.1.7
     hostname: doris-fe-3
     environment:
-      FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010},fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
       FE_ID: 3
     ports:
       - "127.0.0.1:9032:9030"
@@ -382,7 +382,7 @@ services:
     image: apache/doris:doris-be-2.1.7
     hostname: doris-be-2
     environment:
-      FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010},fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
       BE_ADDR: 172.30.0.14:9050
     volumes: [doris-be2-storage:/opt/apache-doris/be/storage,doris-be2-log:/opt/apache-doris/be/log]
     networks:
@@ -395,7 +395,7 @@ services:
     image: apache/doris:doris-be-2.1.7
     hostname: doris-be-3
     environment:
-      FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010},fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
       BE_ADDR: 172.30.0.15:9050
     volumes: [doris-be3-storage:/opt/apache-doris/be/storage,doris-be3-log:/opt/apache-doris/be/log]
     networks:
@@ -521,7 +521,7 @@ services:
 
   doris-ha-init:
     image: mysql:8.4
-    container_name: sbase-doris-init
+    container_name: sbase-doris-ha-init
     depends_on:
       doris-fe:
         condition: service_healthy
