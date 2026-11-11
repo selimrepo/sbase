@@ -119,7 +119,7 @@ public class PlatformMetadataController {
     public List<Map<String,Object>> schedules(Authentication auth) {
         permissions.require(auth, "pipelines:read");
         boolean admin=auth.getAuthorities().stream().anyMatch(x->x.getAuthority().equals("ROLE_ADMIN")||x.getAuthority().equals("PERM_platform:admin"));
-        return db.queryForList("SELECT * FROM scheduled_jobs WHERE ?=TRUE OR created_by=? OR created_by IS NULL ORDER BY created_at DESC LIMIT 500",admin,auth.getName());
+        return db.queryForList("SELECT * FROM scheduled_jobs WHERE ?=TRUE OR created_by=? ORDER BY created_at DESC LIMIT 500",admin,auth.getName());
     }
 
     @PostMapping("/dashboards")

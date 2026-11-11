@@ -35,7 +35,7 @@ public class AdvancedWorkspaceController {
  public record DashboardRequest(@NotBlank @Size(max=160) String name,String description,String layoutJson){}
  public record WidgetRequest(@NotBlank String title,@NotBlank String widgetType,@NotBlank String queryJson,Integer x,Integer y,Integer width,Integer height,Integer refreshSeconds){}
  public record ScheduleUpdate(@NotBlank String cronExpression,@NotBlank String timezone,String calendarJson,UUID dependsOn,String failurePolicy,String misfirePolicy){}
- public record ShareRequest(@NotBlank String subject,@NotBlank String permission){}
+ public record ShareRequest(@NotBlank @Size(max=200) String subject,@NotBlank String permission){}
  public record ReportScheduleRequest(@NotBlank String cronExpression,@NotBlank String timezone){}
 
 
@@ -50,7 +50,7 @@ public class AdvancedWorkspaceController {
   String scope="(r.owner_subject=? OR EXISTS(SELECT 1 FROM bi_report_shares s WHERE s.report_id=r.id AND s.subject=?))";
   String filter=" AND (?='' OR lower(r.name) LIKE lower(?))";
   Integer total=db.queryForObject("SELECT count(*) FROM bi_reports r WHERE "+scope+filter,Integer.class,a.getName(),a.getName(),term,"%"+term+"%");
-  List<Map<String,Object>> content=db.queryForList("SELECT r.* FROM bi_reports r WHERE "+scope+filter+" ORDER BY r.updated_at DESC LIMIT ? OFFSET ?",a.getName(),a.getName(),term,"%"+term+"%",size,page*size);
+  List<Map<String,Object>> content=db.queryForList("SELECT r.*,(r.owner_subject=? OR EXISTS(SELECT 1 FROM bi_report_shares q WHERE q.report_id=r.id AND q.subject=? AND q.permission IN ('QUERY','EDIT'))) AS can_query,(r.owner_subject=?) AS can_manage FROM bi_reports r WHERE "+scope+filter+" ORDER BY r.updated_at DESC LIMIT ? OFFSET ?",a.getName(),a.getName(),a.getName(),a.getName(),term,"%"+term+"%",size,page*size);
   return Map.of("content",content,"page",page,"size",size,"totalElements",total==null?0:total,"totalPages",total==null?0:(int)Math.ceil(total/(double)size));
  }
  @PutMapping("/bi/reports/{id}") public void updateReport(@PathVariable UUID id,@Valid @RequestBody ReportRequest r,Authentication a){permissions.require(a,"bi:write");validate(parse(r.definitionJson()));if(db.update("UPDATE bi_reports SET name=?,description=?,definition_json=?,updated_at=now() WHERE id=? AND owner_subject=?",r.name(),r.description(),r.definitionJson(),id,a.getName())==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Report not found");}

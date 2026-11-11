@@ -179,7 +179,7 @@ public class DistributedScheduleWorker {
         List<CompletedRun> completed = db.query("""
             SELECT sr.id AS run_id, sr.schedule_id, sr.status, sr.finished_at,
                    s.cron_expression, s.timezone, s.failure_policy, s.max_attempts,
-                   sr.attempt
+                   sr.attempt, sr.error_message
               FROM schedule_runs sr
               JOIN scheduled_jobs s ON s.id = sr.schedule_id
              WHERE sr.outcome_recorded_at IS NOT NULL
@@ -196,7 +196,7 @@ public class DistributedScheduleWorker {
                 rs.getString("timezone"),
                 rs.getString("failure_policy"),
                 rs.getInt("max_attempts"),
-                rs.getInt("attempt")));
+                rs.getInt("attempt"), rs.getString("error_message")));
 
         for (CompletedRun run : completed) {
             if ("SUCCEEDED".equals(run.status())) {
@@ -221,10 +221,10 @@ public class DistributedScheduleWorker {
                 UPDATE scheduled_jobs
                    SET consecutive_failures = consecutive_failures + 1,
                        next_run_at = now() + (? * interval '1 second'),
-                       attempt_count = ?, last_error = 'Pipeline execution failed; retry scheduled',
+                       attempt_count = ?, last_error = ?,
                        updated_at = now()
                  WHERE id = ?
-                """, delaySeconds, run.attempt(), run.scheduleId());
+                """, delaySeconds, run.errorMessage(), run.attempt(), run.scheduleId());
             return;
         }
 
@@ -251,9 +251,9 @@ public class DistributedScheduleWorker {
                    SET enabled = CASE WHEN ? THEN FALSE ELSE enabled END,
                        consecutive_failures = consecutive_failures + 1,
                        last_run_at = now(), next_run_at = ?, attempt_count = 0,
-                       last_error = 'Pipeline execution failed', updated_at = now()
+                       last_error = ?, updated_at = now()
                  WHERE id = ?
-                """, disable, next.toInstant(), run.scheduleId());
+                """, disable, next.toInstant(), run.errorMessage(), run.scheduleId());
         }
     }
 
@@ -283,26 +283,7 @@ public class DistributedScheduleWorker {
     }
 
     private boolean calendarBlocks(String calendarJson, LocalDate date) {
-        try {
-            JsonNode calendar = mapper.readTree(calendarJson == null ? "{}" : calendarJson);
-            JsonNode skipDates = calendar.path("skipDates");
-            if (skipDates.isArray()) {
-                for (JsonNode value : skipDates) if (date.toString().equals(value.asText())) return true;
-            }
-            JsonNode skipWeekdays = calendar.path("skipWeekdays");
-            if (skipWeekdays.isArray()) {
-                for (JsonNode value : skipWeekdays)
-                    if (date.getDayOfWeek().name().equalsIgnoreCase(value.asText())) return true;
-            }
-            JsonNode includeDates = calendar.path("includeDates");
-            if (includeDates.isArray() && includeDates.size() > 0) {
-                for (JsonNode value : includeDates) if (date.toString().equals(value.asText())) return false;
-                return true;
-            }
-            return false;
-        } catch (Exception ex) {
-            throw new IllegalArgumentException("Invalid scheduler calendar JSON", ex);
-        }
+        return ScheduleCalendarPolicy.blocks(mapper, calendarJson, date);
     }
 
     private void recordSubmissionFailure(UUID id, String error) {
@@ -359,5 +340,5 @@ public class DistributedScheduleWorker {
 
     private record CompletedRun(UUID runId, UUID scheduleId, String status, Instant finishedAt,
                                 String cronExpression, String timezone, String failurePolicy,
-                                int maxAttempts, int attempt) { }
+                                int maxAttempts, int attempt, String errorMessage) { }
 }
