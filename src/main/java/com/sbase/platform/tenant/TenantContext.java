@@ -28,6 +28,10 @@ public class TenantContext {
         if(jdbc!=null) {
             String status=jdbc.query("SELECT status FROM tenants WHERE id=?",(rs)->rs.next()?rs.getString(1):null,tenant);
             if(!"ACTIVE".equals(status)) throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Tenant is not active");
+            Integer membership=jdbc.queryForObject(
+                "SELECT count(*) FROM tenant_memberships WHERE tenant_id=? AND subject=? AND status='ACTIVE'",
+                Integer.class,tenant,subject(authentication));
+            if(membership==null || membership==0) throw new AccessDeniedException("User is not an active member of this tenant");
         }
         return tenant;
     }
