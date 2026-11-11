@@ -20,11 +20,11 @@ import java.util.*;
 
 @Component
 public class GovernedBiScheduleWorker {
- private final JdbcTemplate db;private final BiWorkspaceService bi;private final ObjectMapper mapper;
+ private final JdbcTemplate db;private final BiWorkspaceService bi;private final ObjectMapper mapper;private final java.util.concurrent.Executor executor;
  private final ObjectProvider<JavaMailSender> mail;private final String root;private final String node=UUID.randomUUID().toString();
  public GovernedBiScheduleWorker(@Qualifier("jdbcTemplate") JdbcTemplate db,BiWorkspaceService bi,ObjectMapper mapper,
   ObjectProvider<JavaMailSender> mail,@Value("${sbase.bi.artifact-root:./data/bi-reports}") String root){
-  this.db=db;this.bi=bi;this.mapper=mapper;this.mail=mail;this.root=root;
+  this.db=db;this.bi=bi;this.mapper=mapper;this.executor=executor;this.mail=mail;this.root=root;
  }
  @Scheduled(fixedDelayString="${sbase.bi.scheduler.poll-ms:15000}")
  @Transactional
@@ -41,7 +41,7 @@ public class GovernedBiScheduleWorker {
    FROM due WHERE s.id=due.id RETURNING s.id
    """,(rs,n)->rs.getObject(1,UUID.class),node);
   if(ids.isEmpty())return;
-  TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization(){@Override public void afterCommit(){ids.forEach(id->execute(id));}});
+  TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization(){@Override public void afterCommit(){for(UUID id:ids){try{executor.execute(()->execute(id));}catch(RuntimeException ex){db.update("UPDATE sbase_bi_schedules SET failure_count=failure_count+1,lease_owner=NULL,lease_until=NULL WHERE id=? AND lease_owner=?",id,node);}}}});
  }
  private void execute(UUID id){
   Schedule s=db.query("""
