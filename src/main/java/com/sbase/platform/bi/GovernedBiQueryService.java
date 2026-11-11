@@ -58,7 +58,7 @@ public class GovernedBiQueryService {
  }
  public Map<String,Object> drillDown(UUID tenant,String subject,QueryDefinition base,String dimension,Object value,List<String> nextDimensions){
   if(base.dimensions()==null||!base.dimensions().contains(dimension))throw new IllegalArgumentException("Drill-down dimension must be selected in the parent query");
-  List<Filter> filters=new ArrayList<>(base.filters()==null?List.of():base.filters());filters.add(new Filter(dimension,"EQ",value));
+  List<Filter> filters=new ArrayList<>(base.filters()==null?List.of():base.filters());filters.add(new Filter(dimension,value==null?"IS_NULL":"EQ",value));
   QueryDefinition child=new QueryDefinition(base.table(),nextDimensions==null?base.dimensions():nextDimensions,base.metrics(),filters,base.orderBy(),base.limit());
   Map<String,Object> result=new LinkedHashMap<>(execute(tenant,subject,child));result.put("drillDown",Map.of("dimension",dimension,"value",String.valueOf(value)));return result;
  }
