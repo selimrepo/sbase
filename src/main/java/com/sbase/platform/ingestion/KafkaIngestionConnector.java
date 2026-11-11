@@ -63,8 +63,17 @@ public class KafkaIngestionConnector implements IngestionConnector {
                 }
             });
             long deadline=System.currentTimeMillis()+Long.parseLong(o.getOrDefault("pollTimeoutMs","5000"));
+            long lastLeaseRenewal=0;
             while(read<max && System.currentTimeMillis()<deadline) {
                 ConsumerRecords<String,byte[]> batch=consumer.poll(Duration.ofMillis(500));
+                long now=System.currentTimeMillis();
+                if(now-lastLeaseRenewal>=30000) {
+                    for(var lease : partitionTokens.entrySet()) {
+                        if(!sink.renewKafkaPartition(connectorId,topic,lease.getKey(),ownerId,lease.getValue()))
+                            throw new IllegalStateException("Kafka partition lease expired or was fenced: "+lease.getKey());
+                    }
+                    lastLeaseRenewal=now;
+                }
                 if(batch.isEmpty()) continue;
                 List<DurableRecordSink.Envelope> envelopes=new ArrayList<>();
                 Map<TopicPartition,Long> nextOffsets=new HashMap<>();
