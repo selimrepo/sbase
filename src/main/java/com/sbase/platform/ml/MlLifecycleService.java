@@ -88,10 +88,10 @@ public class MlLifecycleService {
     ParamMap[] grid=parameterGrid(algorithm,search,estimator);
     cv.setEstimatorParamMaps(grid);
     CrossValidatorModel cvModel=cv.fit(train);
-    fitted=(PipelineModel)cvModel.bestModel();
+    PipelineModel bestPipeline=(PipelineModel)cvModel.bestModel();fitted=bestPipeline;
     best.put("crossValidationMetrics",Arrays.stream(cvModel.avgMetrics()).boxed().toList());
     best.put("bestAverageMetric",task.equals("CLASSIFICATION")?Arrays.stream(cvModel.avgMetrics()).max().orElse(0):Arrays.stream(cvModel.avgMetrics()).min().orElse(0));
-    best.put("bestEstimatorParameters",cvModel.bestModel().stages()[1].extractParamMap().toString());
+    best.put("bestEstimatorParameters",bestPipeline.stages()[1].extractParamMap().toString());
    } else fitted=pipeline.fit(train);
    double metric=evaluator(task,label).evaluate(fitted.transform(test));
    String metricName=task.equals("CLASSIFICATION")?"accuracy":"rmse";
