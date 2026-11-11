@@ -65,6 +65,8 @@ ALTER TABLE pipeline_versions ADD COLUMN IF NOT EXISTS tenant_id UUID NOT NULL D
 UPDATE pipeline_versions v SET tenant_id=p.tenant_id FROM pipelines p WHERE v.pipeline_id=p.id;
 
 CREATE INDEX IF NOT EXISTS idx_mining_jobs_tenant_submitted ON mining_jobs(tenant_id,submitted_at DESC);
+DROP INDEX IF EXISTS uq_ingestion_runs_idempotency;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ingestion_runs_tenant_idempotency ON ingestion_runs(tenant_id,idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ingestion_connectors_tenant ON ingestion_connectors(tenant_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ingestion_runs_tenant_started ON ingestion_runs(tenant_id,started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ingestion_records_tenant_created ON ingestion_records(tenant_id,created_at DESC);
