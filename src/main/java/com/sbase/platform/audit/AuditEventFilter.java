@@ -35,7 +35,7 @@ public class AuditEventFilter extends OncePerRequestFilter {
             response.setHeader("X-Request-ID",requestId);
             String outcome=response.getStatus()<400 ? "SUCCESS" : "FAILURE";
             jdbc.update("""
-                INSERT INTO audit_events(tenant_id,subject,action,resource_type,resource_id,outcome,request_id,source_ip,user_agent,details)
+                INSERT INTO platform_audit_events(tenant_id,subject,action,resource_type,resource_id,outcome,request_id,source_ip,user_agent,details)
                 VALUES(?,?,?,?,?,?,?,?,?,CAST(? AS jsonb))
                 """,tenant,subject,request.getMethod()+" "+request.getRequestURI(),"HTTP",null,outcome,
                 requestId,request.getRemoteAddr(),request.getHeader("User-Agent"),
