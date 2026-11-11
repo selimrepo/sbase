@@ -134,3 +134,8 @@ ALTER TABLE sbase_ml_prediction_events ADD COLUMN IF NOT EXISTS input_json JSONB
 
 ALTER TABLE sbase_ml_runs ADD COLUMN IF NOT EXISTS feature_baseline_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE sbase_ml_model_versions ADD COLUMN IF NOT EXISTS feature_baseline_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sbase_ml_single_production_version
+ ON sbase_ml_model_versions(tenant_id,model_id) WHERE stage='PRODUCTION';
+CREATE INDEX IF NOT EXISTS idx_sbase_ml_batch_history
+ ON sbase_ml_batch_jobs(tenant_id,created_at DESC);
