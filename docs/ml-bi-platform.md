@@ -87,7 +87,7 @@ Spark MLlib artifacts are written below `SBASE_ML_ARTIFACT_ROOT` using tenant/ru
 | `SBASE_BI_ARTIFACT_ROOT` | Persistent BI export directory | `./data/bi-reports` |
 | `SBASE_BI_SCHEDULER_POLL_MS` | Scheduled export polling interval | 15000 |
 
-The `ml:read`, `ml:write`, `ml:deploy`, `ml:predict`, `bi:read`, `bi:write` and `bi:query` permissions are granted to the ADMIN role by migration V11. Other roles should receive only the required permissions through the existing role-permission management flow.
+The existing ROLE_ADMIN / platform:admin authorities satisfy these endpoints. Other roles must be granted only the required `ml:read`, `ml:write`, `ml:deploy`, `ml:predict`, `bi:read`, `bi:write` and `bi:query` permissions through the existing role-permission management flow.
 
 ## Operational notes
 
