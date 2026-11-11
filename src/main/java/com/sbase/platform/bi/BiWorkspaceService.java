@@ -85,7 +85,8 @@ public class BiWorkspaceService {
   reportRow(tenant,subject,report,"QUERY");var expression=org.springframework.scheduling.support.CronExpression.parse(cron);ZoneId zone=ZoneId.of(timezone);ZonedDateTime next=expression.next(ZonedDateTime.now(zone));if(next==null)throw new IllegalArgumentException("Cron has no next occurrence");
   if(!Set.of("CSV","JSON").contains(format))throw new IllegalArgumentException("Output format must be CSV or JSON");
   if(target!=null&&target.length()>1000)throw new IllegalArgumentException("Delivery target too long");
-  if(target!=null&&!target.isBlank()&&!target.startsWith("mailto:")&&target.contains("@"))target="mailto:"+target;\n  UUID id=UUID.randomUUID();db.update("INSERT INTO sbase_bi_schedules(id,tenant_id,report_id,owner_subject,cron_expression,timezone,output_format,delivery_target,next_run_at) VALUES(?,?,?,?,?,?,?,?,?)",id,tenant,report,subject,cron,timezone,format,target,next.toInstant());return id;
+  if(target!=null&&!target.isBlank()&&!target.startsWith("mailto:")&&target.contains("@"))target="mailto:"+target;
+  UUID id=UUID.randomUUID();db.update("INSERT INTO sbase_bi_schedules(id,tenant_id,report_id,owner_subject,cron_expression,timezone,output_format,delivery_target,next_run_at) VALUES(?,?,?,?,?,?,?,?,?)",id,tenant,report,subject,cron,timezone,format,target,next.toInstant());return id;
  }
  private Map<String,Object> reportRow(UUID tenant,String subject,UUID id,String needed){
   return db.query("""
