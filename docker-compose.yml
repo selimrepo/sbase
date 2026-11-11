@@ -48,6 +48,14 @@ services:
       DORIS_JDBC_URL: ${DORIS_JDBC_URL:-jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true}
       DORIS_USERNAME: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
+      DORIS_ALLOWED_TABLES: ${DORIS_ALLOWED_TABLES:-}
+      SBASE_ML_ALLOWED_TABLES: ${SBASE_ML_ALLOWED_TABLES:-}
+      SBASE_ML_ARTIFACT_ROOT: /var/lib/sbase/ml-artifacts
+      SBASE_BI_ARTIFACT_ROOT: /var/lib/sbase/bi-reports
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SBASE_S3_ENDPOINT: ${SBASE_S3_ENDPOINT:-http://minio:9000}
       SBASE_S3_REGION: ${SBASE_S3_REGION:-us-east-1}
       SBASE_S3_BUCKET: ${SBASE_S3_BUCKET:-sbase-artifacts}
@@ -65,6 +73,9 @@ services:
         condition: service_healthy
       doris-init:
         condition: service_completed_successfully
+    volumes:
+      - sbase-ml-artifacts:/var/lib/sbase/ml-artifacts
+      - sbase-bi-reports:/var/lib/sbase/bi-reports
     networks: [sbase-net]
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
@@ -309,6 +320,14 @@ services:
       DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000&loadBalanceHostRemovalGracePeriod=15000
       DORIS_USERNAME: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
+      DORIS_ALLOWED_TABLES: ${DORIS_ALLOWED_TABLES:-}
+      SBASE_ML_ALLOWED_TABLES: ${SBASE_ML_ALLOWED_TABLES:-}
+      SBASE_ML_ARTIFACT_ROOT: /var/lib/sbase/ml-artifacts
+      SBASE_BI_ARTIFACT_ROOT: /var/lib/sbase/bi-reports
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       JAVA_TOOL_OPTIONS: -Xms512m -Xmx2g
     depends_on:
       postgres:
@@ -325,6 +344,9 @@ services:
         condition: service_healthy
       doris-fe-3:
         condition: service_healthy
+    volumes:
+      - sbase-ml-artifacts:/var/lib/sbase/ml-artifacts
+      - sbase-bi-reports:/var/lib/sbase/bi-reports
     networks: [sbase-net]
     restart: unless-stopped
 
@@ -546,6 +568,8 @@ networks:
 
 volumes:
   postgres-data:
+  sbase-ml-artifacts:
+  sbase-bi-reports:
   doris-fe-meta:
   doris-fe-log:
   doris-be-storage:
