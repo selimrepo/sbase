@@ -121,6 +121,10 @@ public class MlLifecycleService {
   };
  }
  private ParamMap[] parameterGrid(String algorithm,JsonNode s,PipelineStage stage) {
+  if(s!=null&&!s.isObject())throw new IllegalArgumentException("Hyperparameter search space must be a JSON object");
+  Set<String> supported=Set.of("RANDOM_FOREST_CLASSIFIER","RANDOM_FOREST_REGRESSOR").contains(algorithm)
+   ?Set.of("numTrees","maxDepth"):Set.of("regParam","maxIter");
+  if(s!=null){Iterator<String> names=s.fieldNames();while(names.hasNext()){String name=names.next();if(!supported.contains(name))throw new IllegalArgumentException("Hyperparameter "+name+" is not supported by "+algorithm);}}
   ParamGridBuilder b=new ParamGridBuilder();boolean added=false;
   if(s!=null&&s.isObject()) {
    JsonNode n=s.path("numTrees");if(n.isArray()){int[] v=ints(n,1,500);if(stage instanceof RandomForestClassifier m){b.addGrid(m.numTrees(),v);added=true;}if(stage instanceof RandomForestRegressor m){b.addGrid(m.numTrees(),v);added=true;}}
