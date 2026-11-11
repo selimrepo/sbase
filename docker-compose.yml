@@ -1,6 +1,11 @@
 services:
   postgres:
     image: postgres:16-alpine
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    mem_limit: 2g
+
+
     container_name: sbase-postgres
     environment:
       POSTGRES_DB: sbase
@@ -20,6 +25,9 @@ services:
 
   sbase:
     build:
+    pids_limit: 512
+
+
       context: .
       dockerfile: Dockerfile
     image: sbase:latest
@@ -74,6 +82,10 @@ services:
 
   spark-master:
     image: apache/spark:3.5.6
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+
+
     container_name: sbase-spark-master
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master"]
     ports:
@@ -84,6 +96,11 @@ services:
 
   spark-worker:
     image: apache/spark:3.5.6
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 4g
+    cpus: 4.0
+
+
     container_name: sbase-spark-worker
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     depends_on: [spark-master]
@@ -95,6 +112,10 @@ services:
 
   doris-fe:
     image: apache/doris:doris-fe-2.1.7
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 4g
+
+
     container_name: sbase-doris-fe
     hostname: doris-fe
     environment:
@@ -237,6 +258,11 @@ services:
     restart: "no"
   doris-be:
     image: apache/doris:doris-be-2.1.7
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 8g
+    cpus: 8.0
+
+
     container_name: sbase-doris-be
     hostname: doris-be
     environment:
@@ -272,10 +298,12 @@ services:
       - "7078"
       - "7079"
     environment:
-      SPRING_PROFILES_ACTIVE: docker
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
       SPRING_DATASOURCE_USERNAME: sbase
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-}
+      JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase-node-2
       SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
