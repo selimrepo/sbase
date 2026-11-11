@@ -86,7 +86,7 @@ public class JdbcIngestionConnector implements IngestionConnector {
         return switch(type.toLowerCase(Locale.ROOT)) {
             case "long","integer" -> Long.valueOf(value);
             case "decimal" -> new java.math.BigDecimal(value);
-            case "timestamp" -> Timestamp.from(Instant.parse(value));
+            case "timestamp" -> parseTimestamp(value);
             case "date" -> java.sql.Date.valueOf(LocalDate.parse(value));
             default -> value;
         };
