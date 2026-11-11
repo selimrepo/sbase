@@ -423,7 +423,7 @@ public class PipelineExecutionService {
         try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgresUrl, postgresUser, postgresPassword);
              java.sql.Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE IF NOT EXISTS " + stageName + " (" +
-                "tenant_id UUID NOT NULL, feature_set VARCHAR(160) NOT NULL, entity_key VARCHAR(512) NOT NULL, " +
+                "tenant_id VARCHAR(36) NOT NULL, feature_set VARCHAR(160) NOT NULL, entity_key VARCHAR(512) NOT NULL, " +
                 "feature_version INTEGER NOT NULL, feature_values TEXT NOT NULL, event_time TIMESTAMPTZ)");
             statement.executeUpdate("TRUNCATE TABLE " + stageName);
         } catch (java.sql.SQLException ex) {
