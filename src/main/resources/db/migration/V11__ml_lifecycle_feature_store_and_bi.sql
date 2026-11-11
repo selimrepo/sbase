@@ -129,3 +129,5 @@ INSERT INTO sbase_role_permissions(role_id,permission)
 SELECT r.id,p.permission FROM sbase_roles r CROSS JOIN (VALUES
  ('ml:read'),('ml:write'),('ml:deploy'),('ml:predict'),('bi:read'),('bi:write'),('bi:query')
 ) p(permission) WHERE r.name='ADMIN' ON CONFLICT DO NOTHING;
+
+ALTER TABLE sbase_ml_prediction_events ADD COLUMN IF NOT EXISTS input_json JSONB NOT NULL DEFAULT '{}'::jsonb;
