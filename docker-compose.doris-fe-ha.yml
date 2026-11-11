@@ -1,0 +1,66 @@
+# Three-FE Doris cluster for SQL endpoint failover tests (one BE is sufficient
+# because the base init job explicitly creates replication_num=1 probe tables).
+services:
+  sbase:
+    environment:
+      DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000&loadBalanceHostRemovalGracePeriod=15000
+    depends_on:
+      doris-fe-2:
+        condition: service_healthy
+      doris-fe-3:
+        condition: service_healthy
+  doris-fe:
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_ID: 1
+  doris-be:
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      BE_ADDR: 172.30.0.11:9050
+  doris-fe-2:
+    image: apache/doris:doris-fe-2.1.7
+    hostname: doris-fe-2
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_ID: 2
+    ports:
+      - "9031:9030"
+    volumes:
+      - doris-fe2-meta:/opt/apache-doris/fe/doris-meta
+      - doris-fe2-log:/opt/apache-doris/fe/log
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.12
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    restart: unless-stopped
+  doris-fe-3:
+    image: apache/doris:doris-fe-2.1.7
+    hostname: doris-fe-3
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_ID: 3
+    ports:
+      - "9032:9030"
+    volumes:
+      - doris-fe3-meta:/opt/apache-doris/fe/doris-meta
+      - doris-fe3-log:/opt/apache-doris/fe/log
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.13
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    restart: unless-stopped
+volumes:
+  doris-fe2-meta:
+  doris-fe2-log:
+  doris-fe3-meta:
+  doris-fe3-log:
