@@ -122,12 +122,14 @@ public class DurableRecordSink {
                 int partition = entry.getKey();
                 List<Envelope> batch = entry.getValue();
                 Long fencingToken = fencingTokens.get(partition);
-                if (fencingToken == null || jdbc.queryForObject("""
-                    SELECT EXISTS(SELECT 1 FROM ingestion_partition_offsets
+                Long activeToken = jdbc.query("""
+                    SELECT fencing_token FROM ingestion_partition_offsets
                      WHERE tenant_id=? AND connector_id=? AND topic=? AND partition_id=?
                        AND lease_owner=? AND fencing_token=? AND lease_until>now()
-                     FOR UPDATE)
-                    """, Boolean.class, tenantId, connectorId, topic, partition, ownerId, fencingToken) != Boolean.TRUE) {
+                     FOR UPDATE
+                    """, rs -> rs.next() ? rs.getLong(1) : null,
+                    tenantId, connectorId, topic, partition, ownerId, fencingToken);
+                if (fencingToken == null || activeToken == null || !activeToken.equals(fencingToken)) {
                     throw new IllegalStateException("Kafka partition ownership was revoked; refusing stale offset progression");
                 }
                 long first = batch.stream().mapToLong(e -> ((Number)e.payload().get("offset")).longValue()).min().orElseThrow();
