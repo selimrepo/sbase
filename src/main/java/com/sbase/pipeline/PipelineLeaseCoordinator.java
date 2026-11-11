@@ -44,7 +44,7 @@ public class PipelineLeaseCoordinator {
         return jdbc.update("""
             UPDATE pipeline_runs
                SET lease_until=now()+(? * interval '1 second'), lease_heartbeat_at=now()
-             WHERE id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now()
+             WHERE id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now() AND lease_until>now()
             """, leaseSeconds, lease.runId(), workerId, lease.fencingToken()) == 1;
     }
 
