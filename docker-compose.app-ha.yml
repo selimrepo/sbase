@@ -1,0 +1,12 @@
+# Second application instance sharing PostgreSQL and the same durable queues.
+# This validates application-level multi-node startup and node restart behavior.
+services:
+  sbase-node-2:
+    extends:
+      file: docker-compose.yml
+      service: sbase
+    container_name: sbase-node-2
+    ports:
+      - "8082:8080"
+    environment:
+      SPARK_DRIVER_HOST: sbase-node-2
