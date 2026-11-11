@@ -16,15 +16,23 @@ public class FeatureAccessService {
         this.permissions = permissions;
     }
 
-    public void require(Authentication authentication, String featureSet, boolean write) {
+    private record FeatureRow(java.util.UUID id, String lifecycle, String owner) { }\n\n    public void require(Authentication authentication, String featureSet, boolean write) {
         String subject = permissions.subject(authentication);
         permissions.require(authentication, write ? "features:write" : "features:read");
-        Integer grants = db.queryForObject("""
-            SELECT count(*) FROM feature_access_grants g
-            JOIN feature_sets f ON f.id=g.feature_set_id
-            WHERE f.name=?
-            """, Integer.class, featureSet);
-        if (grants == null || grants == 0) return; // Preserve legacy feature sets until ACLs are explicitly configured.
+        FeatureRow row = db.query("""
+            SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=?
+            """, rs -> rs.next() ? new FeatureRow(rs.getObject("id", java.util.UUID.class),
+                rs.getString("lifecycle_state"), rs.getString("owner_subject")) : null, featureSet);
+        if (row == null) throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.NOT_FOUND, "Feature set not found");
+        if (write && !"ACTIVE".equalsIgnoreCase(row.lifecycle()))
+            throw new org.springframework.security.access.AccessDeniedException("Only ACTIVE feature sets can be materialized");
+        if (subject.equals(row.owner())) return;
+        Integer grants = db.queryForObject("SELECT count(*) FROM feature_access_grants WHERE feature_set_id=?",
+            Integer.class, row.id());
+        if ((grants == null || grants == 0) && row.owner() == null) return;
+        if (grants == null || grants == 0)
+            throw new org.springframework.security.access.AccessDeniedException("Feature-set owner has not granted access");
         String grant = db.query("""
             SELECT g.permission FROM feature_access_grants g
             JOIN feature_sets f ON f.id=g.feature_set_id

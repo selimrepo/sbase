@@ -98,7 +98,7 @@ public class DistributedScheduleWorker {
     void execute(UUID id) {
         try {
             ScheduleRow schedule = db.query("""
-                SELECT id, name, pipeline_id, cron_expression, timezone, calendar_json,
+                SELECT id, name, created_by, pipeline_id, cron_expression, timezone, calendar_json,
                        failure_policy, misfire_policy, next_run_at, attempt_count,
                        max_attempts, misfire_grace_seconds
                   FROM scheduled_jobs
@@ -106,6 +106,7 @@ public class DistributedScheduleWorker {
                 """, rs -> rs.next() ? new ScheduleRow(
                     rs.getObject("id", UUID.class),
                     rs.getString("name"),
+                    rs.getString("created_by"),
                     rs.getObject("pipeline_id", UUID.class),
                     rs.getString("cron_expression"),
                     rs.getString("timezone"),
@@ -141,7 +142,7 @@ public class DistributedScheduleWorker {
 
             // RUN_ONCE coalesces missed occurrences; CATCH_UP keeps the original
             // scheduled instant and will claim the next overdue instant on a later poll.
-            PipelineRunEntity run = pipelines.submit(schedule.pipelineId());
+            PipelineRunEntity run = pipelines.submit(schedule.pipelineId(), schedule.createdBy());
             db.update("""
                 INSERT INTO schedule_runs
                     (id, schedule_id, pipeline_run_id, status, scheduled_for, started_at, attempt)
@@ -228,12 +229,13 @@ public class DistributedScheduleWorker {
         }
 
         ScheduleRow schedule = db.query("""
-            SELECT id, name, pipeline_id, cron_expression, timezone, calendar_json,
+            SELECT id, name, created_by, pipeline_id, cron_expression, timezone, calendar_json,
                    failure_policy, misfire_policy, next_run_at, attempt_count,
                    max_attempts, misfire_grace_seconds
               FROM scheduled_jobs WHERE id = ?
             """, rs -> rs.next() ? new ScheduleRow(
                 rs.getObject("id", UUID.class), rs.getString("name"),
+                rs.getString("created_by"),
                 rs.getObject("pipeline_id", UUID.class), rs.getString("cron_expression"),
                 rs.getString("timezone"), rs.getString("calendar_json"),
                 rs.getString("failure_policy"), rs.getString("misfire_policy"),
@@ -305,12 +307,12 @@ public class DistributedScheduleWorker {
 
     private void recordSubmissionFailure(UUID id, String error) {
         ScheduleRow schedule = db.query("""
-            SELECT id, name, pipeline_id, cron_expression, timezone, calendar_json,
+            SELECT id, name, created_by, pipeline_id, cron_expression, timezone, calendar_json,
                    failure_policy, misfire_policy, next_run_at, attempt_count,
                    max_attempts, misfire_grace_seconds
               FROM scheduled_jobs WHERE id = ? AND lease_owner = ?
             """, rs -> rs.next() ? new ScheduleRow(
-                rs.getObject("id", UUID.class), rs.getString("name"),
+                rs.getObject("id", UUID.class), rs.getString("name"), rs.getString("created_by"),
                 rs.getObject("pipeline_id", UUID.class), rs.getString("cron_expression"),
                 rs.getString("timezone"), rs.getString("calendar_json"),
                 rs.getString("failure_policy"), rs.getString("misfire_policy"),
@@ -350,7 +352,7 @@ public class DistributedScheduleWorker {
         return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
     }
 
-    private record ScheduleRow(UUID id, String name, UUID pipelineId, String cronExpression,
+    private record ScheduleRow(UUID id, String name, String createdBy, UUID pipelineId, String cronExpression,
                                String timezone, String calendarJson, String failurePolicy,
                                String misfirePolicy, Instant scheduledFor, int attemptCount,
                                int maxAttempts, int misfireGraceSeconds) { }

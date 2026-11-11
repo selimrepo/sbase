@@ -16,7 +16,7 @@ public class PipelineRunController {
 
     @PostMapping("/{id}/runs")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public PipelineRunEntity submit(@PathVariable UUID id, Authentication auth) { permissions.require(auth, "pipelines:write"); return execution.submit(id); }
+    public PipelineRunEntity submit(@PathVariable UUID id, Authentication auth) { permissions.require(auth, "pipelines:write"); if (execution.pipelineWritesFeatures(id)) permissions.require(auth, "features:write"); return execution.submit(id, auth.getName()); }
 
     @GetMapping("/{id}/runs")
     public List<PipelineRunEntity> list(@PathVariable UUID id, Authentication auth) { permissions.require(auth, "pipelines:read"); return execution.listRuns(id); }

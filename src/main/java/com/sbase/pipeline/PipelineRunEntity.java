@@ -25,14 +25,19 @@ public class PipelineRunEntity {
     @Column(name = "next_attempt_at") private Instant nextAttemptAt;
     @Column(name = "lease_until") private Instant leaseUntil;
     @Column(name = "idempotency_key", length = 160) private String idempotencyKey;
+    @Column(name = "submitted_by", nullable = false, length = 200) private String submittedBy = "system";
     @Version @Column(name = "version", nullable = false) private long version;
 
     protected PipelineRunEntity() { }
     public PipelineRunEntity(UUID pipelineId, int pipelineVersion, String definitionSnapshot) {
+        this(pipelineId, pipelineVersion, definitionSnapshot, "system");
+    }
+    public PipelineRunEntity(UUID pipelineId, int pipelineVersion, String definitionSnapshot, String submittedBy) {
         this.id = UUID.randomUUID();
         this.pipelineId = pipelineId;
         this.pipelineVersion = pipelineVersion;
         this.definitionSnapshot = definitionSnapshot;
+        this.submittedBy = submittedBy == null || submittedBy.isBlank() ? "system" : submittedBy;
         this.status = "QUEUED";
         this.submittedAt = Instant.now();
     }
@@ -51,6 +56,7 @@ public class PipelineRunEntity {
     public Instant getNextAttemptAt() { return nextAttemptAt; }
     public Instant getLeaseUntil() { return leaseUntil; }
     public String getIdempotencyKey() { return idempotencyKey; }
+    public String getSubmittedBy() { return submittedBy; }
     public void succeed(String resultJson, long records) {
         status = "SUCCEEDED"; this.resultJson = resultJson; recordsProcessed = records; finishedAt = Instant.now(); leaseUntil = null;
     }

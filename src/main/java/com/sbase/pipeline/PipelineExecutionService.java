@@ -58,11 +58,16 @@ public class PipelineExecutionService {
 
     @Transactional
     public PipelineRunEntity submit(UUID pipelineId) {
+        return submit(pipelineId, "system");
+    }
+
+    @Transactional
+    public PipelineRunEntity submit(UUID pipelineId, String submittedBy) {
         PipelineEntity pipeline = pipelines.findById(pipelineId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline not found"));
         if (!pipeline.isEnabled()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Pipeline is disabled");
         validator.parseAndValidate(pipeline.getDefinitionJson());
-        PipelineRunEntity run = new PipelineRunEntity(pipelineId, pipeline.getVersion(), pipeline.getDefinitionJson());
+        PipelineRunEntity run = new PipelineRunEntity(pipelineId, pipeline.getVersion(), pipeline.getDefinitionJson(), submittedBy);
         run.setMaxAttempts(configuredMaxAttempts);
         run.setIdempotencyKey(UUID.randomUUID().toString());
         run = runs.save(run);
@@ -210,10 +215,41 @@ public class PipelineExecutionService {
             case "aggregate" -> aggregate(input, step);
             case "join" -> join(inputs, step);
             case "union" -> union(inputs, step);
-            case "feature_store_write" -> { writeOnlineFeatures(requireInput(input), step, runId); yield input; }
+            case "feature_store_write" -> { requireFeatureWrite(step.path("featureSet").asText(), runId); writeOnlineFeatures(requireInput(input), step, runId); yield input; }
             case "doris_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
         };
+    }
+
+    private record FeatureOwner(UUID id, String lifecycle, String owner) { }\n\n    public boolean pipelineWritesFeatures(UUID pipelineId) {
+        PipelineEntity pipeline = pipelines.findById(pipelineId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline not found"));
+        JsonNode definition = validator.parseAndValidate(pipeline.getDefinitionJson());
+        for (JsonNode step : definition.path("steps"))
+            if ("feature_store_write".equals(step.path("type").asText())) return true;
+        return false;
+    }
+
+    private void requireFeatureWrite(String featureSet, UUID runId) {
+        PipelineRunEntity run = runs.findById(runId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline run not found"));
+        FeatureOwner feature = jdbc.query("""
+            SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=?
+            """, rs -> rs.next() ? new FeatureOwner(rs.getObject("id", UUID.class),
+                rs.getString("lifecycle_state"), rs.getString("owner_subject")) : null, featureSet);
+        if (feature == null) throw new IllegalArgumentException("Unknown feature set: " + featureSet);
+        if (!"ACTIVE".equalsIgnoreCase(feature.lifecycle()))
+            throw new org.springframework.security.access.AccessDeniedException("Feature set is not active for materialization");
+        if (run.getSubmittedBy().equals(feature.owner())) return;
+        Integer grantCount = jdbc.queryForObject("SELECT count(*) FROM feature_access_grants WHERE feature_set_id=?", Integer.class, feature.id());
+        if ((grantCount == null || grantCount == 0) && feature.owner() == null) return;
+        if (grantCount == null || grantCount == 0)
+            throw new org.springframework.security.access.AccessDeniedException("Feature-set owner has not granted pipeline access");
+        String grant = jdbc.query("""
+            SELECT permission FROM feature_access_grants WHERE feature_set_id=? AND subject=?
+            """, rs -> rs.next() ? rs.getString(1) : null, feature.id(), run.getSubmittedBy());
+        if (!"ADMIN".equals(grant) && !"WRITE".equals(grant))
+            throw new org.springframework.security.access.AccessDeniedException("Pipeline submitter has no WRITE grant for feature set " + featureSet);
     }
 
     private Dataset<Row> readDoris(String table) {
