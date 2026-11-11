@@ -49,7 +49,7 @@ sbase:
   spark:
     master: ${SPARK_MASTER:local[*]}
     app-name: sbase-data-mining-hub
-    shuffle-partitions: 8
+    shuffle-partitions: ${SPARK_SHUFFLE_PARTITIONS:8}
   doris:
     pool:
       maximum-pool-size: ${DORIS_POOL_MAX:12}

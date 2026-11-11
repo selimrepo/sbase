@@ -21,31 +21,17 @@ public class DurableRecordSink {
     }
 
     public long write(UUID connectorId, String source, List<Envelope> records, String checkpointKey, String checkpointValue) {
-        // Serialize before opening the transaction so CPU/JSON work does not hold a DB
-        // connection or row locks. JDBC batches reduce round trips for large ingestion pages.
-        List<EncodedEnvelope> encoded = records.stream().map(record -> {
-            try { return new EncodedEnvelope(record.sourceKey(), mapper.writeValueAsString(record.payload())); }
-            catch (Exception e) { throw new IllegalArgumentException("Record is not JSON serializable", e); }
-        }).toList();
         return transactions.execute(status -> {
             long inserted = 0;
-            if (!encoded.isEmpty()) {
-                int[][] counts = jdbc.batchUpdate("""
+            for (Envelope record : records) {
+                String json;
+                try { json = mapper.writeValueAsString(record.payload()); }
+                catch (Exception e) { throw new IllegalArgumentException("Record is not JSON serializable", e); }
+                inserted += jdbc.update("""
                     INSERT INTO ingestion_records(id,connector_id,tenant_id,source_key,payload,created_at)
                     SELECT ?,c.id,c.tenant_id,?,?::jsonb,now() FROM ingestion_connectors c WHERE c.id=?
                     ON CONFLICT (connector_id, source_key) DO NOTHING
-                    """, encoded, 500, (statement, record) -> {
-                        statement.setObject(1, UUID.randomUUID());
-                        statement.setString(2, record.sourceKey());
-                        statement.setString(3, record.payloadJson());
-                        statement.setObject(4, connectorId);
-                    });
-                for (int[] batch : counts) {
-                    for (int count : batch) {
-                        if (count > 0) inserted += count;
-                        else if (count == java.sql.Statement.SUCCESS_NO_INFO) inserted++;
-                    }
-                }
+                    """, UUID.randomUUID(), record.sourceKey(), json, connectorId);
             }
             if (checkpointKey != null) {
                 jdbc.update("""
@@ -81,6 +67,5 @@ public class DurableRecordSink {
         }));
     }
 
-    private record EncodedEnvelope(String sourceKey, String payloadJson) { }
     public record Envelope(String sourceKey, Map<String,Object> payload) {}
 }

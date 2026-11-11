@@ -15,6 +15,16 @@ public class SparkConfig {
                 .master(properties.master())
                 .config("spark.sql.shuffle.partitions", properties.shufflePartitions())
                 .config("spark.sql.adaptive.enabled", "true")
+                .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+                .config("spark.sql.adaptive.skewJoin.enabled", "true")
+                .config("spark.sql.adaptive.localShuffleReader.enabled", "true")
+                .config("spark.sql.adaptive.advisoryPartitionSizeInBytes",
+                    System.getenv().getOrDefault("SPARK_ADVISORY_PARTITION_BYTES", "67108864"))
+                .config("spark.default.parallelism",
+                    System.getenv().getOrDefault("SPARK_DEFAULT_PARALLELISM",
+                        Integer.toString(properties.shufflePartitions())))
+                .config("spark.sql.files.maxPartitionBytes",
+                    System.getenv().getOrDefault("SPARK_MAX_FILE_PARTITION_BYTES", "134217728"))
                 // Spark 3.5 bundles a javax.servlet-based Jetty UI. The host app is Jakarta/Spring Boot 3.
                 // The UI is not needed for the embedded driver and otherwise causes Jersey servlet startup failure.
                 .config("spark.ui.enabled", "false")
