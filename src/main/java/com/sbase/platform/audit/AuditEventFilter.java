@@ -31,7 +31,7 @@ public class AuditEventFilter extends OncePerRequestFilter {
                 if(claim instanceof String value) try { tenant=UUID.fromString(value); } catch(IllegalArgumentException ignored) { }
             }
             String requestId=request.getHeader("X-Request-ID");
-            if(requestId==null || requestId.isBlank()) requestId=UUID.randomUUID().toString();
+            if(requestId==null || !requestId.matches("[A-Za-z0-9._:-]{1,100}")) requestId=UUID.randomUUID().toString();
             response.setHeader("X-Request-ID",requestId);
             String outcome=response.getStatus()<400 ? "SUCCESS" : "FAILURE";
             jdbc.update("""
