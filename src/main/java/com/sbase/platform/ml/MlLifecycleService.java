@@ -84,7 +84,7 @@ public class MlLifecycleService {
    Map<String,Object> best=new LinkedHashMap<>();
    if(folds>1) {
     CrossValidator cv=new CrossValidator().setEstimator(pipeline).setEvaluator(evaluator(task,label)).setNumFolds(folds).setParallelism(1).setSeed(42L);
-    ParamMap[] grid=parameterGrid(algorithm,search);
+    ParamMap[] grid=parameterGrid(algorithm,search,estimator);
     cv.setEstimatorParamMaps(grid);
     CrossValidatorModel cvModel=cv.fit(train);
     fitted=(PipelineModel)cvModel.bestModel();
@@ -112,13 +112,13 @@ public class MlLifecycleService {
    default -> throw new IllegalArgumentException("Unsupported estimator");
   };
  }
- private ParamMap[] parameterGrid(String algorithm,JsonNode s) {
+ private ParamMap[] parameterGrid(String algorithm,JsonNode s,PipelineStage stage) {
   ParamGridBuilder b=new ParamGridBuilder();boolean added=false;
   if(s!=null&&s.isObject()) {
-   JsonNode n=s.path("numTrees");if(n.isArray()) {int[] v=ints(n,1,500);if(algorithm.startsWith("RANDOM_FOREST")){if(algorithm.endsWith("CLASSIFIER"))b.addGrid(new RandomForestClassifier().numTrees(),v);else b.addGrid(new RandomForestRegressor().numTrees(),v);added=true;}}
-   n=s.path("maxDepth");if(n.isArray()){int[] v=ints(n,1,30);if(algorithm.equals("RANDOM_FOREST_CLASSIFIER"))b.addGrid(new RandomForestClassifier().maxDepth(),v);if(algorithm.equals("RANDOM_FOREST_REGRESSOR"))b.addGrid(new RandomForestRegressor().maxDepth(),v);added=true;}
-   n=s.path("regParam");if(n.isArray()&&(algorithm.equals("LOGISTIC_REGRESSION")||algorithm.equals("LINEAR_REGRESSION"))){double[] v=doubles(n);if(algorithm.equals("LOGISTIC_REGRESSION"))b.addGrid(new LogisticRegression().regParam(),v);else b.addGrid(new LinearRegression().regParam(),v);added=true;}
-   n=s.path("maxIter");if(n.isArray()&&(algorithm.equals("LOGISTIC_REGRESSION")||algorithm.equals("LINEAR_REGRESSION"))){int[] v=ints(n,1,500);if(algorithm.equals("LOGISTIC_REGRESSION"))b.addGrid(new LogisticRegression().maxIter(),v);else b.addGrid(new LinearRegression().maxIter(),v);added=true;}
+   JsonNode n=s.path("numTrees");if(n.isArray()){int[] v=ints(n,1,500);if(stage instanceof RandomForestClassifier m){b.addGrid(m.numTrees(),v);added=true;}if(stage instanceof RandomForestRegressor m){b.addGrid(m.numTrees(),v);added=true;}}
+   n=s.path("maxDepth");if(n.isArray()){int[] v=ints(n,1,30);if(stage instanceof RandomForestClassifier m){b.addGrid(m.maxDepth(),v);added=true;}if(stage instanceof RandomForestRegressor m){b.addGrid(m.maxDepth(),v);added=true;}}
+   n=s.path("regParam");if(n.isArray()){double[] v=doubles(n);if(stage instanceof LogisticRegression m){b.addGrid(m.regParam(),v);added=true;}if(stage instanceof LinearRegression m){b.addGrid(m.regParam(),v);added=true;}}
+   n=s.path("maxIter");if(n.isArray()){int[] v=ints(n,1,500);if(stage instanceof LogisticRegression m){b.addGrid(m.maxIter(),v);added=true;}if(stage instanceof LinearRegression m){b.addGrid(m.maxIter(),v);added=true;}}
   }
   return added?b.build():new ParamGridBuilder().build();
  }
@@ -129,7 +129,7 @@ public class MlLifecycleService {
   if(model==null){model=UUID.randomUUID();db.update("INSERT INTO sbase_ml_models(id,tenant_id,name,description,owner_subject) VALUES(?,?,?,?,?)",model,tenant,name,description,subject);}
   Integer version=db.queryForObject("SELECT COALESCE(MAX(version),0)+1 FROM sbase_ml_model_versions WHERE model_id=?",Integer.class,model);
   db.update("INSERT INTO sbase_ml_model_versions(id,tenant_id,model_id,run_id,version,artifact_uri,framework,algorithm,task_type,metrics_json,signature_json,created_by) VALUES(?,?,?,?,?,?,'Spark MLlib',?,?,CAST(? AS jsonb),CAST(? AS jsonb),?)",
-    UUID.randomUUID(),tenant,model,run,version,r.get("artifact_uri"),r.get("algorithm"),r.get("task_type"),r.get("metrics_json").toString(),json.writeValueAsString(Map.of("features",json.readValue(r.get("feature_columns_json").toString(),List.class),"label",r.get("label_column"))),subject);
+    UUID.randomUUID(),tenant,model,run,version,r.get("artifact_uri"),r.get("algorithm"),r.get("task_type"),r.get("metrics_json").toString(),signatureJson(r.get("feature_columns_json").toString(),r.get("label_column")),subject);
   return model;
  }
  public List<Map<String,Object>> compare(UUID tenant,UUID experiment) {
@@ -169,11 +169,12 @@ public class MlLifecycleService {
  public UUID batchPredict(UUID tenant,UUID deployment,List<Map<String,Object>> rows) {
   if(rows==null||rows.isEmpty()||rows.size()>10000)throw new IllegalArgumentException("Batch must contain 1..10000 records");
   UUID id=UUID.randomUUID();List<Map<String,Object>> predictions=new ArrayList<>();for(Map<String,Object> row:rows)predictions.add(predict(tenant,deployment,row));
-  db.update("INSERT INTO sbase_ml_batch_jobs(id,tenant_id,model_version_id,input_table,output_table,status,row_count,submitted_by,finished_at) SELECT ?,tenant_id,model_version_id,'API_PAYLOAD','API_RESPONSE','SUCCEEDED',?,?,now() FROM sbase_ml_deployments WHERE id=?",
-    id,rows.size(),"api",deployment);
+  db.update("INSERT INTO sbase_ml_batch_jobs(id,tenant_id,model_version_id,input_table,output_table,status,row_count,result_json,submitted_by,finished_at) SELECT ?,tenant_id,model_version_id,'API_PAYLOAD','API_RESPONSE','SUCCEEDED',?,CAST(? AS jsonb),'api',now() FROM sbase_ml_deployments WHERE id=?",
+    id,rows.size(),toJson(predictions),deployment);
   return id;
  }
  private String toJson(Object value){try{return json.writeValueAsString(value);}catch(Exception ex){return "{}";}}
+ private String signatureJson(String featureJson,Object label){try{return json.writeValueAsString(Map.of("features",json.readValue(featureJson,List.class),"label",String.valueOf(label)));}catch(Exception ex){throw new IllegalStateException("Unable to build model signature",ex);}}
  private String uriPath(String uri){if(uri.startsWith("file:"))return Paths.get(java.net.URI.create(uri)).toString();return uri;}
  private void validateTable(String table){identifier(table);if(!tables.contains(table.toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Training table is not allow-listed");}
  private static void identifier(String s){if(s==null||!s.matches("[A-Za-z_][A-Za-z0-9_]{0,127}(\\.[A-Za-z_][A-Za-z0-9_]{0,127})?"))throw new IllegalArgumentException("Unsafe SQL identifier");}
