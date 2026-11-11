@@ -67,5 +67,63 @@ public class DurableRecordSink {
         }));
     }
 
+
+    /**
+     * Atomically persists Kafka records, batch receipts, and per-partition next offsets.
+     * Broker commits happen only after this transaction returns. Replayed batches are
+     * suppressed by the receipt primary key; record source keys remain a second guard.
+     */
+    public long writeKafkaBatch(UUID connectorId, String topic, List<Envelope> records) {
+        if (records == null || records.isEmpty()) return 0;
+        return transactions.execute(status -> {
+            UUID tenantId = jdbc.query("SELECT tenant_id FROM ingestion_connectors WHERE id=?",
+                rs -> rs.next() ? rs.getObject(1, UUID.class) : null, connectorId);
+            if (tenantId == null) throw new IllegalArgumentException("Unknown ingestion connector");
+            Map<Integer, List<Envelope>> partitions = new java.util.TreeMap<>();
+            for (Envelope record : records) {
+                Object p = record.payload().get("partition");
+                Object o = record.payload().get("offset");
+                if (!(p instanceof Number) || !(o instanceof Number))
+                    throw new IllegalArgumentException("Kafka envelope must contain numeric partition and offset");
+                partitions.computeIfAbsent(((Number)p).intValue(), ignored -> new java.util.ArrayList<>()).add(record);
+            }
+            java.util.Set<String> accepted = new java.util.HashSet<>();
+            long inserted = 0;
+            for (var entry : partitions.entrySet()) {
+                int partition = entry.getKey();
+                List<Envelope> batch = entry.getValue();
+                long first = batch.stream().mapToLong(e -> ((Number)e.payload().get("offset")).longValue()).min().orElseThrow();
+                long next = batch.stream().mapToLong(e -> ((Number)e.payload().get("offset")).longValue()).max().orElseThrow() + 1;
+                int receipt = jdbc.update("""
+                    INSERT INTO ingestion_batch_receipts(tenant_id,connector_id,topic,partition_id,
+                        first_offset,next_offset,record_count)
+                    VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING
+                    """, tenantId, connectorId, topic, partition, first, next, batch.size());
+                if (receipt == 1) {
+                    batch.forEach(e -> accepted.add(e.sourceKey()));
+                    jdbc.update("""
+                        INSERT INTO ingestion_partition_offsets(tenant_id,connector_id,topic,partition_id,next_offset,updated_at)
+                        VALUES(?,?,?,?,?,now())
+                        ON CONFLICT(tenant_id,connector_id,topic,partition_id) DO UPDATE
+                          SET next_offset=GREATEST(ingestion_partition_offsets.next_offset,EXCLUDED.next_offset),
+                              updated_at=now()
+                        """, tenantId, connectorId, topic, partition, next);
+                }
+            }
+            for (Envelope record : records) {
+                if (!accepted.contains(record.sourceKey())) continue;
+                String json;
+                try { json = mapper.writeValueAsString(record.payload()); }
+                catch (Exception e) { throw new IllegalArgumentException("Record is not JSON serializable", e); }
+                inserted += jdbc.update("""
+                    INSERT INTO ingestion_records(id,connector_id,tenant_id,source_key,payload,created_at)
+                    VALUES(?,?,?, ?,?::jsonb,now())
+                    ON CONFLICT(connector_id,source_key) DO NOTHING
+                    """, UUID.randomUUID(), connectorId, tenantId, record.sourceKey(), json);
+            }
+            return inserted;
+        });
+    }
+
     public record Envelope(String sourceKey, Map<String,Object> payload) {}
 }
