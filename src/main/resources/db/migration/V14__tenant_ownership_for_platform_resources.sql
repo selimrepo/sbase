@@ -74,3 +74,14 @@ CREATE INDEX IF NOT EXISTS idx_feature_sets_tenant ON feature_sets(tenant_id,upd
 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_tenant_due ON scheduled_jobs(tenant_id,enabled,next_run_at);
 CREATE INDEX IF NOT EXISTS idx_dashboards_tenant ON dashboards(tenant_id,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_bi_reports_tenant ON bi_reports(tenant_id,updated_at DESC);
+
+-- Default administrative role receives the new operational controls.
+INSERT INTO sbase_role_permissions(role_id,permission)
+SELECT r.id,p.permission FROM sbase_roles r CROSS JOIN (VALUES
+  ('tenants:admin'),('resources:admin'),('audit:read'),('mining:read'),('mining:write'),
+  ('datasets:read'),('datasets:write')
+) p(permission) WHERE r.name='ADMIN' ON CONFLICT DO NOTHING;
+INSERT INTO sbase_role_permissions(role_id,permission)
+SELECT r.id,p.permission FROM sbase_roles r CROSS JOIN (VALUES
+  ('mining:read'),('mining:write'),('datasets:read'),('datasets:write')
+) p(permission) WHERE r.name='DATA_ENGINEER' ON CONFLICT DO NOTHING;
