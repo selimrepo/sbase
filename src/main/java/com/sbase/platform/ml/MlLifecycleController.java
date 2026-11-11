@@ -25,7 +25,7 @@ public class MlLifecycleController {
  public record PredictionRequest(@NotEmpty Map<String,Object> features){}
  public record BatchRequest(@NotEmpty @Size(max=10000) List<Map<String,Object>> records){}
  private UUID tenant(Authentication a){return tenants.tenantId(a);}
- private void require(Authentication a,String p){permissions.require(a,p);}
+ private void require(Authentication a,String p){permissions.require(a,p);if(Set.of("ml:write","ml:deploy","bi:write").contains(p))tenants.requireWrite(a);}
  @PostMapping("/experiments") @ResponseStatus(HttpStatus.CREATED)
  public Map<String,Object> createExperiment(@Valid @RequestBody ExperimentRequest r,Authentication a){
   require(a,"ml:write");return Map.of("id",ml.createExperiment(tenant(a),r.name(),r.description(),a.getName()));
