@@ -39,6 +39,19 @@ public final class CircuitBreaker {
         }
     }
 
+    /** Connection acquisition must not erase failures observed later at SQL execution. */
+    public <T> T executeAcquisition(Supplier<T> operation) {
+        boolean probe = acquirePermission();
+        try {
+            T result = operation.get();
+            if (probe) recordSuccess();
+            return result;
+        } catch (RuntimeException | Error failure) {
+            recordFailure(probe);
+            throw failure;
+        }
+    }
+
     public void recordSuccess() {
         failures.set(0);
         openedAt.set(0);
