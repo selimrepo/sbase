@@ -141,7 +141,7 @@ public class AdvancedWorkspaceController {
   String owner=db.query("SELECT owner_subject FROM feature_sets WHERE id=?",rs->rs.next()?rs.getString(1):null,id);
   if(owner==null)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Feature set not found");
   boolean admin=auth.getAuthorities().stream().anyMatch(a->a.getAuthority().equals("ROLE_ADMIN")||a.getAuthority().equals("PERM_platform:admin"))||permissions.has(auth.getName(),"platform:admin");
-  if(!admin&&!owner.equals(auth.getName()))throw new org.springframework.security.access.AccessDeniedException("Only the feature-set owner or platform administrator can manage grants");
+  if(!admin&&!auth.getName().equals(owner))throw new org.springframework.security.access.AccessDeniedException("Only the feature-set owner or platform administrator can manage grants");
  }
  private String validateCalendar(String source){
   String value=source==null?"{}":source;
