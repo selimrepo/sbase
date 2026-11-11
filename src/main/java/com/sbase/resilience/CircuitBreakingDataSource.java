@@ -68,16 +68,31 @@ public final class CircuitBreakingDataSource implements DataSource, AutoCloseabl
         return Proxy.newProxyInstance(jdbcType.getClassLoader(), new Class<?>[]{jdbcType}, (proxy, method, args) -> {
             try {
                 Object result = method.invoke(target, args);
+                if (result instanceof java.sql.CallableStatement) return wrap(result, java.sql.CallableStatement.class);
+                if (result instanceof java.sql.PreparedStatement) return wrap(result, java.sql.PreparedStatement.class);
                 if (result instanceof Statement) return wrap(result, Statement.class);
                 if (result instanceof ResultSet) return wrap(result, ResultSet.class);
-                breaker.recordSuccess();
+                if (method.getName().startsWith("execute") || method.getName().equals("commit")
+                        || method.getName().equals("rollback") || method.getName().equals("isValid")) {
+                    breaker.recordSuccess();
+                }
                 return result;
             } catch (InvocationTargetException invocation) {
                 Throwable cause = invocation.getCause();
-                if (cause instanceof SQLException) breaker.recordFailure();
+                if (cause instanceof SQLException sql && isConnectionFailure(sql)) breaker.recordFailure();
                 throw cause;
             }
         });
+    }
+
+    private static boolean isConnectionFailure(SQLException failure) {
+        for (SQLException current = failure; current != null; current = current.getNextException()) {
+            if (current instanceof java.sql.SQLRecoverableException
+                    || current instanceof java.sql.SQLNonTransientConnectionException
+                    || current instanceof java.sql.SQLTransientConnectionException
+                    || (current.getSQLState() != null && current.getSQLState().startsWith("08"))) return true;
+        }
+        return false;
     }
 
     @FunctionalInterface private interface SqlSupplier { Connection get() throws SQLException; }
