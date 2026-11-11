@@ -56,6 +56,29 @@ public class GovernedBiQueryService {
   if(d.orderBy()!=null&&!d.orderBy().isEmpty()){List<String> order=new ArrayList<>();if(d.orderBy().size()>10)throw new IllegalArgumentException("At most 10 sort expressions");for(Sort s:d.orderBy()){String col=identifier(s.column());if(!aliases.contains(col))throw new IllegalArgumentException("Sort must reference a selected dimension or metric alias");String dir="DESC".equalsIgnoreCase(s.direction())?"DESC":"ASC";order.add(col+" "+dir);}sql.append(" ORDER BY ").append(String.join(",",order));}
   int limit=d.limit()==null?1000:d.limit();if(limit<1||limit>maxRows)throw new IllegalArgumentException("Query row limit must be 1.."+maxRows);sql.append(" LIMIT ").append(limit);return sql.toString();
  }
+ public Map<String,Object> drillDown(UUID tenant,String subject,QueryDefinition base,String dimension,Object value,List<String> nextDimensions){
+  if(base.dimensions()==null||!base.dimensions().contains(dimension))throw new IllegalArgumentException("Drill-down dimension must be selected in the parent query");
+  List<Filter> filters=new ArrayList<>(base.filters()==null?List.of():base.filters());filters.add(new Filter(dimension,"EQ",value));
+  QueryDefinition child=new QueryDefinition(base.table(),nextDimensions==null?base.dimensions():nextDimensions,base.metrics(),filters,base.orderBy(),base.limit());
+  Map<String,Object> result=execute(tenant,subject,child);result.put("drillDown",Map.of("dimension",dimension,"value",String.valueOf(value)));return result;
+ }
+ public Map<String,Object> drillThrough(UUID tenant,String subject,String table,List<String> columns,List<Filter> filters,Integer requestedLimit){
+  if(table==null||!tables.contains(table.toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Table is not allow-listed");
+  if(columns==null||columns.isEmpty()||columns.size()>30)throw new IllegalArgumentException("Select 1..30 drill-through columns");
+  String[] parts=tableParts(table);Set<String> valid=new HashSet<>();
+  analytics.queryForList("SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA=? AND TABLE_NAME=?",parts[0],parts[1])
+   .forEach(row->valid.add(Objects.toString(row.get("COLUMN_NAME"),"").toLowerCase(Locale.ROOT)));
+  if(!valid.contains("tenant_id"))throw new org.springframework.security.access.AccessDeniedException("BI source table must expose tenant_id for tenant isolation");
+  columns.forEach(col->column(col,valid));int limit=requestedLimit==null?500:requestedLimit;
+  if(limit<1||limit>Math.min(1000,maxRows))throw new IllegalArgumentException("Drill-through limit must be 1..1000");
+  List<String> where=new ArrayList<>();where.add("tenant_id = "+literal(tenant.toString()));
+  if(filters!=null){if(filters.size()>30)throw new IllegalArgumentException("At most 30 drill-through filters");for(Filter f:filters)where.add(filter(f,valid));}
+  String sql="SELECT "+String.join(",",columns)+" FROM "+table+" WHERE "+String.join(" AND ",where)+" LIMIT "+limit;
+  String hash=hash(sql);if(!permits.tryAcquire())throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,"BI query concurrency limit reached");
+  long started=System.nanoTime();try{List<Map<String,Object>> rows=doris.query(sql);long elapsed=(System.nanoTime()-started)/1_000_000;audit(tenant,subject,hash,elapsed,rows.size(),rows.size()+elapsed/1000.0,false,"SUCCEEDED");return Map.of("rows",rows,"rowCount",rows.size(),"queryHash",hash,"elapsedMs",elapsed,"drillThrough",true);}
+  catch(RuntimeException ex){long elapsed=(System.nanoTime()-started)/1_000_000;audit(tenant,subject,hash,elapsed,0,0,false,"FAILED");throw ex;}
+  finally{permits.release();}
+ }
  private String filter(Filter f,Set<String> valid){column(f.column(),valid);String op=f.operator().toUpperCase(Locale.ROOT);Object v=f.value();
   return switch(op){case "IS_NULL"->f.column()+" IS NULL";case "NOT_NULL"->f.column()+" IS NOT NULL";
    case "EQ","NE","GT","GTE","LT","LTE"->{String symbol=switch(op){case "EQ"->"=";case "NE"->"<>";case "GT"->">";case "GTE"->">=";case "LT"->"<";default->"<=";};yield f.column()+" "+symbol+" "+literal(v);}
