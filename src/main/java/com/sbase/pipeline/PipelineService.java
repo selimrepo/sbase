@@ -31,10 +31,11 @@ public class PipelineService {
         return repository.findAllByTenantIdOrderByUpdatedAtDesc(tenant).stream()
             .filter(p -> p.getOwnerSubject().equals(subject) || admin(auth) || canRead(tenant,p.getId(),subject)).toList();
     }
-    @Transactional(readOnly=true) public PipelineEntity get(UUID id,Authentication auth) {
+    @Transactional(readOnly=true) public PipelineEntity get(UUID id,Authentication auth) { return authorize(id,auth,false); }
+    @Transactional(readOnly=true) public PipelineEntity authorize(UUID id,Authentication auth,boolean write) {
         PipelineEntity p=repository.findByIdAndTenantId(id,tenants.tenantId(auth))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,"Pipeline not found"));
-        require(p,auth,false); return p;
+        require(p,auth,write); return p;
     }
     @Transactional public PipelineEntity update(UUID id,PipelineRequest request,Authentication auth) {
         validator.parseAndValidate(request.definitionJson());
