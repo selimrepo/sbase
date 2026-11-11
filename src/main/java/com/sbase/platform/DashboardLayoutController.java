@@ -5,6 +5,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -21,7 +22,7 @@ public class DashboardLayoutController {
     private final JdbcTemplate db;
     private final PermissionService permissions;
 
-    public DashboardLayoutController(JdbcTemplate db, PermissionService permissions) {
+    public DashboardLayoutController(@Qualifier("jdbcTemplate") JdbcTemplate db, PermissionService permissions) {
         this.db = db;
         this.permissions = permissions;
     }

@@ -92,7 +92,7 @@ public class PlatformMetadataController {
     @GetMapping("/features")
     public List<Map<String,Object>> features(Authentication auth) {
         permissions.require(auth, "features:read");
-        boolean admin=auth.getAuthorities().stream().anyMatch(x->x.getAuthority().equals("ROLE_ADMIN")||x.getAuthority().equals("PERM_platform:admin"));
+        boolean admin=auth.getAuthorities().stream().anyMatch(x->x.getAuthority().equals("ROLE_ADMIN")||x.getAuthority().equals("PERM_platform:admin"))||permissions.has(auth.getName(),"platform:admin");
         return db.queryForList("""
             SELECT f.* FROM feature_sets f
              WHERE ?=TRUE OR f.owner_subject=? 

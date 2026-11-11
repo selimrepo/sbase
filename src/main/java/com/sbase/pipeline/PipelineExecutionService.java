@@ -242,7 +242,7 @@ public class PipelineExecutionService {
         if (feature == null) throw new IllegalArgumentException("Unknown feature set: " + featureSet);
         if (!"ACTIVE".equalsIgnoreCase(feature.lifecycle()))
             throw new org.springframework.security.access.AccessDeniedException("Feature set is not active for materialization");
-        if (run.getSubmittedBy().equals(feature.owner())) return;
+        if (run.getSubmittedBy().equals(feature.owner()) || Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM sbase_user_roles ur JOIN sbase_role_permissions rp ON rp.role_id=ur.role_id WHERE ur.subject=? AND rp.permission='platform:admin')", Boolean.class, run.getSubmittedBy()))) return;
         Integer grantCount = jdbc.queryForObject("SELECT count(*) FROM feature_access_grants WHERE feature_set_id=?", Integer.class, feature.id());
         if ((grantCount == null || grantCount == 0) && feature.owner() == null) return;
         if (grantCount == null || grantCount == 0)
