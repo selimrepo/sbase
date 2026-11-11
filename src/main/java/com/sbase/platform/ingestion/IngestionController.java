@@ -28,11 +28,11 @@ public class IngestionController {
     }
     @PostMapping("/dead-letters/{id}/replay") @ResponseStatus(HttpStatus.ACCEPTED)
     public Map<String,Object> replayDeadLetter(@PathVariable UUID id,Authentication auth) {
-        permissions.require(auth,"ingestion:write"); return deadLetters.replay(id,tenants.tenantId(auth),tenants.subject(auth));
+        permissions.require(auth,"ingestion:write"); tenants.requireWrite(auth); return deadLetters.replay(id,tenants.tenantId(auth),tenants.subject(auth));
     }
     @PostMapping("/{type}/runs") @ResponseStatus(HttpStatus.ACCEPTED)
     public Map<String,Object> run(@PathVariable String type,@Valid @RequestBody Request request,Authentication auth) {
-        permissions.require(auth,"ingestion:write");
+        permissions.require(auth,"ingestion:write"); tenants.requireWrite(auth);
         return service.execute(type,request.connectorId(),request.datasetId(),request.source(),request.target(),
             request.options(),request.idempotencyKey(),tenants.tenantId(auth),tenants.subject(auth));
     }
