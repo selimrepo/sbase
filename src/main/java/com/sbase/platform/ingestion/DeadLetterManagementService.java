@@ -54,7 +54,7 @@ public class DeadLetterManagementService {
             config.path("options").fields().forEachRemaining(e->options.put(e.getKey(),e.getValue().asText()));
             UUID connectorId=(UUID)row.get("connectorId");
             options.put("connectorId",connectorId.toString());
-            Map<String,Object> result=executions.execute(String.valueOf(row.get("type")),connectorId,null,source,target,options,"dlq-replay:"+id);
+            Map<String,Object> result=executions.execute(String.valueOf(row.get("type")),connectorId,null,source,target,options,"dlq-replay:"+id+":"+UUID.randomUUID());
             jdbc.update("UPDATE ingestion_dead_letters SET replayed_at=now(),replay_started_at=NULL,last_replay_error=NULL WHERE id=?",id);
             return Map.of("deadLetterId",id,"replayed",true,"execution",result);
         } catch(Exception ex) {
