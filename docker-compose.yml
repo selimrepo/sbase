@@ -242,7 +242,7 @@ services:
             break
           fi
 
-          probe_attempt=$( (probe_attempt + 1) )
+          probe_attempt=$$((probe_attempt + 1))
           if [ "$probe_attempt" -ge 60 ]; then
             echo "Doris could not place a tablet after 5 minutes; backend is not schedulable."
             cat /tmp/doris-backend-probe.err
@@ -485,7 +485,7 @@ services:
     command:
       - |
         set -eu
-        until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do sleep 3; done
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 3; done
         mc mb --ignore-existing local/sbase-artifacts
         mc version enable local/sbase-artifacts
         mc ilm rule add --expire-days 365 local/sbase-artifacts
