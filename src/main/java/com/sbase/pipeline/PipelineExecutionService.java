@@ -67,7 +67,7 @@ public class PipelineExecutionService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline not found"));
         if (!pipeline.isEnabled()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Pipeline is disabled");
         validator.parseAndValidate(pipeline.getDefinitionJson());
-        PipelineRunEntity run = new PipelineRunEntity(pipelineId, pipeline.getVersion(), pipeline.getDefinitionJson(), submittedBy);
+        PipelineRunEntity run = new PipelineRunEntity(pipeline.getTenantId(), pipelineId, pipeline.getVersion(), pipeline.getDefinitionJson(), submittedBy);
         run.setMaxAttempts(configuredMaxAttempts);
         run.setIdempotencyKey(UUID.randomUUID().toString());
         run = runs.save(run);
