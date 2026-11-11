@@ -34,7 +34,7 @@ public class GovernedBiQueryService {
   try{
    List<Map<String,Object>> rows=doris.query(sql);long elapsed=(System.nanoTime()-started)/1_000_000;
    double cost=estimate(d,rows.size(),elapsed);audit(tenant,subject,hash,elapsed,rows.size(),cost,false,"SUCCEEDED");
-   if(cacheMillis>0){if(cache.size()>2000)cache.entrySet().removeIf(e->e.getValue().expiresAt()<System.currentTimeMillis());cache.put(key,new CacheEntry(List.copyOf(rows),System.currentTimeMillis()+cacheMillis));}
+   if(cacheMillis>0){cache.entrySet().removeIf(e->e.getValue().expiresAt()<System.currentTimeMillis());if(cache.size()>=2000){String oldest=cache.keySet().stream().findFirst().orElse(null);if(oldest!=null)cache.remove(oldest);}cache.put(key,new CacheEntry(List.copyOf(rows),System.currentTimeMillis()+cacheMillis));}
    return Map.of("rows",rows,"rowCount",rows.size(),"cacheHit",false,"queryHash",hash,"elapsedMs",elapsed,"estimatedCost",cost,"sql",sql);
   }catch(RuntimeException ex){long elapsed=(System.nanoTime()-started)/1_000_000;audit(tenant,subject,hash,elapsed,0,0,false,"FAILED");throw ex;}
   finally{permits.release();}
@@ -87,7 +87,7 @@ public class GovernedBiQueryService {
    case "BETWEEN"->{if(!(v instanceof List<?> list)||list.size()!=2)throw new IllegalArgumentException("BETWEEN requires two values");yield f.column()+" BETWEEN "+literal(list.get(0))+" AND "+literal(list.get(1));}
    default->throw new IllegalArgumentException("Unsupported filter operator");};
  }
- private String literal(Object v){if(v==null)return "NULL";if(v instanceof Number n){double d=n.doubleValue();if(!Double.isFinite(d))throw new IllegalArgumentException("Non-finite filter value");return n.toString();}if(v instanceof Boolean b)return b?"TRUE":"FALSE";String s=String.valueOf(v);if(s.length()>2000)throw new IllegalArgumentException("Filter value too long");return "'"+s.replace("'","''")+"'";}
+ private String literal(Object v){if(v==null)return "NULL";if(v instanceof Number n){double d=n.doubleValue();if(!Double.isFinite(d))throw new IllegalArgumentException("Non-finite filter value");return n.toString();}if(v instanceof Boolean b)return b?"TRUE":"FALSE";String s=String.valueOf(v);if(s.length()>2000)throw new IllegalArgumentException("Filter value too long");return "'"+s.replace("\\","\\\\").replace("'","''")+"'";}
  private void column(String s,Set<String> valid){identifier(s);if(!valid.contains(s.toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Column is not present in selected table: "+s);}
  private String[] tableParts(String table){int dot=table.lastIndexOf('.');return dot<0?new String[]{database,table}:new String[]{table.substring(0,dot),table.substring(dot+1)};}
  private String identifier(String s){if(s==null||!s.matches("[A-Za-z_][A-Za-z0-9_]{0,127}"))throw new IllegalArgumentException("Unsafe SQL identifier");return s;}
