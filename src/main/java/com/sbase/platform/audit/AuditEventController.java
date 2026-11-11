@@ -29,7 +29,7 @@ public class AuditEventController {
         String sql="""
             SELECT id,occurred_at,subject,action,resource_type,resource_id,outcome,request_id,
                    host(source_ip) AS source_ip,user_agent,details::text AS details
-              FROM audit_events
+              FROM platform_audit_events
              WHERE tenant_id=? AND (? IS NULL OR occurred_at < ?)
              ORDER BY occurred_at DESC,id DESC LIMIT ?
             """;
