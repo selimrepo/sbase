@@ -123,14 +123,19 @@ public class AdvancedWorkspaceController {
   List<Map<String,Object>> all=bi.query(sql.toString());int from=Math.min(all.size(),page*size),to=Math.min(all.size(),from+size);
   return Map.of("rows",all.subList(from,to),"page",page,"size",size,"totalRows",all.size(),"hasNext",to<all.size(),"truncated",all.size()==maxRows,"sql",sql.toString());
  }
- private String filterSql(Filter f){String op=f.operator().toUpperCase(Locale.ROOT);String column=f.column();return switch(op){
-  case "IS_NULL"->column+" IS NULL";case "NOT_NULL"->column+" IS NOT NULL";
-  case "IN"->{List<?> values=(List<?>)f.value();yield column+" IN ("+String.join(",",values.stream().map(v->literal(v,"EQ")).toList())+")";}
-  case "BETWEEN"->{List<?> values=(List<?>)f.value();yield column+" BETWEEN "+literal(values.get(0),"EQ")+" AND "+literal(values.get(1),"EQ");}
-  case "STARTS_WITH"->column+" LIKE "+literal(String.valueOf(f.value())+"%","EQ");
-  case "ENDS_WITH"->column+" LIKE "+literal("%"+String.valueOf(f.value()),"EQ");
-  default->column+" "+operator(op)+" "+literal(f.value(),op);
- }}
+ private String filterSql(Filter f){
+  String op=f.operator().toUpperCase(Locale.ROOT);
+  String column=f.column();
+  return switch(op){
+   case "IS_NULL" -> column+" IS NULL";
+   case "NOT_NULL" -> column+" IS NOT NULL";
+   case "IN" -> {List<?> values=(List<?>)f.value();yield column+" IN ("+String.join(",",values.stream().map(v->literal(v,"EQ")).toList())+")";}
+   case "BETWEEN" -> {List<?> values=(List<?>)f.value();yield column+" BETWEEN "+literal(values.get(0),"EQ")+" AND "+literal(values.get(1),"EQ");}
+   case "STARTS_WITH" -> column+" LIKE "+literal(String.valueOf(f.value())+"%","EQ");
+   case "ENDS_WITH" -> column+" LIKE "+literal("%"+String.valueOf(f.value()),"EQ");
+   default -> column+" "+operator(op)+" "+literal(f.value(),op);
+  };
+ }
  private String operator(String s){return switch(s.toUpperCase(Locale.ROOT)){case "EQ"->"=";case "NE"->"<>";case "GT"->">";case "GTE"->">=";case "LT"->"<";case "LTE"->"<=";case "CONTAINS","STARTS_WITH","ENDS_WITH"->"LIKE";default->throw new IllegalArgumentException("Invalid operator");};}
  private String literal(Object v,String op){if(v==null)return "NULL";if(v instanceof Number n){if(!Double.isFinite(n.doubleValue()))throw new IllegalArgumentException("Non-finite filter number");return n.toString();}if(v instanceof Boolean b)return b?"TRUE":"FALSE";String s=String.valueOf(v);if(s.length()>2000)throw new IllegalArgumentException("Filter too long");if("CONTAINS".equalsIgnoreCase(op))s="%"+s+"%";return "'"+s.replace("'","''")+"'";}
  private void identifier(String s){if(s==null||!IDENT.matcher(s).matches())throw new IllegalArgumentException("Unsafe identifier");}
