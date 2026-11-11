@@ -2,6 +2,7 @@ package com.sbase.platform.feature;
 
 import com.sbase.platform.security.PermissionService;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -12,6 +13,11 @@ public class FeatureAccessService {
     private final PermissionService permissions;
     private final com.sbase.platform.tenant.TenantContext tenants;
 
+    public FeatureAccessService(@Qualifier("jdbcTemplate") JdbcTemplate db, PermissionService permissions) {
+        this.db=db; this.permissions=permissions; this.tenants=null;
+    }
+
+    @Autowired
     public FeatureAccessService(@Qualifier("jdbcTemplate") JdbcTemplate db, PermissionService permissions, com.sbase.platform.tenant.TenantContext tenants) {
         this.db = db;
         this.permissions = permissions;
@@ -22,8 +28,8 @@ public class FeatureAccessService {
 
     public void require(Authentication authentication, String featureSet, boolean write) {
         String subject = permissions.subject(authentication);
-        java.util.UUID tenantId = tenants.tenantId(authentication);
-        if(write) tenants.requireWrite(authentication);
+        java.util.UUID tenantId = tenants == null ? java.util.UUID.fromString("00000000-0000-0000-0000-000000000001") : tenants.tenantId(authentication);
+        if(write && tenants != null) tenants.requireWrite(authentication);
         permissions.require(authentication, write ? "features:write" : "features:read");
         FeatureRow row = db.query("""
             SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=? AND tenant_id=?
