@@ -127,7 +127,6 @@ public class ConnectorExecutionService {
                     records_written=?,lease_owner=NULL,lease_until=NULL
                  WHERE id=? AND tenant_id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=?
                 """, result.recordsRead(), result.recordsWritten(), run.id(), run.tenantId(), workerId, run.fencingToken());
-            heartbeatOrLose(run);
             return;
         } catch (Exception ex) {
             failure = ex instanceof RuntimeException re ? re : new IllegalStateException(ex);
