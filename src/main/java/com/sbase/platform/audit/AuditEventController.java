@@ -26,16 +26,21 @@ public class AuditEventController {
         permissions.require(auth,"audit:read");
         int safeLimit=Math.max(1,Math.min(500,limit));
         UUID tenant=tenants.tenantId(auth);
-        String sql="""
+        String columns = """
             SELECT id,occurred_at,subject,action,resource_type,resource_id,outcome,request_id,
                    host(source_ip) AS source_ip,user_agent,details::text AS details
               FROM platform_audit_events
-             WHERE tenant_id=? AND (? IS NULL OR occurred_at < ?)
-             ORDER BY occurred_at DESC,id DESC LIMIT ?
+             WHERE tenant_id=?
             """;
-        return jdbc.query(sql,(rs,n)->new AuditEventView(rs.getLong("id"),rs.getTimestamp("occurred_at").toInstant(),
-            rs.getString("subject"),rs.getString("action"),rs.getString("resource_type"),rs.getString("resource_id"),
-            rs.getString("outcome"),rs.getString("request_id"),rs.getString("source_ip"),rs.getString("user_agent"),
-            rs.getString("details")),tenant,before,before,safeLimit);
+        String sql = before == null
+            ? columns + " ORDER BY occurred_at DESC,id DESC LIMIT ?"
+            : columns + " AND occurred_at < ? ORDER BY occurred_at DESC,id DESC LIMIT ?";
+        var mapper = (org.springframework.jdbc.core.RowMapper<AuditEventView>) (rs,n) ->
+            new AuditEventView(rs.getLong("id"),rs.getTimestamp("occurred_at").toInstant(),
+                rs.getString("subject"),rs.getString("action"),rs.getString("resource_type"),rs.getString("resource_id"),
+                rs.getString("outcome"),rs.getString("request_id"),rs.getString("source_ip"),rs.getString("user_agent"),
+                rs.getString("details"));
+        if (before == null) return jdbc.query(sql,mapper,tenant,safeLimit);
+        return jdbc.query(sql,mapper,tenant,java.sql.Timestamp.from(before),safeLimit);
     }
 }
