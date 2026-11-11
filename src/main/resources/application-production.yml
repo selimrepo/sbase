@@ -7,6 +7,17 @@ server:
     mime-types: application/json,text/css,text/html,text/javascript,application/javascript
     min-response-size: 1024
 spring:
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SMTP_AUTH:true}
+          starttls:
+            enable: ${SMTP_STARTTLS:true}
   application:
     name: sbase
   lifecycle:
@@ -79,15 +90,3 @@ sbase:
     artifact-root: ${SBASE_BI_ARTIFACT_ROOT:/var/lib/sbase/bi-reports}
     scheduler:
       poll-ms: ${SBASE_BI_SCHEDULER_POLL_MS:15000}
-spring:
-  mail:
-    host: ${SMTP_HOST:}
-    port: ${SMTP_PORT:587}
-    username: ${SMTP_USERNAME:}
-    password: ${SMTP_PASSWORD:}
-    properties:
-      mail:
-        smtp:
-          auth: ${SMTP_AUTH:true}
-          starttls:
-            enable: ${SMTP_STARTTLS:true}
