@@ -36,7 +36,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase
-      SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar
+      SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
       DORIS_JDBC_URL: jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
       DORIS_USERNAME: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
@@ -117,28 +117,88 @@ services:
           sleep 5
         done
 
-        # A running BE process is not necessarily registered with the FE.
-        # Register it explicitly and wait until the FE reports it as alive.
+        # Register the BE once. Alive=true alone does not prove that the FE
+        # has received storage-path information or can schedule tablets.
         if ! mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -e "SHOW BACKENDS" | grep -Fq "172.30.0.11"; then
           mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "ALTER SYSTEM ADD BACKEND '172.30.0.11:9050'"
         fi
 
         attempt=0
-        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -e "SHOW BACKENDS" | awk '$2 == "172.30.0.11" && tolower($7) == "true" { found=1 } END { exit !found }'; do
-          attempt=$((attempt + 1))
-          if [ "$attempt" -ge 60 ]; then
-            echo "Doris BE did not become alive in the FE within 5 minutes."
-            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS"
+        healthy=0
+        while [ "$$healthy" -lt 3 ]; do
+          if mysql --protocol=TCP -h doris-fe -P 9030 -uroot -B -e "SHOW BACKENDS" 2>/dev/null | awk -F '\t' '
+            NR == 1 {
+              for (i = 1; i <= NF; i++) {
+                name = tolower($$i)
+                if (name == "host") host_col = i
+                if (name == "alive") alive_col = i
+                if (name == "systemdecommissioned") decommissioned_col = i
+                if (name == "availcapacity") available_col = i
+                if (name == "totalcapacity") total_col = i
+              }
+              next
+            }
+            {
+              available = $$(available_col)
+              total = $$(total_col)
+              sub(/[[:space:]].*$$/, "", available)
+              sub(/[[:space:]].*$$/, "", total)
+              if ($$(host_col) == "172.30.0.11" &&
+                  tolower($$(alive_col)) == "true" &&
+                  tolower($$(decommissioned_col)) == "false" &&
+                  (available + 0) > 0 && (total + 0) > 0) {
+                found = 1
+              }
+            }
+            END {
+              if (!host_col || !alive_col || !decommissioned_col || !available_col || !total_col) exit 2
+              exit !found
+            }
+          '; then
+            healthy=$$((healthy + 1))
+            echo "Doris BE has registered storage capacity ($$healthy/3 consecutive checks)."
+          else
+            healthy=0
+            echo "Waiting for Doris BE storage-path registration and capacity..."
+          fi
+          attempt=$$((attempt + 1))
+          if [ "$$attempt" -ge 60 ]; then
+            echo "Doris BE did not register usable storage capacity within 5 minutes."
+            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS" || true
             exit 1
           fi
-          echo "Waiting for Doris BE registration ($attempt/60)..."
-          sleep 5
+          if [ "$$healthy" -lt 3 ]; then sleep 5; fi
         done
 
         mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
+
+        # SHOW BACKENDS can report an alive BE before FE's RPC blacklist clears.
+        # A real OLAP table creation is the authoritative tablet-placement check.
+        probe_attempt=0
+        while :; do
+          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e \
+            "DROP TABLE IF EXISTS analytics.sbase_backend_readiness_probe" >/dev/null 2>&1 || true
+          if mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e \
+            'CREATE TABLE analytics.sbase_backend_readiness_probe (id BIGINT NOT NULL) UNIQUE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES ("replication_num"="1", "storage_medium"="HDD")' \
+            2>/tmp/doris-backend-probe.err; then
+            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e \
+              "DROP TABLE analytics.sbase_backend_readiness_probe"
+            echo "Doris successfully placed a tablet on the registered backend."
+            break
+          fi
+
+          probe_attempt=$((probe_attempt + 1))
+          if [ "$probe_attempt" -ge 60 ]; then
+            echo "Doris could not place a tablet after 5 minutes; backend is not schedulable."
+            cat /tmp/doris-backend-probe.err
+            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS" || true
+            exit 1
+          fi
+          echo "Waiting for Doris tablet placement readiness ($probe_attempt/60)..."
+          sleep 5
+        done
     networks: [sbase-net]
     restart: "no"
-
   doris-be:
     image: apache/doris:doris-be-2.1.7
     container_name: sbase-doris-be

@@ -34,6 +34,12 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
 
     implementation "org.apache.spark:spark-sql_2.12:${sparkVersion}"
+    // Keep ANTLR aligned with Spark 3.5.6's generated parser ATN format.
+    implementation('org.antlr:antlr4-runtime:4.9.3') {
+        version { strictly '4.9.3' }
+    }
+    // Spark 3.5 still links against the javax.servlet API even when its embedded UI is disabled.
+    implementation 'javax.servlet:javax.servlet-api:4.0.1'
     implementation "org.apache.spark:spark-mllib_2.12:${sparkVersion}"
     implementation "org.apache.mahout:mahout-math:${mahoutVersion}"
 
@@ -41,6 +47,8 @@ dependencies {
     runtimeOnly 'com.mysql:mysql-connector-j'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -51,6 +59,28 @@ tasks.withType(JavaCompile).configureEach {
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
     maxHeapSize = '1g'
+    maxParallelForks = 1
+    // Spark 3.5 on Java 17 needs these JDK internals open for its local runtime.
+    jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang.invoke=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+            '--add-opens=java.base/java.io=ALL-UNNAMED',
+            '--add-opens=java.base/java.net=ALL-UNNAMED',
+            '--add-opens=java.base/java.nio=ALL-UNNAMED',
+            '--add-opens=java.base/java.util=ALL-UNNAMED',
+            '--add-opens=java.base/java.util.concurrent=ALL-UNNAMED',
+            '--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED',
+            '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
+            '--add-opens=java.base/sun.nio.cs=ALL-UNNAMED',
+            '--add-opens=java.base/sun.security.action=ALL-UNNAMED',
+            '--add-opens=java.base/sun.util.calendar=ALL-UNNAMED',
+            '--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED'
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+        showCauses true
+        showStackTraces true
+    }
 }
 
 bootRun {
