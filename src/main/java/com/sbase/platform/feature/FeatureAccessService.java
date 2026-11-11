@@ -27,7 +27,7 @@ public class FeatureAccessService {
         FeatureRow row = db.query("""
             SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=? AND tenant_id=?
             """, rs -> rs.next() ? new FeatureRow(rs.getObject("id", java.util.UUID.class),
-                rs.getString("lifecycle_state"), rs.getString("owner_subject")) : null, featureSet);
+                rs.getString("lifecycle_state"), rs.getString("owner_subject")) : null, featureSet, tenantId);
         if (row == null) throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.NOT_FOUND, "Feature set not found");
         if (write && !"ACTIVE".equalsIgnoreCase(row.lifecycle()))
@@ -44,8 +44,8 @@ public class FeatureAccessService {
         String grant = db.query("""
             SELECT g.permission FROM feature_access_grants g
             JOIN feature_sets f ON f.id=g.feature_set_id
-            WHERE f.name=? AND g.subject=?
-            """, rs -> rs.next() ? rs.getString(1) : null, featureSet, subject);
+            WHERE f.name=? AND f.tenant_id=? AND g.subject=?
+            """, rs -> rs.next() ? rs.getString(1) : null, featureSet, tenantId, subject);
         if (!"ADMIN".equals(grant) && !(write ? "WRITE".equals(grant) : ("READ".equals(grant) || "WRITE".equals(grant)))) {
             throw new org.springframework.security.access.AccessDeniedException("Feature-set access denied");
         }
