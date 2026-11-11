@@ -46,7 +46,7 @@ jobs:
         run: |
           docker version
           docker compose version
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml config --quiet
+          docker compose --profile app-ha --profile doris-fe-ha config --quiet
       - name: Validate production Compose overlay
         env:
           POSTGRES_PASSWORD: ci-production-password
@@ -56,11 +56,11 @@ jobs:
           JWT_JWK_SET_URI: https://identity.example.test/realms/sbase/protocol/openid-connect/certs
         run: |
           cp secrets/prometheus_scrape_token.txt.example secrets/prometheus_scrape_token.txt
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml -f docker-compose.production.yml config --quiet
-          MINIO_ROOT_USER=ci-minio MINIO_ROOT_PASSWORD=ci-minio-password docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml -f docker-compose.object-storage.yml config --quiet
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml -f docker-compose.kafka-ha.yml config --quiet
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml config --quiet
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.production.yml -f docker-compose.doris-ha.yml config --quiet
+          docker compose --profile app-ha --profile doris-fe-ha -f docker-compose.production.yml config --quiet
+          MINIO_ROOT_USER=ci-minio MINIO_ROOT_PASSWORD=ci-minio-password docker compose --profile app-ha --profile doris-fe-ha -f docker-compose.object-storage.yml config --quiet
+          docker compose --profile app-ha --profile doris-fe-ha -f docker-compose.kafka-ha.yml config --quiet
+          docker compose --profile app-ha --profile doris-fe-ha config --quiet
+          DORIS_FE_SERVERS=fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010 docker compose --profile app-ha --profile doris-fe-ha --profile doris-ha --profile observability config --quiet
           rm -f secrets/prometheus_scrape_token.txt
       - name: Configure host kernel for Doris BE
         run: |
@@ -76,7 +76,7 @@ jobs:
           POSTGRES_PASSWORD: ci-sbase-password
           DORIS_USERNAME: root
           DORIS_PASSWORD: ""
-        run: docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml up --build -d
+        run: DORIS_FE_SERVERS=fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010 docker compose --profile app-ha --profile doris-fe-ha up --build -d
       - name: Wait for application liveness
         run: |
           set -eu
@@ -89,14 +89,14 @@ jobs:
             fi
             echo "Waiting for SBase startup ($attempt/$max_attempts)..."
             if [ "$((attempt % 6))" -eq 0 ]; then
-              docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml ps
-              docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml logs --no-color --tail=40 sbase
+              docker compose --profile app-ha --profile doris-fe-ha ps
+              docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=40 sbase
             fi
             sleep 5
           done
           echo "SBase did not become live within 6 minutes."
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml ps
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml logs --no-color --tail=200
+          docker compose --profile app-ha --profile doris-fe-ha ps
+          docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200
           exit 1
       - uses: actions/setup-java@v4
         with:
@@ -119,12 +119,12 @@ jobs:
             sleep 5
           done
           if ! curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8082/actuator/health/liveness; then
-            docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml logs --no-color --tail=200 sbase-node-2
+            docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200 sbase-node-2
             exit 1
           fi
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml stop sbase-node-2
+          docker compose --profile app-ha --profile doris-fe-ha stop sbase-node-2
           curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml start sbase-node-2
+          docker compose --profile app-ha --profile doris-fe-ha start sbase-node-2
           for attempt in $(seq 1 36); do
             if curl --fail --silent --show-error --connect-timeout 1 --max-time 2 http://localhost:8082/actuator/health/liveness; then
               echo
@@ -133,7 +133,7 @@ jobs:
             fi
             sleep 5
           done
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml logs --no-color --tail=200 sbase-node-2
+          docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200 sbase-node-2
           exit 1
       - name: Exercise Doris SQL endpoint outage and recovery
         run: |
@@ -141,7 +141,7 @@ jobs:
           # The FE owns the MySQL protocol endpoint (9030). Verify the published
           # host port actually closes after the container is stopped; checking
           # DriverManager alone can be fooled by a still-open Docker proxy socket.
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml stop doris-fe
+          docker compose --profile app-ha --profile doris-fe-ha stop doris-fe
           endpoint_closed=false
           for attempt in $(seq 1 12); do
             if ! timeout 2 bash -c '</dev/tcp/127.0.0.1/9030' 2>/dev/null; then
@@ -160,7 +160,7 @@ jobs:
           SBASE_DORIS_TEST_USERNAME=root SBASE_DORIS_TEST_PASSWORD='' \
             gradle --no-daemon test --tests '*SparkDorisResilienceTest'
           echo "Doris SQL workload passed with FE-1 stopped; JDBC load-balancer used surviving FEs."
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml start doris-fe
+          docker compose --profile app-ha --profile doris-fe-ha start doris-fe
           for attempt in $(seq 1 36); do
             state="$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-fe 2>/dev/null || true)"
             if [ "$state" = "healthy" ]; then
@@ -170,13 +170,13 @@ jobs:
             sleep 5
           done
           if [ "$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-fe 2>/dev/null || true)" != "healthy" ]; then
-            docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml logs --no-color --tail=200 doris-fe doris-be
+            docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200 doris-fe doris-be
             exit 1
           fi
           # Force a fresh BE heartbeat/storage-path report after FE recovery.
           # A still-running BE can leave the restarted FE without its disk-path
           # scheduling state even while SHOW BACKENDS reports stale capacity.
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml restart doris-be
+          docker compose --profile app-ha --profile doris-fe-ha restart doris-be
           for attempt in $(seq 1 36); do
             state="$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-be 2>/dev/null || true)"
             if [ "$state" = "healthy" ]; then
@@ -186,12 +186,12 @@ jobs:
             sleep 5
           done
           if [ "$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-be 2>/dev/null || true)" != "healthy" ]; then
-            docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml logs --no-color --tail=200 doris-be
+            docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200 doris-be
             exit 1
           fi
           # Re-run initialization so SQL readiness and backend storage capacity
           # are checked against the recovered FE, not the pre-fault FE state.
-          docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml run --rm --no-deps doris-init
+          docker compose --profile app-ha --profile doris-fe-ha run --rm --no-deps doris-init
       - name: Run real Spark-Doris load and idempotency test
         env:
           SBASE_DORIS_TEST_JDBC_URL: jdbc:mysql://127.0.0.1:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
@@ -200,10 +200,10 @@ jobs:
         run: gradle --no-daemon test --tests '*SparkDorisResilienceTest'
       - name: Show container status
         if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml ps
+        run: docker compose --profile app-ha --profile doris-fe-ha ps
       - name: Collect logs on failure
         if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml logs --no-color --tail=300
+        run: docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=300
       - name: Stop stack and remove volumes
         if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml down --volumes --remove-orphans
+        run: docker compose --profile app-ha --profile doris-fe-ha down --volumes --remove-orphans

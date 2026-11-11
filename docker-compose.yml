@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: sbase
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -30,16 +30,23 @@ services:
       - "7078"
       - "7079"
     environment:
-      SPRING_PROFILES_ACTIVE: docker
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
       SPRING_DATASOURCE_USERNAME: sbase
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-}
+      JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase
       SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
-      DORIS_JDBC_URL: jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
+      DORIS_JDBC_URL: ${DORIS_JDBC_URL:-jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true}
       DORIS_USERNAME: ${DORIS_USERNAME:-root}
       DORIS_PASSWORD: ${DORIS_PASSWORD:-}
+      SBASE_S3_ENDPOINT: ${SBASE_S3_ENDPOINT:-}
+      SBASE_S3_REGION: ${SBASE_S3_REGION:-us-east-1}
+      SBASE_S3_BUCKET: ${SBASE_S3_BUCKET:-sbase-artifacts}
+      SBASE_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-}
+      SBASE_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-}
       JAVA_TOOL_OPTIONS: -Xms512m -Xmx2g
     depends_on:
       postgres:
@@ -54,14 +61,24 @@ services:
         condition: service_completed_successfully
     networks: [sbase-net]
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    mem_limit: 4g
+    cpus: 4.0
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/actuator/health/readiness >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 120s
 
   spark-master:
     image: apache/spark:3.5.6
     container_name: sbase-spark-master
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master"]
     ports:
-      - "7077:7077"
-      - "8081:8080"
+      - "127.0.0.1:7077:7077"
+      - "127.0.0.1:8081:8080"
     networks: [sbase-net]
     restart: unless-stopped
 
@@ -81,11 +98,11 @@ services:
     container_name: sbase-doris-fe
     hostname: doris-fe
     environment:
-      FE_SERVERS: fe1:172.30.0.10:9010
+      FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010}
       FE_ID: 1
     ports:
-      - "8030:8030"
-      - "9030:9030"
+      - "127.0.0.1:8030:8030"
+      - "127.0.0.1:9030:9030"
     volumes:
       - doris-fe-meta:/opt/apache-doris/fe/doris-meta
       - doris-fe-log:/opt/apache-doris/fe/log
@@ -242,6 +259,267 @@ services:
       start_period: 90s
     restart: unless-stopped
 
+  sbase-node-2:
+    profiles: ["app-ha"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sbase:latest
+    container_name: sbase-node-2
+    ports:
+      - "8082:8080"
+    expose:
+      - "7078"
+      - "7079"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
+      SPRING_DATASOURCE_USERNAME: sbase
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+      SPARK_MASTER: spark://spark-master:7077
+      SPARK_DRIVER_HOST: sbase-node-2
+      SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
+      DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000&loadBalanceHostRemovalGracePeriod=15000
+      DORIS_USERNAME: ${DORIS_USERNAME:-root}
+      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
+      JAVA_TOOL_OPTIONS: -Xms512m -Xmx2g
+    depends_on:
+      postgres:
+        condition: service_healthy
+      spark-master:
+        condition: service_started
+      doris-fe:
+        condition: service_healthy
+      doris-be:
+        condition: service_healthy
+      doris-init:
+        condition: service_completed_successfully
+      doris-fe-2:
+        condition: service_healthy
+      doris-fe-3:
+        condition: service_healthy
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  doris-fe-2:
+    profiles: ["doris-fe-ha"]
+    image: apache/doris:doris-fe-2.1.7
+    hostname: doris-fe-2
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_ID: 2
+    ports:
+      - "9031:9030"
+    volumes:
+      - doris-fe2-meta:/opt/apache-doris/fe/doris-meta
+      - doris-fe2-log:/opt/apache-doris/fe/log
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.12
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    restart: unless-stopped
+
+  doris-fe-3:
+    profiles: ["doris-fe-ha"]
+    image: apache/doris:doris-fe-2.1.7
+    hostname: doris-fe-3
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_ID: 3
+    ports:
+      - "9032:9030"
+    volumes:
+      - doris-fe3-meta:/opt/apache-doris/fe/doris-meta
+      - doris-fe3-log:/opt/apache-doris/fe/log
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.13
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    restart: unless-stopped
+volumes:
+
+  doris-be-2:
+    profiles: ["doris-ha"]
+    image: apache/doris:doris-be-2.1.7
+    hostname: doris-be-2
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      BE_ADDR: 172.30.0.14:9050
+    volumes: [doris-be2-storage:/opt/apache-doris/be/storage,doris-be2-log:/opt/apache-doris/be/log]
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.14
+    restart: unless-stopped
+
+  doris-be-3:
+    profiles: ["doris-ha"]
+    image: apache/doris:doris-be-2.1.7
+    hostname: doris-be-3
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      BE_ADDR: 172.30.0.15:9050
+    volumes: [doris-be3-storage:/opt/apache-doris/be/storage,doris-be3-log:/opt/apache-doris/be/log]
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.15
+    restart: unless-stopped
+volumes:
+
+  kafka-1:
+    profiles: ["kafka"]
+    image: apache/kafka:3.8.1
+    hostname: kafka-1
+    environment: &kafka-env
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_NUM_PARTITIONS: 6
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092
+    volumes: [kafka-1-data:/var/lib/kafka/data]
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  kafka-2:
+    profiles: ["kafka"]
+    image: apache/kafka:3.8.1
+    hostname: kafka-2
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9092
+    volumes: [kafka-2-data:/var/lib/kafka/data]
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  kafka-3:
+    profiles: ["kafka"]
+    image: apache/kafka:3.8.1
+    hostname: kafka-3
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9092
+    volumes: [kafka-3-data:/var/lib/kafka/data]
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  schema-registry:
+    profiles: ["kafka"]
+    image: confluentinc/cp-schema-registry:7.8.0
+    hostname: schema-registry
+    depends_on: [kafka-1, kafka-2, kafka-3]
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka-1:9092,PLAINTEXT://kafka-2:9092,PLAINTEXT://kafka-3:9092
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 3
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+    expose: ["8081"]
+    networks: [sbase-net]
+    restart: unless-stopped
+volumes:
+
+  minio:
+    profiles: ["object-storage"]
+    image: minio/minio:RELEASE.2025-02-07T23-21-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    volumes: [minio-data:/data]
+    expose: ["9000","9001"]
+    networks: [sbase-net]
+    restart: unless-stopped
+
+  minio-init:
+    profiles: ["object-storage"]
+    image: minio/mc:RELEASE.2025-02-08T19-14-34Z
+    depends_on: [minio]
+    entrypoint: ["/bin/sh","-c"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    command:
+      - |
+        set -eu
+        until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do sleep 3; done
+        mc mb --ignore-existing local/sbase-artifacts
+        mc version enable local/sbase-artifacts
+        mc ilm rule add --expire-days 365 local/sbase-artifacts
+        mc ilm rule add --noncurrent-expire-days 90 local/sbase-artifacts
+        mc mb --ignore-existing local/doris-backups
+        mc version enable local/doris-backups
+        mc ilm rule add --expire-days 365 local/doris-backups
+        mc ilm rule add --noncurrent-expire-days 90 local/doris-backups
+    networks: [sbase-net]
+    restart: "no"
+volumes:
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.1.0
+    container_name: sbase-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    secrets:
+      - prometheus_scrape_token
+    expose:
+      - "9090"
+    networks: [sbase-net]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+
+volumes:
+
+  doris-ha-init:
+    image: mysql:8.4
+    container_name: sbase-doris-init
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+      doris-be:
+        condition: service_healthy
+    environment:
+      DORIS_USERNAME: ${DORIS_USERNAME:-sbase_app}
+      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
+    profiles: ["doris-ha"]
+    volumes:
+      - ./ops/register-doris-ha-backends.sh:/ops/register-doris-ha-backends.sh:ro
+    entrypoint: ["/bin/bash", "/ops/register-doris-ha-backends.sh"]
+    command: []
+    networks: [sbase-net]
+    restart: "no"
+
 networks:
   sbase-net:
     driver: bridge
@@ -255,3 +533,20 @@ volumes:
   doris-fe-log:
   doris-be-storage:
   doris-be-log:
+  doris-fe2-meta:
+  doris-fe2-log:
+  doris-fe3-meta:
+  doris-fe3-log:
+  doris-be2-storage:
+  doris-be2-log:
+  doris-be3-storage:
+  doris-be3-log:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:
+  minio-data:
+  prometheus-data:
+
+secrets:
+  prometheus_scrape_token:
+    file: ${PROMETHEUS_SCRAPE_TOKEN_FILE:-./secrets/prometheus_scrape_token.txt}
