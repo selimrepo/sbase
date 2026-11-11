@@ -29,7 +29,8 @@ public class FeatureAccessService {
             org.springframework.http.HttpStatus.NOT_FOUND, "Feature set not found");
         if (write && !"ACTIVE".equalsIgnoreCase(row.lifecycle()))
             throw new org.springframework.security.access.AccessDeniedException("Only ACTIVE feature sets can be materialized");
-        if (subject.equals(row.owner()) || permissions.has(subject, "platform:admin")) return;
+        boolean admin = authentication.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("PERM_platform:admin")) || permissions.has(subject, "platform:admin");
+        if (subject.equals(row.owner()) || admin) return;
         Integer grants = db.queryForObject("SELECT count(*) FROM feature_access_grants WHERE feature_set_id=?",
             Integer.class, row.id());
         if ((grants == null || grants == 0) && row.owner() == null) return;

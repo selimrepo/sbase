@@ -9,6 +9,8 @@ import com.sbase.platform.DashboardLayoutController;
 import com.sbase.platform.bi.BiReportScheduleWorker;
 import com.sbase.platform.bi.DorisBiQueryService;
 import com.sbase.platform.feature.FeatureAccessService;
+import com.sbase.platform.feature.FeatureEngineeringController;
+import com.sbase.platform.feature.SparkFeatureEngineeringService;
 import com.sbase.platform.security.PermissionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -110,6 +112,19 @@ class AdvancedPlatformIntegrationTest {
             VALUES(?,?,'WRITE',?)
             """, id, "feature-analyst", "feature-owner");
         access.require(analyst, "customer_features_it", true);
+
+        SparkFeatureEngineeringService spark = mock(SparkFeatureEngineeringService.class);
+        FeatureEngineeringController materializer = new FeatureEngineeringController(
+            spark, access, db, new ObjectMapper());
+        var request = new FeatureEngineeringController.MaterializeRequest(
+            "customer_features_it", "s3://input/customer", "s3://output/customer",
+            List.of(new FeatureEngineeringController.Operation("bucketize", "score", "score_bucket", 10)));
+        Map<String,Object> materialized = materializer.materialize(request, owner);
+        assertThat(materialized.get("status")).isEqualTo("SUCCEEDED");
+        assertThat(db.queryForObject("SELECT status FROM feature_materializations WHERE feature_set_id=?", String.class, id))
+            .isEqualTo("SUCCEEDED");
+        assertThat(db.queryForObject("SELECT count(*) FROM feature_lineage WHERE feature_set_id=?", Integer.class, id))
+            .isEqualTo(1);
     }
 
     @Test
