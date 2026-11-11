@@ -31,16 +31,26 @@ public final class CircuitBreaker {
         boolean probe = acquirePermission();
         try {
             T result = operation.get();
-            failures.set(0);
-            openedAt.set(0);
-            probeInFlight.set(false);
+            recordSuccess();
             return result;
         } catch (RuntimeException | Error failure) {
-            if (probe) { openedAt.set(System.nanoTime()); failures.set(threshold); }
-            else if (failures.incrementAndGet() >= threshold) openedAt.compareAndSet(0, System.nanoTime());
-            probeInFlight.set(false);
+            recordFailure(probe);
             throw failure;
         }
+    }
+
+    public void recordSuccess() {
+        failures.set(0);
+        openedAt.set(0);
+        probeInFlight.set(false);
+    }
+
+    public void recordFailure() { recordFailure(false); }
+
+    private void recordFailure(boolean probe) {
+        if (probe) { openedAt.set(System.nanoTime()); failures.set(threshold); }
+        else if (failures.incrementAndGet() >= threshold) openedAt.compareAndSet(0, System.nanoTime());
+        probeInFlight.set(false);
     }
 
     private boolean acquirePermission() {
