@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 # Run from the repository root. The output directory should be on durable,
 # encrypted storage and copied off-host by the deployment's backup agent.
