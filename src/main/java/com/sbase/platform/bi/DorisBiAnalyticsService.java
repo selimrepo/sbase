@@ -80,7 +80,7 @@ public class DorisBiAnalyticsService {
                            COALESCE(SUM(scan_bytes), 0) AS scanned_bytes,
                            COALESCE(SUM(scan_rows), 0) AS scanned_rows
                     FROM information_schema.query_audit_log
-                    WHERE start_time >= NOW() - INTERVAL 24 HOUR
+                    WHERE time >= NOW() - INTERVAL 24 HOUR
                       AND is_query = 1
                     """);
             return Map.of(
