@@ -23,6 +23,7 @@ public class PipelineService {
         return auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("PERM_platform:admin"));
     }
     @Transactional public PipelineEntity create(PipelineRequest request,Authentication auth) {
+        tenants.requireWrite(auth);
         validator.parseAndValidate(request.definitionJson());
         return repository.save(new PipelineEntity(tenants.tenantId(auth),tenants.subject(auth),request.name(),request.description(),request.definitionJson(),request.enabled()));
     }
@@ -33,16 +34,18 @@ public class PipelineService {
     }
     @Transactional(readOnly=true) public PipelineEntity get(UUID id,Authentication auth) { return authorize(id,auth,false); }
     @Transactional(readOnly=true) public PipelineEntity authorize(UUID id,Authentication auth,boolean write) {
+        if(write) tenants.requireWrite(auth);
         PipelineEntity p=repository.findByIdAndTenantId(id,tenants.tenantId(auth))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,"Pipeline not found"));
         require(p,auth,write); return p;
     }
     @Transactional public PipelineEntity update(UUID id,PipelineRequest request,Authentication auth) {
+        tenants.requireWrite(auth);
         validator.parseAndValidate(request.definitionJson());
         PipelineEntity p=get(id,auth); require(p,auth,true);
         p.update(request.name(),request.description(),request.definitionJson(),request.enabled()); return p;
     }
-    @Transactional public void delete(UUID id,Authentication auth) { PipelineEntity p=get(id,auth); require(p,auth,true); repository.delete(p); }
+    @Transactional public void delete(UUID id,Authentication auth) { tenants.requireWrite(auth); PipelineEntity p=get(id,auth); require(p,auth,true); repository.delete(p); }
     private boolean canRead(UUID tenant,UUID id,String subject) {
         try { acl.require(tenant,"PIPELINE",id,subject,false,false); return true; }
         catch(org.springframework.security.access.AccessDeniedException e) { return false; }
