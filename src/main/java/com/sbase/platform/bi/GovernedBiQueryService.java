@@ -15,22 +15,22 @@ import java.util.concurrent.*;
 public class GovernedBiQueryService {
  private final DorisBiQueryService doris;private final JdbcTemplate control;private final JdbcTemplate analytics;
  private final ObjectMapper mapper;private final String database;private final Set<String> tables;
- private final Semaphore permits;private final long cacheMillis;private final int maxRows;private final ConcurrentHashMap<String,CacheEntry> cache=new ConcurrentHashMap<>();
+ private final Semaphore permits;private final long cacheMillis;private final int maxRows;private final double maxCost;private final ConcurrentHashMap<String,CacheEntry> cache=new ConcurrentHashMap<>();
  public GovernedBiQueryService(DorisBiQueryService doris,@Qualifier("jdbcTemplate") JdbcTemplate control,
   @Qualifier("dorisJdbcTemplate") JdbcTemplate analytics,ObjectMapper mapper,
   @Value("${sbase.doris.database:analytics}") String database,@Value("${sbase.doris.allowed-tables:}") String allowed,
   @Value("${sbase.bi.max-concurrent-queries:4}") int concurrency,@Value("${sbase.bi.cache-ttl-ms:30000}") long cacheMillis,
-  @Value("${sbase.bi.max-rows:5000}") int maxRows){
+  @Value("${sbase.bi.max-rows:5000}") int maxRows,@Value("${sbase.bi.max-estimated-cost:100000}") double maxCost){
   this.doris=doris;this.control=control;this.analytics=analytics;this.mapper=mapper;this.database=database;
   this.tables=new HashSet<>();for(String t:allowed.split(","))if(!t.isBlank())tables.add(t.trim().toLowerCase(Locale.ROOT));
-  this.permits=new Semaphore(Math.max(1,concurrency));this.cacheMillis=Math.max(0,cacheMillis);this.maxRows=Math.min(10000,Math.max(1,maxRows));
+  this.permits=new Semaphore(Math.max(1,concurrency));this.cacheMillis=Math.max(0,cacheMillis);this.maxRows=Math.min(10000,Math.max(1,maxRows));this.maxCost=Math.max(1000,maxCost);
  }
  public List<Map<String,Object>> tables(){List<Map<String,Object>> out=new ArrayList<>();for(String t:tables){List<Map<String,Object>> cols=analytics.queryForList("SELECT COLUMN_NAME AS name,DATA_TYPE AS type FROM information_schema.columns WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION",database,t);out.add(Map.of("name",t,"columns",cols));}return out;}
  public Map<String,Object> execute(UUID tenant,String subject,QueryDefinition d){
   long started=System.nanoTime();String hash=hash(write(d));String key=tenant+":"+hash;CacheEntry cached=cache.get(key);
   if(cached!=null&&cached.expiresAt()>System.currentTimeMillis()){audit(tenant,subject,hash,0,cached.rows().size(),0,true,"CACHE_HIT");return Map.of("rows",cached.rows(),"rowCount",cached.rows().size(),"cacheHit",true,"queryHash",hash);}
   if(!permits.tryAcquire())throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,"BI query concurrency limit reached");
-  String sql;try{sql=compile(d);}catch(RuntimeException e){permits.release();throw e;}
+  String sql;try{sql=compile(d,tenant);double planned=(double)(d.limit()==null?1000:d.limit())*(1+(d.dimensions()==null?0:d.dimensions().size())+(d.filters()==null?0:d.filters().size()));if(planned>maxCost)throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,"Estimated BI query cost exceeds configured budget");}catch(RuntimeException e){permits.release();throw e;}
   try{
    List<Map<String,Object>> rows=doris.query(sql);long elapsed=(System.nanoTime()-started)/1_000_000;
    double cost=estimate(d,rows.size(),elapsed);audit(tenant,subject,hash,elapsed,rows.size(),cost,false,"SUCCEEDED");
@@ -39,7 +39,7 @@ public class GovernedBiQueryService {
   }catch(RuntimeException ex){long elapsed=(System.nanoTime()-started)/1_000_000;audit(tenant,subject,hash,elapsed,0,0,false,"FAILED");throw ex;}
   finally{permits.release();}
  }
- public String compile(QueryDefinition d){
+ public String compile(QueryDefinition d,UUID tenant){
   if(d==null||d.table()==null||!tables.contains(d.table().toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Table is not allow-listed");
   if(d.dimensions()==null||d.dimensions().size()>12||d.metrics()==null||d.metrics().isEmpty()||d.metrics().size()>20)throw new IllegalArgumentException("Select up to 12 dimensions and 1..20 metrics");
   Set<String> valid=new HashSet<>();List<Map<String,Object>> cols=analytics.queryForList("SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA=? AND TABLE_NAME=?",database,d.table());
@@ -49,7 +49,7 @@ public class GovernedBiQueryService {
   for(Metric m:d.metrics()){String fn=m.aggregate()==null?"COUNT":m.aggregate().toUpperCase(Locale.ROOT);if(!Set.of("COUNT","SUM","AVG","MIN","MAX","COUNT_DISTINCT").contains(fn))throw new IllegalArgumentException("Unsupported metric aggregation");if(!("*".equals(m.column())&&"COUNT".equals(fn)))column(m.column(),valid);String alias=identifier(m.alias());String expression=fn.equals("COUNT_DISTINCT")?"COUNT(DISTINCT "+m.column()+")":fn+"("+m.column()+")";select.add(expression+" AS "+alias);aliases.add(alias);}
   if(select.isEmpty())throw new IllegalArgumentException("At least one dimension or metric is required");
   StringBuilder sql=new StringBuilder("SELECT ").append(String.join(",",select)).append(" FROM ").append(d.table());
-  List<String> where=new ArrayList<>();if(d.filters()!=null){if(d.filters().size()>40)throw new IllegalArgumentException("At most 40 filters are allowed");for(Filter f:d.filters())where.add(filter(f,valid));}
+  if(!valid.contains("tenant_id"))throw new org.springframework.security.access.AccessDeniedException("BI source table must expose tenant_id for tenant isolation");\n  List<String> where=new ArrayList<>();where.add("tenant_id = "+literal(tenant.toString()));if(d.filters()!=null){if(d.filters().size()>40)throw new IllegalArgumentException("At most 40 filters are allowed");for(Filter f:d.filters())where.add(filter(f,valid));}
   if(!where.isEmpty())sql.append(" WHERE ").append(String.join(" AND ",where));
   if(!groups.isEmpty())sql.append(" GROUP BY ").append(String.join(",",groups));
   if(d.orderBy()!=null&&!d.orderBy().isEmpty()){List<String> order=new ArrayList<>();if(d.orderBy().size()>10)throw new IllegalArgumentException("At most 10 sort expressions");for(Sort s:d.orderBy()){String col=identifier(s.column());if(!aliases.contains(col))throw new IllegalArgumentException("Sort must reference a selected dimension or metric alias");String dir="DESC".equalsIgnoreCase(s.direction())?"DESC":"ASC";order.add(col+" "+dir);}sql.append(" ORDER BY ").append(String.join(",",order));}
