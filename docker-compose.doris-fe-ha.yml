@@ -31,6 +31,9 @@ services:
     networks:
       sbase-net:
         ipv4_address: 172.30.0.12
+    depends_on:
+      doris-fe:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
       interval: 15s
