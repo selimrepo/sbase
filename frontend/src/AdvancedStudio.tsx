@@ -103,7 +103,7 @@ function Dashboard(){
 }
 function DashboardWidget({dashboardId,widget}:{dashboardId:string;widget:any}){
  const query=useQuery({queryKey:['widget-data',dashboardId,widget.id],queryFn:()=>post<any>('/api/platform/advanced/dashboards/'+dashboardId+'/widgets/'+widget.id+'/run',{}),enabled:!!dashboardId&&!!widget.id,refetchInterval:widget.refresh_seconds>0?widget.refresh_seconds*1000:false,retry:1})
- const rows=query.data?.rows||[],keys=rows.length?Object.keys(rows[0]):[],labelKey=keys.find((k:string)=>typeof rows[0][k]==='string')||keys[0],valueKey=keys.find((k:string)=>typeof rows[0][k]==='number')||keys.find((k:string)=>k!==labelKey)
+ const rows=query.data?.rows||[],keys=rows.length?Object.keys(rows[0]):[],labelKey=keys.find((k:string)=>typeof rows[0][k]==='string')||keys[0]||'__label',valueKey=keys.find((k:string)=>typeof rows[0][k]==='number')||keys.find((k:string)=>k!==labelKey)||keys[0]||'__value'
  const numeric=(v:any)=>typeof v==='number'?v:Number(v)
  const chartRows=rows.map((r:any,i:number)=>({...r,__label:String(r[labelKey]??i),__value:numeric(r[valueKey])}))
  const value=rows.length&&valueKey?numeric(rows[0][valueKey]):null
