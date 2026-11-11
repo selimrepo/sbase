@@ -9,6 +9,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Qualifier;
+import java.util.concurrent.Executor;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
@@ -26,12 +28,15 @@ public class ConnectorExecutionService {
     private final ObjectMapper mapper;
     private final String workerId = UUID.randomUUID().toString();
     private final int batchSize;
+    private final Executor workerExecutor;
 
     public ConnectorExecutionService(List<IngestionConnector> list,
             @Qualifier("jdbcTemplate") JdbcTemplate db, ObjectMapper mapper,
-            @Value("${sbase.ingestion.worker.batch-size:4}") int batchSize) {
+            @Value("${sbase.ingestion.worker.batch-size:4}") int batchSize,
+            @Qualifier("ingestionExecutor") Executor workerExecutor) {
         this.db = db; this.mapper = mapper;
         this.batchSize = Math.max(1, Math.min(32, batchSize));
+        this.workerExecutor = workerExecutor;
         Map<String, IngestionConnector> map = new HashMap<>();
         for (IngestionConnector connector : list)
             if (map.put(connector.type().toLowerCase(Locale.ROOT), connector) != null)
@@ -88,7 +93,12 @@ public class ConnectorExecutionService {
         for (int i = 0; i < batchSize; i++) {
             ClaimedRun run = claimOne();
             if (run == null) return;
-            process(run);
+            try { workerExecutor.execute(() -> process(run)); }
+            catch (RuntimeException rejected) {
+                db.update("UPDATE ingestion_runs SET status='QUEUED',lease_owner=NULL,lease_until=NULL,error_message=? WHERE id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=?",
+                    "Worker executor rejected run: " + rejected.getMessage(), run.id(), workerId, run.fencingToken());
+                return;
+            }
         }
     }
 
@@ -96,7 +106,7 @@ public class ConnectorExecutionService {
         return db.query("""
             WITH candidate AS (
                 SELECT id FROM ingestion_runs
-                 WHERE status='QUEUED' OR (status='RETRY_WAIT' AND next_attempt_at<=now())
+                 WHERE status='QUEUED' OR (status='RETRY_WAIT' AND next_attempt_at<=now()) OR (status='RUNNING' AND lease_until<now())
                  ORDER BY submitted_at,id
                  FOR UPDATE SKIP LOCKED LIMIT 1
             )
@@ -109,6 +119,14 @@ public class ConnectorExecutionService {
             RETURNING r.id,r.tenant_id,r.connector_id,r.request_payload,r.fencing_token,r.attempt_count
             """, rs -> rs.next() ? new ClaimedRun(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
                 rs.getObject(3, UUID.class), rs.getString(4), rs.getLong(5), rs.getInt(6)) : null, workerId);
+    }
+
+    @Scheduled(fixedDelayString = "${sbase.ingestion.worker.heartbeat-ms:20000}")
+    public void heartbeatLeases() {
+        db.update("""
+            UPDATE ingestion_runs SET lease_until=now()+interval '90 seconds',lease_heartbeat_at=now()
+             WHERE status='RUNNING' AND lease_owner=? AND lease_until>now()
+            """, workerId);
     }
 
     private void process(ClaimedRun run) {
