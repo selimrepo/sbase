@@ -2,6 +2,7 @@ package com.sbase.platform.feature;
 
 import com.sbase.platform.security.PermissionService;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -10,21 +11,30 @@ import org.springframework.stereotype.Service;
 public class FeatureAccessService {
     private final JdbcTemplate db;
     private final PermissionService permissions;
+    private final com.sbase.platform.tenant.TenantContext tenants;
 
     public FeatureAccessService(@Qualifier("jdbcTemplate") JdbcTemplate db, PermissionService permissions) {
+        this.db=db; this.permissions=permissions; this.tenants=null;
+    }
+
+    @Autowired
+    public FeatureAccessService(@Qualifier("jdbcTemplate") JdbcTemplate db, PermissionService permissions, com.sbase.platform.tenant.TenantContext tenants) {
         this.db = db;
         this.permissions = permissions;
+        this.tenants = tenants;
     }
 
     private record FeatureRow(java.util.UUID id, String lifecycle, String owner) { }
 
     public void require(Authentication authentication, String featureSet, boolean write) {
         String subject = permissions.subject(authentication);
+        java.util.UUID tenantId = tenants == null ? java.util.UUID.fromString("00000000-0000-0000-0000-000000000001") : tenants.tenantId(authentication);
+        if(write && tenants != null) tenants.requireWrite(authentication);
         permissions.require(authentication, write ? "features:write" : "features:read");
         FeatureRow row = db.query("""
-            SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=?
+            SELECT id, lifecycle_state, owner_subject FROM feature_sets WHERE name=? AND tenant_id=?
             """, rs -> rs.next() ? new FeatureRow(rs.getObject("id", java.util.UUID.class),
-                rs.getString("lifecycle_state"), rs.getString("owner_subject")) : null, featureSet);
+                rs.getString("lifecycle_state"), rs.getString("owner_subject")) : null, featureSet, tenantId);
         if (row == null) throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.NOT_FOUND, "Feature set not found");
         if (write && !"ACTIVE".equalsIgnoreCase(row.lifecycle()))
@@ -41,8 +51,8 @@ public class FeatureAccessService {
         String grant = db.query("""
             SELECT g.permission FROM feature_access_grants g
             JOIN feature_sets f ON f.id=g.feature_set_id
-            WHERE f.name=? AND g.subject=?
-            """, rs -> rs.next() ? rs.getString(1) : null, featureSet, subject);
+            WHERE f.name=? AND f.tenant_id=? AND g.subject=?
+            """, rs -> rs.next() ? rs.getString(1) : null, featureSet, tenantId, subject);
         if (!"ADMIN".equals(grant) && !(write ? "WRITE".equals(grant) : ("READ".equals(grant) || "WRITE".equals(grant)))) {
             throw new org.springframework.security.access.AccessDeniedException("Feature-set access denied");
         }

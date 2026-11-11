@@ -19,6 +19,7 @@ class OnlineFeatureStoreServiceTest {
         service.upsert("customer_profile", "customer-42", 3,
             Instant.parse("2026-11-08T10:00:00Z"), Map.of("lifetime_value", 123.5));
         verify(jdbc).update(contains("ON CONFLICT(feature_set, entity_key) DO UPDATE"),
+            eq(java.util.UUID.fromString("00000000-0000-0000-0000-000000000001")),
             eq("customer_profile"), eq("customer-42"), eq(3), anyString(), any(java.sql.Timestamp.class));
     }
 

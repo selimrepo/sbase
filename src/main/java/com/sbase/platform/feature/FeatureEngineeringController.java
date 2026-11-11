@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 import java.util.Map;
@@ -20,15 +21,18 @@ public class FeatureEngineeringController {
     private final FeatureAccessService access;
     private final JdbcTemplate db;
     private final ObjectMapper mapper;
+    private final com.sbase.platform.tenant.TenantContext tenants;
 
     public FeatureEngineeringController(SparkFeatureEngineeringService service,
                                         FeatureAccessService access,
                                         @Qualifier("jdbcTemplate") JdbcTemplate db,
-                                        ObjectMapper mapper) {
+                                        ObjectMapper mapper,
+                                        com.sbase.platform.tenant.TenantContext tenants) {
         this.service = service;
         this.access = access;
         this.db = db;
         this.mapper = mapper;
+        this.tenants = tenants;
     }
 
     public record MaterializeRequest(@NotBlank String featureSetName, @NotBlank String inputUri,
@@ -40,9 +44,9 @@ public class FeatureEngineeringController {
     public Map<String,Object> materialize(@Valid @RequestBody MaterializeRequest request, Authentication auth) {
         access.require(auth, request.featureSetName(), true);
         FeatureSetRef feature = db.query("""
-            SELECT id,version FROM feature_sets WHERE name=?
+            SELECT id,version FROM feature_sets WHERE name=? AND tenant_id=?
             """, rs -> rs.next() ? new FeatureSetRef(rs.getObject("id", UUID.class), rs.getInt("version")) : null,
-            request.featureSetName());
+            request.featureSetName(), tenants == null ? java.util.UUID.fromString("00000000-0000-0000-0000-000000000001") : tenants.tenantId(auth));
         if (feature == null) throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.NOT_FOUND, "Feature set not found");
 

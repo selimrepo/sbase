@@ -1,0 +1,86 @@
+# Compose overlay for a 3-FE / 3-BE Doris cluster.
+# Run each FE/BE on a separate host/failure domain for real HA.
+services:
+  sbase:
+    environment:
+      DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
+    depends_on:
+      doris-fe-2:
+        condition: service_started
+      doris-fe-3:
+        condition: service_started
+  doris-fe:
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_ID: 1
+  doris-be:
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      BE_ADDR: 172.30.0.11:9050
+  doris-init:
+    volumes:
+      - ./ops/register-doris-ha-backends.sh:/ops/register-doris-ha-backends.sh:ro
+    entrypoint: ["/bin/bash","/ops/register-doris-ha-backends.sh"]
+    command: []
+    depends_on:
+      doris-fe-2:
+        condition: service_started
+      doris-fe-3:
+        condition: service_started
+      doris-be-2:
+        condition: service_started
+      doris-be-3:
+        condition: service_started
+  doris-fe-2:
+    image: apache/doris:doris-fe-2.1.7
+    hostname: doris-fe-2
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_ID: 2
+    volumes: [doris-fe2-meta:/opt/apache-doris/fe/doris-meta,doris-fe2-log:/opt/apache-doris/fe/log]
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.12
+    restart: unless-stopped
+  doris-fe-3:
+    image: apache/doris:doris-fe-2.1.7
+    hostname: doris-fe-3
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      FE_ID: 3
+    volumes: [doris-fe3-meta:/opt/apache-doris/fe/doris-meta,doris-fe3-log:/opt/apache-doris/fe/log]
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.13
+    restart: unless-stopped
+  doris-be-2:
+    image: apache/doris:doris-be-2.1.7
+    hostname: doris-be-2
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      BE_ADDR: 172.30.0.14:9050
+    volumes: [doris-be2-storage:/opt/apache-doris/be/storage,doris-be2-log:/opt/apache-doris/be/log]
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.14
+    restart: unless-stopped
+  doris-be-3:
+    image: apache/doris:doris-be-2.1.7
+    hostname: doris-be-3
+    environment:
+      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
+      BE_ADDR: 172.30.0.15:9050
+    volumes: [doris-be3-storage:/opt/apache-doris/be/storage,doris-be3-log:/opt/apache-doris/be/log]
+    networks:
+      sbase-net:
+        ipv4_address: 172.30.0.15
+    restart: unless-stopped
+volumes:
+  doris-fe2-meta:
+  doris-fe2-log:
+  doris-fe3-meta:
+  doris-fe3-log:
+  doris-be2-storage:
+  doris-be2-log:
+  doris-be3-storage:
+  doris-be3-log:

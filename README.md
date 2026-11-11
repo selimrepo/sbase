@@ -193,6 +193,12 @@ docker compose down
 
 To remove persisted Compose volumes as well, use `docker compose down -v`. This deletes the data stored in those volumes; do not run it if you need to preserve local databases or artifacts.
 
+## Production deployment
+
+The default Compose stack is intended for local evaluation and CI. A hardened single-host deployment overlay, PostgreSQL backup/restore scripts, Prometheus metrics configuration, and explicit production limitations are documented in [docs/production-readiness.md](docs/production-readiness.md).
+
+The production overlay binds the application to loopback by default, removes published database/analytics ports, requires explicit credentials and JWT issuer configuration, provisions a dedicated Doris application account, and protects Prometheus scraping with a monitoring JWT. It is not a substitute for a multi-node Doris/Kafka topology, tenant isolation, off-host backups, or a tested disaster-recovery plan.
+
 ## Frontend development
 
 The production Dockerfile builds the React application with Node and copies the generated assets into Spring Boot's static resources. The production deployment therefore serves the workspace and API from one application endpoint on port 8080.

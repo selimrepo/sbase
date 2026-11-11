@@ -47,6 +47,20 @@ jobs:
           docker version
           docker compose version
           docker compose -f docker-compose.yml config --quiet
+      - name: Validate production Compose overlay
+        env:
+          POSTGRES_PASSWORD: ci-production-password
+          DORIS_USERNAME: sbase_app
+          DORIS_PASSWORD: ci-doris-password
+          JWT_ISSUER_URI: https://identity.example.test/realms/sbase
+          JWT_JWK_SET_URI: https://identity.example.test/realms/sbase/protocol/openid-connect/certs
+        run: |
+          cp secrets/prometheus_scrape_token.txt.example secrets/prometheus_scrape_token.txt
+          docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
+          MINIO_ROOT_USER=ci-minio MINIO_ROOT_PASSWORD=ci-minio-password docker compose -f docker-compose.yml -f docker-compose.object-storage.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.kafka-ha.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.doris-ha.yml config --quiet
+          rm -f secrets/prometheus_scrape_token.txt
       - name: Configure host kernel for Doris BE
         run: |
           sudo sysctl -w vm.max_map_count=2000000
