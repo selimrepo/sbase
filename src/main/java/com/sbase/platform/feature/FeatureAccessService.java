@@ -33,9 +33,11 @@ public class FeatureAccessService {
         if (subject.equals(row.owner()) || admin) return;
         Integer grants = db.queryForObject("SELECT count(*) FROM feature_access_grants WHERE feature_set_id=?",
             Integer.class, row.id());
-        if ((grants == null || grants == 0) && row.owner() == null) return;
         if (grants == null || grants == 0)
-            throw new org.springframework.security.access.AccessDeniedException("Feature-set owner has not granted access");
+            throw new org.springframework.security.access.AccessDeniedException(
+                row.owner() == null
+                    ? "Feature set has no owner; administrator access is required"
+                    : "Feature-set owner has not granted access");
         String grant = db.query("""
             SELECT g.permission FROM feature_access_grants g
             JOIN feature_sets f ON f.id=g.feature_set_id

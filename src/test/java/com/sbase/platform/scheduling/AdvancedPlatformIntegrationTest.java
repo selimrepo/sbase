@@ -107,6 +107,15 @@ class AdvancedPlatformIntegrationTest {
         assertThrows(org.springframework.security.access.AccessDeniedException.class,
             () -> access.require(analyst, "customer_features_it", true));
 
+        UUID legacyId = UUID.randomUUID();
+        db.update("""
+            INSERT INTO feature_sets(id,name,description,entity_key,feature_schema_json,transformation_json,
+                                     version,created_at,updated_at,lifecycle_state)
+            VALUES(?,?,?, ?, '[]','{}',1,now(),now(),'ACTIVE')
+            """, legacyId, "legacy_unowned_features_it", "Legacy ownerless feature set", "customer_id");
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+            () -> access.require(analyst, "legacy_unowned_features_it", false));
+
         db.update("""
             INSERT INTO feature_access_grants(feature_set_id,subject,permission,granted_by)
             VALUES(?,?,'WRITE',?)
