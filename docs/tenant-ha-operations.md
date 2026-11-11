@@ -2,7 +2,7 @@
 
 ## Tenant identity and ownership
 
-The API now requires a UUID `tenant_id` (or `tenant`) claim in the verified JWT. A token without it is denied. Tenant IDs are not accepted from request bodies or query parameters. Migration V13 backfills existing datasets, pipelines and pipeline runs into the reserved `legacy-default` tenant; existing records are not silently exposed to newly provisioned tenants.
+The API now requires a UUID `tenant_id` (or `tenant`) claim in the verified JWT and an ACTIVE row in `tenant_memberships`. A token without the claim or membership is denied. Tenant creation automatically adds its creator as OWNER; tenant admins can add members with ADMIN, MEMBER or READ_ONLY roles. Tenant IDs are not accepted from request bodies or query parameters. Migration V13 backfills existing datasets, pipelines and pipeline runs into the reserved `legacy-default` tenant; existing records are not silently exposed to newly provisioned tenants.
 
 Datasets and pipelines carry `tenant_id` and `owner_subject`. Their list/get/update/delete paths are tenant-scoped. Resource grants are tenant-scoped and support READ, WRITE and ADMIN. Grant management is exposed at `/api/access-grants` and requires `resources:admin`.
 
@@ -35,7 +35,7 @@ It defines three FE nodes and three BE nodes with persistent volumes. Place them
 
 ## Doris snapshot / restore
 
-Scripts `ops/backup-doris.sh` and `ops/restore-doris.sh` use Doris S3 repositories. Provide a dedicated least-privilege S3 identity and an S3-compatible endpoint. The scripts accept an explicit comma-separated table list and use a stable snapshot label. A successful SQL submission is not proof of a completed backup: check `SHOW BACKUP FROM analytics`, copy the repository data off failure domain, and perform restore drills. Restore is destructive and requires `CONFIRM_DORIS_RESTORE=YES`.
+Scripts `ops/backup-doris.sh` and `ops/restore-doris.sh` use Doris S3 repositories. Provide a dedicated least-privilege S3 identity and an S3-compatible endpoint. The scripts accept an explicit comma-separated table list and use a stable snapshot label. A successful SQL submission is not proof of a completed backup: check `SHOW BACKUP FROM analytics`, copy the repository data off failure domain, and perform restore drills. Restore is destructive and requires `CONFIRM_DORIS_RESTORE=YES`; supply the exact `DORIS_BACKUP_TIMESTAMP` reported by `SHOW BACKUP`.
 
 ## S3 / MinIO object lifecycle
 
@@ -59,4 +59,4 @@ Three broker/controller nodes use replication factor 3 and min ISR 2 for interna
 
 ## Load, stress and soak tests
 
-The `perf/k6` directory contains smoke, stress and long-duration soak scenarios. Run with a production-like staging environment and a scoped test token. Track p95/p99 latency, error rate, throughput, DB pool saturation, Kafka lag, Doris query/compaction pressure, memory, CPU and disk. Soak tests should run for at least 24 hours before a release candidate; test broker/BE/FE loss and recovery during sustained traffic. Never run destructive stress tests against customer production data.
+The `perf/k6` directory contains smoke, stress and long-duration soak scenarios; see [perf/README.md](../perf/README.md) for commands and release gates. Run with a production-like staging environment and a scoped test token. Track p95/p99 latency, error rate, throughput, DB pool saturation, Kafka lag, Doris query/compaction pressure, memory, CPU and disk. Soak tests should run for at least 24 hours before a release candidate; test broker/BE/FE loss and recovery during sustained traffic. Never run destructive stress tests against customer production data.
