@@ -156,8 +156,8 @@ jobs:
           fi
           curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness
           echo "Doris FE-1 SQL endpoint is unreachable while SBase remains live."
-          SBASE_DORIS_TEST_JDBC_URL='jdbc:mysql:loadbalance://127.0.0.1:9030,127.0.0.1:9031,127.0.0.1:9032/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000' \\
-          SBASE_DORIS_TEST_USERNAME=root SBASE_DORIS_TEST_PASSWORD='' \\
+          SBASE_DORIS_TEST_JDBC_URL='jdbc:mysql:loadbalance://127.0.0.1:9030,127.0.0.1:9031,127.0.0.1:9032/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000' \
+          SBASE_DORIS_TEST_USERNAME=root SBASE_DORIS_TEST_PASSWORD='' \
             gradle --no-daemon test --tests '*SparkDorisResilienceTest'
           echo "Doris SQL workload passed with FE-1 stopped; JDBC load-balancer used surviving FEs."
           docker compose -f docker-compose.yml -f docker-compose.app-ha.yml -f docker-compose.doris-fe-ha.yml start doris-fe
