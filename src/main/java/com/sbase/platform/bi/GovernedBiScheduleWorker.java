@@ -29,10 +29,15 @@ public class GovernedBiScheduleWorker {
  @Scheduled(fixedDelayString="${sbase.bi.scheduler.poll-ms:15000}")
  @Transactional
  public void poll(){
+  db.update("""
+   UPDATE sbase_bi_schedule_runs r SET status='FAILED',error_message='Worker lease expired',finished_at=now()
+   FROM sbase_bi_schedules s
+   WHERE r.schedule_id=s.id AND r.status='RUNNING' AND s.lease_until<now()
+   """);
   List<UUID> ids=db.query("""
    WITH due AS (SELECT id FROM sbase_bi_schedules WHERE enabled=true AND next_run_at<=now()
     AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at LIMIT 10 FOR UPDATE SKIP LOCKED)
-   UPDATE sbase_bi_schedules s SET lease_owner=?,lease_until=now()+interval '5 minutes'
+   UPDATE sbase_bi_schedules s SET lease_owner=?,lease_until=now()+interval '30 minutes'
    FROM due WHERE s.id=due.id RETURNING s.id
    """,(rs,n)->rs.getObject(1,UUID.class),node);
   if(ids.isEmpty())return;
