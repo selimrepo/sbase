@@ -11,13 +11,15 @@ import static org.mockito.Mockito.*;
 
 class GovernedBiQueryServiceTest {
  private JdbcTemplate analytics;
+ private DorisBiQueryService doris;
  private GovernedBiQueryService service;
  private final UUID tenant=UUID.fromString("11111111-1111-1111-1111-111111111111");
  @BeforeEach void setUp(){
   analytics=mock(JdbcTemplate.class);
   List<Map<String,Object>> columns=List.of(Map.of("COLUMN_NAME","tenant_id"),Map.of("COLUMN_NAME","region"),Map.of("COLUMN_NAME","revenue"),Map.of("COLUMN_NAME","created_at"));
   doReturn(columns).when(analytics).queryForList(anyString(),any(Object[].class));
-  service=new GovernedBiQueryService(mock(DorisBiQueryService.class),mock(JdbcTemplate.class),analytics,new ObjectMapper(),"analytics","analytics.sales",4,30000,5000,100000);
+  doris=mock(DorisBiQueryService.class);
+  service=new GovernedBiQueryService(doris,mock(JdbcTemplate.class),analytics,new ObjectMapper(),"analytics","analytics.sales",4,30000,5000,100000);
  }
  @Test void compilesTenantScopedAggregateQuery(){
   var definition=new GovernedBiQueryService.QueryDefinition("analytics.sales",List.of("region"),
@@ -57,4 +59,21 @@ class GovernedBiQueryServiceTest {
    List.of(new GovernedBiQueryService.Metric("revenue","SUM","total")),List.of(),List.of(),100);
   assertThrows(IllegalArgumentException.class,()->service.compile(unsafe,tenant));
  }
+ @Test void queryResultsAndCacheEntriesAreIsolatedByTenant(){
+  UUID tenantA=UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  UUID tenantB=UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+  var definition=new GovernedBiQueryService.QueryDefinition("analytics.sales",List.of("region"),
+   List.of(new GovernedBiQueryService.Metric("revenue","SUM","total")),List.of(),List.of(),100);
+  doReturn(List.of(Map.of("region","north","total",10))).when(doris).query(anyString());
+
+  service.execute(tenantA,"alice",definition);
+  service.execute(tenantB,"bob",definition);
+  service.execute(tenantA,"alice",definition);
+
+  var captor=org.mockito.ArgumentCaptor.forClass(String.class);
+  verify(doris,times(2)).query(captor.capture());
+  assertTrue(captor.getAllValues().get(0).contains("tenant_id = '"+tenantA+"'"));
+  assertTrue(captor.getAllValues().get(1).contains("tenant_id = '"+tenantB+"'"));
+ }
+
 }

@@ -21,10 +21,13 @@ import java.util.UUID;
 public class DashboardLayoutController {
     private final JdbcTemplate db;
     private final PermissionService permissions;
+    private final com.sbase.platform.tenant.TenantContext tenants;
 
-    public DashboardLayoutController(@Qualifier("jdbcTemplate") JdbcTemplate db, PermissionService permissions) {
+    public DashboardLayoutController(@Qualifier("jdbcTemplate") JdbcTemplate db, PermissionService permissions,
+                                     com.sbase.platform.tenant.TenantContext tenants) {
         this.db = db;
         this.permissions = permissions;
+        this.tenants = tenants;
     }
 
     public record WidgetPosition(UUID id, int x, int y, int width, int height) {}
@@ -35,7 +38,9 @@ public class DashboardLayoutController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void saveLayout(@PathVariable UUID id, @Valid @RequestBody LayoutRequest request, Authentication auth) {
         permissions.require(auth, "bi:write");
-        if (db.queryForObject("SELECT count(*) FROM dashboards WHERE id=? AND owner_subject=?", Integer.class, id, auth.getName()) == 0)
+        UUID tenantId = tenants.tenantId(auth);
+        tenants.requireWrite(auth);
+        if (db.queryForObject("SELECT count(*) FROM dashboards WHERE id=? AND tenant_id=? AND owner_subject=?", Integer.class, id, tenantId, auth.getName()) == 0)
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Dashboard not found");
         if (request.widgets().size() > 100) throw new IllegalArgumentException("A dashboard can contain at most 100 widgets");
         Set<UUID> ids = new HashSet<>();
@@ -60,9 +65,10 @@ public class DashboardLayoutController {
                 UPDATE dashboard_widgets
                    SET position_x=?, position_y=?, width=?, height=?
                  WHERE id=? AND dashboard_id=?
-                """, widget.x(), widget.y(), widget.width(), widget.height(), widget.id(), id);
+                   AND EXISTS (SELECT 1 FROM dashboards d WHERE d.id=? AND d.tenant_id=?)
+                """, widget.x(), widget.y(), widget.width(), widget.height(), widget.id(), id, id, tenantId);
             if (changed != 1) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Widget does not belong to this dashboard");
         }
-        db.update("UPDATE dashboards SET version=version+1, updated_at=now() WHERE id=?", id);
+        db.update("UPDATE dashboards SET version=version+1, updated_at=now() WHERE id=? AND tenant_id=?", id, tenantId);
     }
 }
