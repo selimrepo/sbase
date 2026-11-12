@@ -114,4 +114,30 @@ class CatalogLineageIntegrationTest {
             "DERIVES_FROM","USER_DECLARED",null,null,BigDecimal.ONE,1L,null),auth))
             .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
     }
+    @Test
+    void datasetCrudAutomaticallyMaintainsCatalogAndColumnNodes() {
+        UUID tenant=UUID.randomUUID();
+        jdbc.update("INSERT INTO tenants(id,slug,display_name,status) VALUES(?,?,?,'ACTIVE')",tenant,"catalog-sync-"+tenant,"Catalog Sync");
+        TenantContext tenantContext=mock(TenantContext.class);
+        var auth=new TestingAuthenticationToken("dataset-owner","n/a");
+        when(tenantContext.tenantId(auth)).thenReturn(tenant);
+        when(tenantContext.subject(auth)).thenReturn("dataset-owner");
+        CatalogLineageService lineage=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper());
+        DatasetService service=new DatasetService(datasets,tenantContext,mock(com.sbase.platform.tenant.ResourceAclService.class),lineage);
+
+        DatasetEntity dataset=service.create(new DatasetRequest("Orders","warehouse","orders","Order facts","POSTGRESQL",
+            "[{\"name\":\"order_id\",\"type\":\"UUID\",\"nullable\":false},{\"name\":\"amount\",\"dataType\":\"DECIMAL(18,2)\"}]"),auth);
+        CatalogAssetEntity table=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"TABLE",dataset.getId().toString()).orElseThrow();
+        assertThat(table.getDisplayName()).isEqualTo("Orders");
+        assertThat(table.getSchemaFingerprint()).isNotBlank();
+        assertThat(lineage.columns(table.getId(),auth)).extracting(CatalogLineageService.AssetView::displayName)
+            .containsExactly("order_id","amount");
+
+        DatasetEntity updated=service.update(dataset.getId(),new DatasetRequest("Orders curated","warehouse","orders",
+            "Curated order facts","POSTGRESQL","[{\"name\":\"order_id\",\"type\":\"UUID\"}]"),auth);
+        assertThat(updated.getName()).isEqualTo("Orders curated");
+        assertThat(lineage.columns(table.getId(),auth)).filteredOn(col->col.displayName().equals("amount"))
+            .singleElement().extracting(CatalogLineageService.AssetView::lifecycleState).isEqualTo("DEPRECATED");
+    }
+
 }
