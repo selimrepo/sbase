@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sbase.platform.IngestionConnector;
 import com.sbase.platform.ingestion.ConnectorExecutionService;
 import com.sbase.platform.ingestion.DeadLetterManagementService;
+import com.sbase.platform.ingestion.DurableRecordSink;
 import com.sbase.pipeline.PipelineExecutionService;
 import com.sbase.platform.bi.BiWorkspaceService;
 import com.zaxxer.hikari.HikariDataSource;
