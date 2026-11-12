@@ -82,7 +82,7 @@ BEGIN
    SELECT a.id INTO table_asset
    FROM catalog_assets a JOIN datasets d ON a.id=md5('dataset:'||d.id::text)::uuid
    WHERE d.tenant_id=r.tenant_id
-     AND (d.namespace||'.'||d.table_name=definition_doc->>'table' OR d.table_name=definition_doc->>'table')
+     AND (d.namespace||'.'||d.table_name=definition_doc->>'table' OR (d.table_name=definition_doc->>'table' AND (SELECT count(*) FROM datasets d2 WHERE d2.tenant_id=d.tenant_id AND d2.table_name=definition_doc->>'table')=1))
    LIMIT 1;
    IF table_asset IS NULL THEN CONTINUE; END IF;
    FOR col_name IN
