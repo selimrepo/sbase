@@ -326,9 +326,18 @@ public class CatalogLineageService {
         UUID tenant=tenants.tenantId(auth);
         CatalogAssetEntity asset=requireAsset(tenant,id);
         requireOwnerOrAdmin(asset,auth);
-        asset.updateGovernance(trim(request.description()),trim(request.ownerTeam()),trim(request.domain()),
-                classification(request.classification()),writeTags(request.tags()),writeMetadata(request.metadata()));
-        if(request.ownerSubject()!=null && !request.ownerSubject().isBlank()) asset.setOwnerSubject(request.ownerSubject().trim());
+        asset.updateGovernance(request.description()==null?asset.getDescription():trim(request.description()),
+                request.ownerTeam()==null?asset.getOwnerTeam():trim(request.ownerTeam()),
+                request.domain()==null?asset.getDomain():trim(request.domain()),
+                request.classification()==null?asset.getClassification():classification(request.classification()),
+                request.tags()==null?asset.getTags():writeTags(request.tags()),
+                request.metadata()==null?asset.getMetadata():writeMetadata(request.metadata()));
+        if(request.ownerSubject()!=null && !request.ownerSubject().isBlank()
+                && !request.ownerSubject().trim().equals(asset.getOwnerSubject())) {
+            if(request.ownerSubject().trim().length()>200) throw bad("Owner subject exceeds 200 characters");
+            tenants.requireTenantAdmin(auth);
+            asset.setOwnerSubject(request.ownerSubject().trim());
+        }
         if(request.lifecycleState()!=null) {
             String state=normalize(request.lifecycleState());
             if(!Set.of("ACTIVE","CERTIFIED","DEPRECATED","DRAFT").contains(state)) throw bad("Invalid lifecycle state");
@@ -421,7 +430,7 @@ public class CatalogLineageService {
     }
     private void requireOwnerOrAdmin(CatalogAssetEntity asset,Authentication auth) {
         boolean admin=auth.getAuthorities().stream().anyMatch(a->Set.of("ROLE_ADMIN","PERM_platform:admin").contains(a.getAuthority()));
-        if(!admin && !asset.getOwnerSubject().equals(tenants.subject(auth))) throw new AccessDeniedException("Only the asset owner or platform administrator can change governance metadata");
+        if(!admin && !asset.getOwnerSubject().equals(tenants.subject(auth))) tenants.requireTenantAdmin(auth);
     }
     private AssetView view(CatalogAssetEntity a,CatalogColumnEntity c) {
         return new AssetView(a.getId(),a.getAssetType(),a.getExternalKey(),a.getDisplayName(),a.getNamespace(),a.getPhysicalName(),
