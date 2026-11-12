@@ -13,6 +13,7 @@ type Asset={
 type Edge={id:string;fromAssetId:string;toAssetId:string;edgeType:string;evidenceType:string;evidenceRef?:string
  expressionText?:string;confidence:number;observedAt:string;effectiveVersion:number;runId?:string}
 type Graph={rootId:string;direction:string;depth:number;truncated:boolean;nodes:Asset[];edges:Edge[]}
+type SchemaVersion={id:string;fingerprint:string;schema:unknown;sourceRef?:string;observedAt:string;createdBy:string}
 const types=['ALL','DATA_SOURCE','CONNECTOR','TABLE','COLUMN','PIPELINE','PIPELINE_STEP','FEATURE_SET','MODEL','REPORT','REPORT_FIELD','DASHBOARD','WIDGET']
 const classification=['PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED']
 const title=(v:string)=>v.toLowerCase().split('_').map(x=>x.charAt(0).toUpperCase()+x.slice(1)).join(' ')
@@ -29,6 +30,7 @@ export default function CatalogLineageStudio(){
  const selected=assets.data?.find(a=>a.id===rootId)
  useEffect(()=>{if(selected){setOwnerTeam(selected.ownerTeam||'');setOwnerSubject(selected.ownerSubject||'');setDomain(selected.domain||'');setClassificationValue(selected.classification);setTags((selected.tags||[]).join(', '));setDescription(selected.description||'')}},[rootId,selected?.updatedAt])
  const graph=useQuery({queryKey:['catalog-lineage-graph',rootId,mode],queryFn:()=>get<Graph>(mode==='impact'?'/api/catalog/lineage/impact?assetId='+rootId+'&depth=8':'/api/catalog/lineage/graph?rootId='+rootId+'&direction=BOTH&depth=4'),enabled:!!rootId,staleTime:10000})
+ const schemaHistory=useQuery({queryKey:['catalog-schema-history',rootId],queryFn:()=>get<SchemaVersion[]>('/api/catalog/assets/'+rootId+'/schema-versions'),enabled:!!rootId&&selected?.assetType==='TABLE'})
  const save=useMutation({mutationFn:()=>api.patch('/api/catalog/assets/'+rootId+'/governance',{description,ownerSubject,ownerTeam,domain,classification:classificationValue,tags:tags.split(',').map(x=>x.trim()).filter(Boolean)}),onSuccess:()=>{qc.invalidateQueries({queryKey:['catalog-assets']});qc.invalidateQueries({queryKey:['catalog-lineage-graph']})}})
  const nodeById=useMemo(()=>new Map((graph.data?.nodes||[]).map(n=>[n.id,n])),[graph.data])
  const childColumns=graph.data?.nodes.filter(n=>n.assetType==='COLUMN'&&n.parentId===selected?.id)||[]
@@ -58,6 +60,9 @@ export default function CatalogLineageStudio(){
      </Panel>
      {selected.assetType==='TABLE'&&<Panel title="Column dictionary" sub="First-class column contracts">
       {childColumns.length?childColumns.map(n=><button key={n.id} className="catalog-column-row" onClick={()=>choose(n.id)}><span><b>{n.displayName}</b><small>{n.description||'No business description'}</small></span><code>{n.dataType||'UNKNOWN'}</code><small>{n.nullable?'NULL':'NOT NULL'}</small></button>):<Empty>Column details appear when a table graph is loaded</Empty>}
+     </Panel>}
+     {selected.assetType==='TABLE'&&<Panel title="Schema history" sub="Immutable schema snapshots recorded by dataset synchronization">
+      {schemaHistory.isLoading?<div className="loading">Loading schema history…</div>:schemaHistory.isError?<div className="error">{errorText(schemaHistory.error)}</div>:schemaHistory.data?.length?schemaHistory.data.map(v=><details className="catalog-schema-version" key={v.id}><summary><b>{date(v.observedAt)}</b><code>{short(v.fingerprint)}</code><small>{v.createdBy}</small></summary><pre>{JSON.stringify(v.schema,null,2)}</pre></details>):<Empty>No schema snapshots recorded yet</Empty>}
      </Panel>}
     </>:<Panel title="Asset details" sub="Select a catalog asset"><Empty>No asset selected</Empty></Panel>}
     <Panel title={mode==='impact'?'Downstream impact':'Lineage explorer'} sub={mode==='impact'?'All reachable downstream consumers and dependencies':'Upstream and downstream graph, bounded to four hops'} extra={<div className="catalog-mode-switch"><button className={mode==='graph'?'active':''} onClick={()=>setMode('graph')}><GitBranch size={13}/> Graph</button><button className={mode==='impact'?'active':''} onClick={()=>setMode('impact')}><ArrowDownRight size={13}/> Impact</button></div>}>
