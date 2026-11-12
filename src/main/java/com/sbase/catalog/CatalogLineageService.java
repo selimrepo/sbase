@@ -46,17 +46,28 @@ public class CatalogLineageService {
         try { schema=mapper.readTree(Objects.toString(dataset.getSchemaJson(),"[]")); }
         catch(Exception invalidSchema) { return; }
         if(schema==null || !schema.isArray()) return;
+
+        // Retire the previous active schema first; this permits ordinal reuse after drops/reorders.
+        List<CatalogColumnEntity> previous=columns.findAllByTenantIdAndTableAssetIdAndCurrentTrueOrderByOrdinalPosition(tenant,table.getId());
+        for(CatalogColumnEntity old:previous) {
+            old.deprecate();
+            assets.findByIdAndTenantId(old.getId(),tenant).ifPresent(a->a.setLifecycleState("DEPRECATED"));
+        }
+        columns.saveAll(previous);
+        columns.flush();
+
         Set<String> present=new HashSet<>(); int ordinal=0;
         for(JsonNode item:schema) {
             ordinal++;
             if(!item.isObject()) continue;
             String name=firstText(item,"name","columnName","field");
             if(name==null) name="column_"+ordinal;
-            if(name.length()>255) continue;
+            if(name.length()>255) throw bad("Discovered column name exceeds 255 characters");
             String type=firstText(item,"type","dataType");
             if(type==null) type="UNKNOWN";
+            if(type.length()>160) throw bad("Discovered column type exceeds 160 characters");
             String key=dataset.getId()+":"+name.toLowerCase(Locale.ROOT);
-            present.add(key);
+            if(!present.add(key)) throw bad("Duplicate column name in discovered schema: "+name);
             CatalogAssetEntity column=upsertAsset(tenant,"COLUMN",key,name,dataset.getOwnerSubject(),table.getId());
             column.setParentId(table.getId());
             column.setLifecycleState("ACTIVE");
@@ -67,10 +78,6 @@ public class CatalogLineageService {
             else detail.updateSchema(ordinal,type,nullable);
             saveEdge(tenant,table.getId(),column.getId(),"CONTAINS","USER_DECLARED",
                 "dataset-schema:"+dataset.getId(),null,BigDecimal.ONE,1,null);
-        }
-        for(CatalogColumnEntity old:columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,table.getId())) {
-            CatalogAssetEntity oldAsset=assets.findByIdAndTenantId(old.getId(),tenant).orElse(null);
-            if(oldAsset!=null && !present.contains(oldAsset.getExternalKey())) oldAsset.setLifecycleState("DEPRECATED");
         }
     }
 
@@ -304,7 +311,7 @@ public class CatalogLineageService {
         return matches.stream().findFirst().orElse(null);
     }
     private void addColumnUse(UUID tenant,UUID tableId,String columnName,UUID consumer,String evidenceType,String evidence,long version) {
-        List<CatalogColumnEntity> details=columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId);
+        List<CatalogColumnEntity> details=columns.findAllByTenantIdAndTableAssetIdAndCurrentTrueOrderByOrdinalPosition(tenant,tableId);
         List<UUID> ids=details.stream().map(CatalogColumnEntity::getId).toList();
         assets.findAllByTenantIdAndIdIn(tenant,ids).stream()
             .filter(a->a.getDisplayName().equalsIgnoreCase(columnName)).findFirst()
@@ -370,9 +377,11 @@ public class CatalogLineageService {
         if(assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"COLUMN",external).isPresent())
             throw new ResponseStatusException(HttpStatus.CONFLICT,"Column is already registered");
         int ordinal=request.ordinalPosition()==null
-                ? columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId).size()+1
+                ? columns.findAllByTenantIdAndTableAssetIdAndCurrentTrueOrderByOrdinalPosition(tenant,tableId).size()+1
                 : request.ordinalPosition();
         if(ordinal<1 || ordinal>100000) throw bad("Invalid column ordinal position");
+        if(columns.existsByTenantIdAndTableAssetIdAndOrdinalPositionAndCurrentTrue(tenant,tableId,ordinal))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Column ordinal is already used by an active column");
         CatalogAssetEntity column=new CatalogAssetEntity(tenant,"COLUMN",external,request.name(),table.getOwnerSubject());
         column.setParentId(tableId);
         column.updateGovernance(request.description(),request.ownerTeam()==null?table.getOwnerTeam():request.ownerTeam(),table.getDomain(),
