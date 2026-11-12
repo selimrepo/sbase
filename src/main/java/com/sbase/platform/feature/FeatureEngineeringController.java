@@ -22,6 +22,7 @@ public class FeatureEngineeringController {
     private final JdbcTemplate db;
     private final ObjectMapper mapper;
     private final com.sbase.platform.tenant.TenantContext tenants;
+    @Autowired(required=false) private com.sbase.catalog.CatalogLineageService catalogLineage;
 
     public FeatureEngineeringController(SparkFeatureEngineeringService service,
                                         FeatureAccessService access,
@@ -38,7 +39,7 @@ public class FeatureEngineeringController {
     public record MaterializeRequest(@NotBlank String featureSetName, @NotBlank String inputUri,
                                      @NotBlank String outputUri, @NotEmpty List<@Valid Operation> operations) {}
     public record Operation(@NotBlank String operation, @NotBlank String source, @NotBlank String output, int buckets) {}
-    private record FeatureSetRef(UUID id, int version) {}
+    private record FeatureSetRef(UUID id, int version, UUID datasetId) {}
 
     @PostMapping("/materialize")
     public Map<String,Object> materialize(@Valid @RequestBody MaterializeRequest request, Authentication auth) {
@@ -65,13 +66,17 @@ public class FeatureEngineeringController {
         try {
             service.materialize(request.inputUri(), request.outputUri(), operations);
             db.update("UPDATE feature_materializations SET status='SUCCEEDED',finished_at=now() WHERE id=?", materializationId);
+            UUID lineageId=UUID.randomUUID();
+            List<String> sourceColumns=request.operations().stream().map(Operation::source).distinct().toList();
             db.update("""
                 INSERT INTO feature_lineage(id,feature_set_id,source_dataset_id,source_columns_json,
                                             parent_feature_ids_json,transformation_json,created_by)
-                VALUES(?,?,NULL,?,'[]',?,?)
-                """, UUID.randomUUID(), feature.id(),
-                mapper.writeValueAsString(request.operations().stream().map(Operation::source).distinct().toList()),
-                transformation, auth.getName());
+                VALUES(?,?,?,?, '[]',?,?)
+                """, lineageId, feature.id(),feature.datasetId(),
+                mapper.writeValueAsString(sourceColumns),transformation,auth.getName());
+            if(catalogLineage!=null) catalogLineage.synchronizeFeatureLineage(lineageId,
+                tenants==null?UUID.fromString("00000000-0000-0000-0000-000000000001"):tenants.tenantId(auth),
+                feature.id(),feature.datasetId(),sourceColumns,List.of(),transformation,auth.getName());
             return Map.of("id", materializationId, "status", "SUCCEEDED", "featureSet", request.featureSetName(),
                 "version", feature.version(), "outputUri", request.outputUri(), "operationCount", operations.size());
         } catch (Exception ex) {
