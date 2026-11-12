@@ -89,9 +89,9 @@ BEGIN
    LIMIT 1;
    IF table_asset IS NULL THEN CONTINUE; END IF;
    FOR col_name IN
-     SELECT jsonb_array_elements_text(COALESCE(definition_doc->'dimensions','[]'::jsonb))
+     SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(definition_doc->'dimensions')='array' THEN definition_doc->'dimensions' ELSE '[]'::jsonb END)
      UNION
-     SELECT metric->>'column' FROM jsonb_array_elements(COALESCE(definition_doc->'metrics','[]'::jsonb)) metric
+     SELECT metric->>'column' FROM jsonb_array_elements(CASE WHEN jsonb_typeof(definition_doc->'metrics')='array' THEN definition_doc->'metrics' ELSE '[]'::jsonb END) metric
        WHERE metric ? 'column'
    LOOP
      SELECT a.id INTO column_asset FROM catalog_assets a
