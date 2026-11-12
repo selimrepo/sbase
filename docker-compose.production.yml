@@ -1,7 +1,5 @@
 # Production overlay. Keep docker-compose.yml as the shared service definition.
-# Required in the production .env: POSTGRES_PASSWORD, SBASE_IMAGE,
-# JWT_ISSUER_URI, JWT_JWK_SET_URI, DORIS_USERNAME, DORIS_PASSWORD,
-# MINIO_ROOT_USER and MINIO_ROOT_PASSWORD (when object-storage is enabled).
+# Set all secrets and identity URLs in the production .env before starting.
 services:
   sbase:
     image: ${SBASE_IMAGE:?Set SBASE_IMAGE to a pinned production image}
@@ -25,5 +23,5 @@ services:
     restart: unless-stopped
   minio:
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER when object-storage is enabled}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD when object-storage is enabled}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
