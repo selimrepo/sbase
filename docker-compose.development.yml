@@ -1,0 +1,13 @@
+# Development overlay. Keep docker-compose.yml as the shared service definition.
+services:
+  sbase:
+    environment:
+      SPRING_PROFILES_ACTIVE: development,docker
+      JAVA_TOOL_OPTIONS: -Xms256m -Xmx2g
+    restart: "no"
+  postgres:
+    restart: "no"
+  spark-master:
+    restart: "no"
+  spark-worker:
+    restart: "no"

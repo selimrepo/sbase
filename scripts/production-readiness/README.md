@@ -6,6 +6,41 @@ Deployment-facing checks for a staging environment. Do not run load or restore t
 
 Bash, curl, PostgreSQL client tools (psql/pg_dump/pg_restore), k6, and a deployed SBase environment.
 
+## Environment configuration
+
+Docker Compose automatically reads a project-root `.env` file. Create it from the template and replace the placeholder with a strong, unique password:
+
+```bash
+cp .env.example .env
+# Generate a secret, then paste it as POSTGRES_PASSWORD in .env:
+openssl rand -base64 36
+chmod 600 .env
+docker compose config
+docker compose up -d --build
+```
+
+`POSTGRES_PASSWORD` is mandatory: Compose refuses to start if it is missing or empty. The same value is injected into PostgreSQL and the SBase application as `SPRING_DATASOURCE_PASSWORD`. The checked-in `.env.example` is only a template; never commit the real `.env` file. For running Spring Boot outside Compose, export `SPRING_DATASOURCE_PASSWORD` in the process environment.
+
+## Development and production Compose files
+
+The shared `docker-compose.yml` retains the complete service graph and optional profiles (HA, Doris HA, Kafka, object storage and observability). Use one environment overlay; do not start both overlays together.
+
+Development:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.development.yml config
+docker compose -f docker-compose.yml -f docker-compose.development.yml up --build -d
+```
+
+Production (pin `SBASE_IMAGE` to an immutable release tag or digest and provide production-only values in the deployment environment or secret manager):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.production.yml config
+docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
+```
+
+To enable an optional profile, append the same `--profile` flag to either command, for example `--profile object-storage` or `--profile observability`. The base Compose file owns shared infrastructure; the overlay changes only environment-specific settings. Spring Boot settings remain in `application.yml` and the profile-specific `application-development.yml` / `application-production.yml` files. The Compose overlay activates the matching Spring profile.
+
 ## Smoke and readiness
 
 \`\`\`bash

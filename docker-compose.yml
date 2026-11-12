@@ -11,7 +11,7 @@ services:
     environment:
       POSTGRES_DB: sbase
       POSTGRES_USER: sbase
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting SBase}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -39,7 +39,7 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
       SPRING_DATASOURCE_USERNAME: sbase
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting SBase}
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://localhost:8081/realms/sbase}
       JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077
@@ -56,11 +56,11 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SBASE_S3_ENDPOINT: ${SBASE_S3_ENDPOINT:-http://minio:9000}
-      SBASE_S3_REGION: ${SBASE_S3_REGION:-us-east-1}
-      SBASE_S3_BUCKET: ${SBASE_S3_BUCKET:-sbase-artifacts}
-      SBASE_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-}
-      SBASE_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-sbase-artifacts}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-}
       JAVA_TOOL_OPTIONS: -Xms512m -Xmx2g
     depends_on:
       postgres:
@@ -311,7 +311,7 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
       SPRING_DATASOURCE_USERNAME: sbase
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting SBase}
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://localhost:8081/realms/sbase}
       JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077

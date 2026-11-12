@@ -33,6 +33,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14'
+      - name: Audit production and environment configuration
+        run: bash scripts/production-readiness/config-audit.sh
       - name: Test and package
         run: gradle --no-daemon clean test bootJar
 
@@ -41,6 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
+      POSTGRES_PASSWORD: ci-sbase-password
       DORIS_FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
       DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000&loadBalanceHostRemovalGracePeriod=15000
     steps:
@@ -58,8 +61,11 @@ jobs:
           DORIS_PASSWORD: ci-doris-password
           JWT_ISSUER_URI: https://identity.example.test/realms/sbase
           JWT_JWK_SET_URI: https://identity.example.test/realms/sbase/protocol/openid-connect/certs
+          SBASE_IMAGE: ghcr.io/selimrepo/sbase:ci-test
         run: |
           docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.development.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
           docker compose --profile app-ha --profile doris-fe-ha config --quiet
           docker compose --profile app-ha --profile doris-fe-ha --profile observability config --quiet
           MINIO_ROOT_USER=ci-minio MINIO_ROOT_PASSWORD=ci-minio-password docker compose --profile object-storage config --quiet
