@@ -39,6 +39,7 @@ public class CatalogAssetEntity {
     }
     public void setPhysicalLocation(String namespace,String physicalName) { this.namespace=namespace; this.physicalName=physicalName; this.updatedAt=Instant.now(); }
     public void setParentId(UUID parentId) { this.parentId=parentId; this.updatedAt=Instant.now(); }
+    public void setOwnerSubject(String ownerSubject) { this.ownerSubject=ownerSubject; this.updatedAt=Instant.now(); }
     public void setLifecycleState(String lifecycleState) { this.lifecycleState=lifecycleState; this.updatedAt=Instant.now(); }
     public void setSchemaFingerprint(String fingerprint) { this.schemaFingerprint=fingerprint; this.updatedAt=Instant.now(); }
     public UUID getId(){return id;} public UUID getTenantId(){return tenantId;} public String getAssetType(){return assetType;}
