@@ -14,7 +14,8 @@ check_present() {
   if grep -Eq "$pattern" "$file"; then echo "PASS $label"
   else echo "FAIL $label: required configuration not found in $file"; fail=1; fi
 }
-check_absent 'POSTGRES_PASSWORD:-sbase|SPRING_DATASOURCE_PASSWORD:sbase' "$compose" "Compose has no default database password"
+check_absent 'POSTGRES_PASSWORD:-|POSTGRES_PASSWORD:-sbase' "$compose" "Compose has no default database password fallback"
+check_present 'POSTGRES_PASSWORD:\?Set POSTGRES_PASSWORD in \.env' "$compose" "Compose requires PostgreSQL password from environment"
 check_absent 'password:.*\$\{SPRING_DATASOURCE_PASSWORD:sbase\}' "$application" "Spring has no default datasource password"
 check_present 'ddl-auto: validate' "$application" "Hibernate schema validation enabled"
 check_present 'include: health,info,metrics' "$application" "Actuator exposure is allow-listed"
