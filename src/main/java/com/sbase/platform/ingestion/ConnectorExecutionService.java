@@ -103,9 +103,12 @@ public class ConnectorExecutionService {
     private ClaimedRun claimOne() {
         return db.query("""
             WITH candidate AS (
-                SELECT id FROM ingestion_runs
-                 WHERE status='QUEUED' OR (status='RETRY_WAIT' AND next_attempt_at<=now()) OR (status='RUNNING' AND lease_until<now())
-                 ORDER BY submitted_at,id
+                SELECT r.id FROM ingestion_runs r
+                  JOIN ingestion_connectors c ON c.id=r.connector_id AND c.tenant_id=r.tenant_id
+                 WHERE c.enabled=true
+                   AND (r.status='QUEUED' OR (r.status='RETRY_WAIT' AND r.next_attempt_at<=now())
+                        OR (r.status='RUNNING' AND r.lease_until<now()))
+                 ORDER BY r.submitted_at,r.id
                  FOR UPDATE OF r SKIP LOCKED LIMIT 1
             )
             UPDATE ingestion_runs r
