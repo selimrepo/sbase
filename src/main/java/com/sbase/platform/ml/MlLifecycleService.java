@@ -247,7 +247,7 @@ public class MlLifecycleService {
      throw new org.springframework.security.access.AccessDeniedException("Invalid model artifact location");
     }
  }
- static String tenantScopedTrainingQuery(String table,List<String> features,String label,UUID tenant) {
+ public static String tenantScopedTrainingQuery(String table,List<String> features,String label,UUID tenant) {
   if (tenant==null) throw new IllegalArgumentException("Tenant is required for ML training");
   identifier(table);
   if (features==null || features.isEmpty()) throw new IllegalArgumentException("ML features are required");

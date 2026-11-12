@@ -108,7 +108,7 @@ class TenantDataIsolationIntegrationTest {
         jdbc.update("INSERT INTO tenant_ml_training_iso(tenant_id,feature,label) VALUES(?,?,?)",ids[1],9.0,9.0);
         String scoped= MlLifecycleService.tenantScopedTrainingQuery("tenant_ml_training_iso",List.of("feature"),"label",ids[0]);
         assertThat(jdbc.queryForList("SELECT feature,label FROM "+scoped)).hasSize(1);
-        assertThat(jdbc.queryForList("SELECT feature,label FROM "+scoped)).first().containsEntry("feature",1.0);
+        assertThat(jdbc.queryForList("SELECT feature,label FROM "+scoped).get(0).get("feature")).isEqualTo(1.0);
 
         UUID experimentA=ml.createExperiment(ids[0],"exp-a","tenant A","alice");
         UUID experimentB=ml.createExperiment(ids[1],"exp-b","tenant B","bob");

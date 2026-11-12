@@ -143,12 +143,16 @@ class AdvancedPlatformIntegrationTest {
     @Test
     void dashboardLayoutPersistsNonOverlappingGridPositions() {
         UUID dashboard = UUID.randomUUID(), first = UUID.randomUUID(), second = UUID.randomUUID();
-        db.update("INSERT INTO dashboards(id,name,description,layout_json,owner_subject,created_at) VALUES(?,?,?,?,?,now())",
-            dashboard, "Operations IT", "layout test", "{}", "dashboard-owner");
+        UUID tenantId = UUID.randomUUID();
+        com.sbase.platform.tenant.TenantContext tenantContext =
+            mock(com.sbase.platform.tenant.TenantContext.class);
+        when(tenantContext.tenantId(org.mockito.ArgumentMatchers.any())).thenReturn(tenantId);
+        db.update("INSERT INTO dashboards(id,tenant_id,name,description,layout_json,owner_subject,created_at) VALUES(?,?,?,?,?,?,now())",
+            dashboard, tenantId, "Operations IT", "layout test", "{}", "dashboard-owner");
         insertWidget(first, dashboard, "Revenue");
         insertWidget(second, dashboard, "Orders");
 
-        DashboardLayoutController controller = new DashboardLayoutController(db, permissions());
+        DashboardLayoutController controller = new DashboardLayoutController(db, permissions(), tenantContext);
         var request = new DashboardLayoutController.LayoutRequest(List.of(
             new DashboardLayoutController.WidgetPosition(first, 0, 0, 6, 4),
             new DashboardLayoutController.WidgetPosition(second, 6, 0, 6, 4)));
