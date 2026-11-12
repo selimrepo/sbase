@@ -231,13 +231,15 @@ public class MlLifecycleService {
    java.net.URI uri=java.net.URI.create(artifactUri);
    if (!"file".equalsIgnoreCase(uri.getScheme()))
     throw new org.springframework.security.access.AccessDeniedException("Unsupported model artifact location");
-   Path root=Paths.get(artifactRoot).toAbsolutePath().normalize().resolve(tenant.toString()).normalize();
+   Path base=Paths.get(artifactRoot).toAbsolutePath().normalize();
+   Path root=base.resolve(tenant.toString()).normalize();
    Path artifact=Paths.get(uri).toAbsolutePath().normalize();
-   if (!artifact.startsWith(root) || artifact.equals(root))
+   if (!root.startsWith(base) || !artifact.startsWith(root) || artifact.equals(root) || Files.isSymbolicLink(root))
     throw new org.springframework.security.access.AccessDeniedException("Model artifact belongs to a different tenant");
+   Path realBase=base.toRealPath();
    Path realRoot=root.toRealPath();
    Path realArtifact=artifact.toRealPath();
-   if (!realArtifact.startsWith(realRoot) || realArtifact.equals(realRoot))
+   if (!realRoot.getParent().equals(realBase) || !realArtifact.startsWith(realRoot) || realArtifact.equals(realRoot))
     throw new org.springframework.security.access.AccessDeniedException("Model artifact resolves outside its tenant directory");
    return realArtifact;
   } catch (org.springframework.security.access.AccessDeniedException ex) { throw ex; }

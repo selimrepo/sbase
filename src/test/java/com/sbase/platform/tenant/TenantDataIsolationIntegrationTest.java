@@ -21,6 +21,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -148,7 +149,7 @@ class TenantDataIsolationIntegrationTest {
     }
 
     @Test
-    void modelArtifactUriCannotEscapeItsTenantDirectory() {
+    void modelArtifactUriCannotEscapeItsTenantDirectory() throws java.io.IOException {
         UUID[] ids=tenants();
         Path artifactRoot=Path.of(System.getProperty("java.io.tmpdir"),"sbase-tenant-artifact-guard");
         MlLifecycleService ml=new MlLifecycleService(jdbc,mapper,mock(ObjectProvider.class),Runnable::run,
@@ -176,5 +177,16 @@ class TenantDataIsolationIntegrationTest {
         var failure=org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
             ()->ml.predict(ids[0],deployment,Map.of("feature",1)));
         assertThat(failure.getCause()).isInstanceOf(AccessDeniedException.class);
+
+        Path tenantAPath=artifactRoot.resolve(ids[0].toString());
+        Path tenantBPath=artifactRoot.resolve(ids[1].toString()).resolve("real-model");
+        Files.createDirectories(tenantAPath);
+        Files.createDirectories(tenantBPath);
+        Path tenantASymlink=tenantAPath.resolve("linked-model");
+        Files.createSymbolicLink(tenantASymlink,tenantBPath);
+        jdbc.update("UPDATE sbase_ml_model_versions SET artifact_uri=? WHERE id=?",tenantASymlink.toUri().toString(),version);
+        var symlinkFailure=org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+            ()->ml.predict(ids[0],deployment,Map.of("feature",1)));
+        assertThat(symlinkFailure.getCause()).isInstanceOf(AccessDeniedException.class);
     }
 }
