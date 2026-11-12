@@ -1,6 +1,5 @@
 package com.sbase.catalog;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.sbase.platform.tenant.TenantContext;
@@ -93,8 +92,8 @@ public class CatalogLineageService {
             pipeline.getName(),pipeline.getOwnerSubject(),null);
         pipelineAsset.updateSourceDetails(pipeline.getName(),pipeline.getDescription(),null,null);
         pipelineAsset.setLifecycleState(pipeline.isEnabled()?"ACTIVE":"DEPRECATED");
-        pipelineAsset.updateGovernance(pipeline.getDescription(),null,null,"INTERNAL","[]",
-            write(Map.of("legacyPipelineId",pipeline.getId(),"version",pipeline.getVersion(),"enabled",pipeline.isEnabled())));
+        pipelineAsset.updateGovernance(pipeline.getDescription(),null,null,"INTERNAL",List.of(),
+            Map.of("legacyPipelineId",pipeline.getId(),"version",pipeline.getVersion(),"enabled",pipeline.isEnabled()));
         assets.save(pipelineAsset);
         JsonNode definition;
         try { definition=mapper.readTree(pipeline.getDefinitionJson()); }
@@ -109,8 +108,8 @@ public class CatalogLineageService {
             String key=pipeline.getId()+":"+id;
             CatalogAssetEntity stepAsset=upsertAsset(tenant,"PIPELINE_STEP",key,id,pipeline.getOwnerSubject(),pipelineAsset.getId());
             stepAsset.setParentId(pipelineAsset.getId());
-            stepAsset.updateGovernance(null,null,null,"INTERNAL","[]",
-                write(Map.of("pipelineId",pipeline.getId(),"stepId",id,"stepType",type,"pipelineVersion",pipeline.getVersion())));
+            stepAsset.updateGovernance(null,null,null,"INTERNAL",List.of(),
+                Map.of("pipelineId",pipeline.getId(),"stepId",id,"stepType",type,"pipelineVersion",pipeline.getVersion()));
             assets.save(stepAsset); stepAssets.put(id,stepAsset);
         }
         for(JsonNode step:steps) {
@@ -188,7 +187,7 @@ public class CatalogLineageService {
             .orElseGet(()->upsertAsset(tenant,"DASHBOARD",dashboardId.toString(),"Dashboard "+dashboardId,owner,null));
         CatalogAssetEntity widget=upsertAsset(tenant,"WIDGET",id.toString(),title,owner,dashboard.getId());
         widget.setParentId(dashboard.getId());
-        widget.updateGovernance(null,null,null,"INTERNAL","[]",write(Map.of("widgetType",widgetType)));
+        widget.updateGovernance(null,null,null,"INTERNAL",List.of(),Map.of("widgetType",widgetType));
         assets.save(widget);
         saveEdge(tenant,dashboard.getId(),widget.getId(),"CONTAINS","BI_DEFINITION",id.toString(),null,BigDecimal.ONE,1,null);
         if(reportId!=null) assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"REPORT",reportId.toString())
@@ -424,26 +423,24 @@ public class CatalogLineageService {
     }
     private AssetView view(CatalogAssetEntity a,CatalogColumnEntity c) {
         return new AssetView(a.getId(),a.getAssetType(),a.getExternalKey(),a.getDisplayName(),a.getNamespace(),a.getPhysicalName(),
-            a.getDescription(),a.getOwnerSubject(),a.getOwnerTeam(),a.getDomain(),a.getClassification(),readTags(a.getTagsJson()),
-            readMap(a.getMetadataJson()),a.getParentId(),a.getLifecycleState(),a.getSchemaFingerprint(),a.getCreatedAt(),a.getUpdatedAt(),
+            a.getDescription(),a.getOwnerSubject(),a.getOwnerTeam(),a.getDomain(),a.getClassification(),a.getTags(),
+            a.getMetadata(),a.getParentId(),a.getLifecycleState(),a.getSchemaFingerprint(),a.getCreatedAt(),a.getUpdatedAt(),
             c==null?null:c.getOrdinalPosition(),c==null?null:c.getDataType(),c==null?null:c.isNullable());
     }
     private EdgeView edgeView(LineageEdgeEntity e) {
         return new EdgeView(e.getId(),e.getFromAssetId(),e.getToAssetId(),e.getEdgeType(),e.getEvidenceType(),e.getEvidenceRef(),
             e.getExpressionText(),e.getConfidence(),e.getObservedAt(),e.getEffectiveVersion(),e.getRunId());
     }
-    private String writeTags(List<String> tags) {
+    private List<String> writeTags(List<String> tags) {
         List<String> normalized=tags==null?List.of():tags.stream().filter(Objects::nonNull).map(String::trim).filter(s->!s.isBlank()).distinct().limit(50).toList();
         if(normalized.stream().anyMatch(s->s.length()>80)) throw bad("Tag exceeds 80 characters");
-        return write(normalized);
+        return normalized;
     }
-    private String writeMetadata(Map<String,Object> metadata) {
+    private Map<String,Object> writeMetadata(Map<String,Object> metadata) {
         Map<String,Object> value=metadata==null?Map.of():metadata;
-        String json=write(value); if(json.length()>16000) throw bad("Metadata exceeds 16 KB"); return json;
+        String json=write(value); if(json.length()>16000) throw bad("Metadata exceeds 16 KB"); return value;
     }
     private String write(Object value) { try{return mapper.writeValueAsString(value);}catch(Exception e){throw bad("Invalid JSON metadata");} }
-    private List<String> readTags(String json) { try{return mapper.readValue(json,new TypeReference<List<String>>(){});}catch(Exception e){return List.of();} }
-    private Map<String,Object> readMap(String json) { try{return mapper.readValue(json,new TypeReference<Map<String,Object>>(){});}catch(Exception e){return Map.of();} }
     private String classification(String value) {
         String v=value==null||value.isBlank()?"INTERNAL":normalize(value);
         if(!CLASSIFICATIONS.contains(v)) throw bad("Invalid data classification"); return v;
