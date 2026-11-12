@@ -69,6 +69,7 @@ public class DistributedScheduleWorker {
             WITH due AS (
                 SELECT s.id
                 FROM scheduled_jobs s
+                JOIN pipelines p ON p.id = s.pipeline_id AND p.tenant_id = s.tenant_id
                 WHERE s.enabled = TRUE
                   AND s.next_run_at <= now()
                   AND (s.lease_until IS NULL OR s.lease_until < now())
@@ -77,6 +78,7 @@ public class DistributedScheduleWorker {
                     s.depends_on IS NULL OR EXISTS (
                       SELECT 1 FROM scheduled_jobs parent
                       WHERE parent.id = s.depends_on
+                        AND parent.tenant_id = s.tenant_id
                         AND parent.last_success_at IS NOT NULL
                         AND parent.last_success_at >= COALESCE(s.last_run_at, s.created_at)
                     )
@@ -169,6 +171,7 @@ public class DistributedScheduleWorker {
                    outcome_recorded_at = now()
               FROM pipeline_runs pr
              WHERE sr.pipeline_run_id = pr.id
+               AND sr.tenant_id = pr.tenant_id
                AND sr.status = 'SUBMITTED'
                AND sr.outcome_recorded_at IS NULL
                AND pr.status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
@@ -181,7 +184,7 @@ public class DistributedScheduleWorker {
                    s.cron_expression, s.timezone, s.failure_policy, s.max_attempts,
                    sr.attempt, sr.error_message
               FROM schedule_runs sr
-              JOIN scheduled_jobs s ON s.id = sr.schedule_id
+              JOIN scheduled_jobs s ON s.id = sr.schedule_id AND s.tenant_id = sr.tenant_id
              WHERE sr.outcome_recorded_at IS NOT NULL
                AND sr.handled_at IS NULL
                AND sr.status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')

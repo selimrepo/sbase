@@ -135,6 +135,7 @@ public class ConnectorExecutionService {
             Map<String, String> options = mapper.convertValue(payload.get("options"), new TypeReference<>() {});
             options = new HashMap<>(options == null ? Map.of() : options);
             options.put("connectorId", run.connectorId().toString());
+            options.put("tenantId", run.tenantId().toString());
             IngestionConnector connector = connectors.get(type);
             var result = connector.ingest(new IngestionConnector.ConnectorRequest(
                 Objects.toString(payload.get("source"), ""), Objects.toString(payload.get("target"), ""), Map.copyOf(options)));

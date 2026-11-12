@@ -80,6 +80,11 @@ public class JdbcIngestionConnector implements IngestionConnector {
             : "Full JDBC load completed");
     }
 
+    static void requireTenantRow(UUID tenantId,Object rowTenant) throws SQLException {
+        if(tenantId==null || rowTenant==null || !tenantId.toString().equals(rowTenant.toString()))
+            throw new SQLException("JDBC ingestion source returned a row outside the connector tenant");
+    }
+
     private static int findColumn(ResultSetMetaData md,String name)throws SQLException {
         for(int i=1;i<=md.getColumnCount();i++) if(md.getColumnLabel(i).equalsIgnoreCase(name)) return i;
         throw new IllegalArgumentException("watermarkColumn must be selected: "+name);
