@@ -157,7 +157,7 @@ class TenantDataIsolationIntegrationTest {
         jdbc.update("""
             INSERT INTO sbase_ml_model_versions(id,tenant_id,model_id,run_id,version,artifact_uri,framework,
               algorithm,task_type,created_by,signature_json,feature_baseline_json)
-            VALUES(?,?,?,?,1,?,'Spark MLlib','LINEAR_REGRESSION','REGRESSION','alice','{}'::jsonb,'{}'::jsonb)
+            VALUES(?,?,?,?,1,?,'Spark MLlib','LINEAR_REGRESSION','REGRESSION','alice','{"features":["feature"],"label":"label"}'::jsonb,'{}'::jsonb)
             """,version,ids[0],model,run,foreignArtifact);
         jdbc.update("""
             INSERT INTO sbase_ml_deployments(id,tenant_id,model_version_id,deployment_name,status,created_by)
