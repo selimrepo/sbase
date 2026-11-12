@@ -41,6 +41,7 @@ class CatalogLineageIntegrationTest {
     }
 
     @Autowired CatalogAssetRepository assets;
+    @Autowired DatasetRepository datasets;
     @Autowired CatalogColumnRepository columns;
     @Autowired LineageEdgeRepository edges;
     @Autowired JdbcTemplate jdbc;
