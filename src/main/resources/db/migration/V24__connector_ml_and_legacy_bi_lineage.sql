@@ -57,7 +57,7 @@ SELECT md5('lineage:ml-model-training:'||v.id::text)::uuid,v.tenant_id,
  'DERIVES_FROM','RUNTIME_OBSERVED',v.id::text,0.950,md5('ml-model-training:'||v.id::text)
 FROM sbase_ml_model_versions v JOIN sbase_ml_runs run ON run.id=v.run_id AND run.tenant_id=v.tenant_id
 JOIN datasets d ON d.tenant_id=v.tenant_id
- AND (run.dataset_table=d.namespace||'.'||d.table_name OR run.dataset_table=d.table_name)
+ AND (run.dataset_table=d.namespace||'.'||d.table_name OR (run.dataset_table=d.table_name AND (SELECT count(*) FROM datasets d2 WHERE d2.tenant_id=d.tenant_id AND d2.table_name=run.dataset_table)=1))
 ON CONFLICT (tenant_id,edge_fingerprint) DO NOTHING;
 
 -- Resolve legacy report definitions to catalog tables and columns when their SQL contract is structured.
@@ -71,7 +71,7 @@ BEGIN
    report_asset := md5('legacy-bi-report:'||r.id::text)::uuid;
    SELECT md5('dataset:'||d.id::text)::uuid INTO table_asset FROM datasets d
     WHERE d.tenant_id=r.tenant_id
-      AND (d.namespace||'.'||d.table_name=definition_doc->>'table' OR d.table_name=definition_doc->>'table')
+      AND (d.namespace||'.'||d.table_name=definition_doc->>'table' OR (d.table_name=definition_doc->>'table' AND (SELECT count(*) FROM datasets d2 WHERE d2.tenant_id=d.tenant_id AND d2.table_name=definition_doc->>'table')=1))
     LIMIT 1;
    IF table_asset IS NULL THEN CONTINUE; END IF;
    INSERT INTO lineage_edges(id,tenant_id,from_asset_id,to_asset_id,edge_type,evidence_type,evidence_ref,confidence,edge_fingerprint)
