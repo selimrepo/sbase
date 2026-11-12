@@ -422,7 +422,7 @@ public class CatalogLineageService {
         UUID tenant=tenants.tenantId(auth);
         CatalogAssetEntity table=requireAsset(tenant,tableId);
         if(!"TABLE".equals(table.getAssetType())) throw bad("Columns can only be listed for TABLE assets");
-        List<CatalogColumnEntity> details=columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId);
+        List<CatalogColumnEntity> details=columns.findAllByTenantIdAndTableAssetIdAndCurrentTrueOrderByOrdinalPosition(tenant,tableId);
         Map<UUID,CatalogColumnEntity> byId=new HashMap<>(); details.forEach(col->byId.put(col.getId(),col));
         return assets.findAllByTenantIdAndIdIn(tenant,List.copyOf(byId.keySet())).stream()
             .sorted(Comparator.comparingInt(a->byId.get(a.getId()).getOrdinalPosition()))
