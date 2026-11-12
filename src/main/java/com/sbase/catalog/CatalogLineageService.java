@@ -2,6 +2,7 @@ package com.sbase.catalog;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.sbase.platform.tenant.TenantContext;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -27,10 +28,16 @@ public class CatalogLineageService {
     private final LineageEdgeRepository edges;
     private final TenantContext tenants;
     private final ObjectMapper mapper;
+    private final CatalogSchemaVersionRepository schemaVersions;
 
+    @Autowired
+    public CatalogLineageService(CatalogAssetRepository assets,CatalogColumnRepository columns,LineageEdgeRepository edges,
+            TenantContext tenants,ObjectMapper mapper,CatalogSchemaVersionRepository schemaVersions) {
+        this.assets=assets; this.columns=columns; this.edges=edges; this.tenants=tenants; this.mapper=mapper; this.schemaVersions=schemaVersions;
+    }
     public CatalogLineageService(CatalogAssetRepository assets,CatalogColumnRepository columns,LineageEdgeRepository edges,
             TenantContext tenants,ObjectMapper mapper) {
-        this.assets=assets; this.columns=columns; this.edges=edges; this.tenants=tenants; this.mapper=mapper;
+        this(assets,columns,edges,tenants,mapper,null);
     }
 
     @Transactional
@@ -40,13 +47,16 @@ public class CatalogLineageService {
             dataset.getOwnerSubject(),null);
         table.updateSourceDetails(dataset.getName(),dataset.getDescription(),dataset.getNamespace(),dataset.getTableName());
         table.setLifecycleState("ACTIVE");
-        table.setSchemaFingerprint(sha256(Objects.toString(dataset.getSchemaJson(),"[]")));
         assets.save(table);
         JsonNode schema;
         try { schema=mapper.readTree(Objects.toString(dataset.getSchemaJson(),"[]")); }
         catch(Exception invalidSchema) { return; }
         if(schema==null || !schema.isArray()) return;
-
+        String canonicalSchema=write(schema);
+        String fingerprint=sha256(canonicalSchema);
+        table.setSchemaFingerprint(fingerprint);
+        if(schemaVersions!=null && !schemaVersions.existsByTenantIdAndTableAssetIdAndSchemaFingerprint(tenant,table.getId(),fingerprint))
+            schemaVersions.save(new CatalogSchemaVersionEntity(tenant,table.getId(),fingerprint,schema,dataset.getId().toString(),dataset.getOwnerSubject()));
         // Retire the previous active schema first; this permits ordinal reuse after drops/reorders.
         List<CatalogColumnEntity> previous=columns.findAllByTenantIdAndTableAssetIdAndCurrentTrueOrderByOrdinalPosition(tenant,table.getId());
         for(CatalogColumnEntity old:previous) {
