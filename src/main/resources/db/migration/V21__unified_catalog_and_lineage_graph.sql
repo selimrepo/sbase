@@ -160,7 +160,7 @@ BEGIN
        jsonb_build_object('discoveredFrom','datasets.schema_json'))
      ON CONFLICT (tenant_id,asset_type,external_key) DO NOTHING;
      INSERT INTO catalog_columns(id,tenant_id,table_asset_id,ordinal_position,data_type,nullable)
-     VALUES(col_id,d.tenant_id,table_id,pos,col_type,COALESCE((item->>'nullable')::boolean,TRUE))
+     VALUES(col_id,d.tenant_id,table_id,pos,col_type,CASE WHEN item->'nullable' = 'false'::jsonb THEN FALSE ELSE TRUE END)
      ON CONFLICT (id) DO NOTHING;
      INSERT INTO lineage_edges(id,tenant_id,from_asset_id,to_asset_id,edge_type,evidence_type,evidence_ref,edge_fingerprint)
      VALUES(md5('lineage:table-column:'||d.id::text||':'||lower(col_name))::uuid,d.tenant_id,table_id,col_id,
