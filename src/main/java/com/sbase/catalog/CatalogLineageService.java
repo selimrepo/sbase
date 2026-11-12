@@ -124,16 +124,21 @@ public class CatalogLineageService {
         }
         for(int pass=0;pass<steps.size();pass++) {
             boolean changed=false;
+            String previousStep=null;
             for(JsonNode step:steps) {
                 String id=firstText(step,"id");
                 if(id==null || stepAssets.get(id)==null) continue;
                 JsonNode deps=step.get("dependsOn");
-                if(deps==null || !deps.isArray()) continue;
                 Set<UUID> inherited=new LinkedHashSet<>(sourceTables.getOrDefault(id,Set.of()));
-                for(JsonNode dep:deps) inherited.addAll(sourceTables.getOrDefault(dep.asText(),Set.of()));
+                if(deps!=null && deps.isArray() && !deps.isEmpty()) {
+                    for(JsonNode dep:deps) inherited.addAll(sourceTables.getOrDefault(dep.asText(),Set.of()));
+                } else if(previousStep!=null) {
+                    inherited.addAll(sourceTables.getOrDefault(previousStep,Set.of()));
+                }
                 if(!inherited.isEmpty() && !inherited.equals(sourceTables.get(id))) {
                     sourceTables.put(id,inherited); changed=true;
                 }
+                previousStep=id;
             }
             if(!changed) break;
         }
