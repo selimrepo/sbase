@@ -124,7 +124,7 @@ class CatalogLineageIntegrationTest {
         var auth=new TestingAuthenticationToken("dataset-owner","n/a");
         when(tenantContext.tenantId(auth)).thenReturn(tenant);
         when(tenantContext.subject(auth)).thenReturn("dataset-owner");
-        CatalogLineageService lineage=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper());
+        CatalogLineageService lineage=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper(),schemaVersions);
         DatasetService service=new DatasetService(datasets,tenantContext,mock(com.sbase.platform.tenant.ResourceAclService.class),lineage);
 
         DatasetEntity dataset=service.create(new DatasetRequest("Orders","warehouse","orders","Order facts","POSTGRESQL",
@@ -138,6 +138,7 @@ class CatalogLineageIntegrationTest {
         DatasetEntity updated=service.update(dataset.getId(),new DatasetRequest("Orders curated","warehouse","orders",
             "Curated order facts","POSTGRESQL","[{\"name\":\"order_id\",\"type\":\"UUID\"}]"),auth);
         assertThat(updated.getName()).isEqualTo("Orders curated");
+        assertThat(lineage.schemaHistory(table.getId(),auth)).hasSize(2);
         assertThat(lineage.columns(table.getId(),auth)).filteredOn(col->col.displayName().equals("amount"))
             .singleElement().extracting(CatalogLineageService.AssetView::lifecycleState).isEqualTo("DEPRECATED");
     }
