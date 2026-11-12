@@ -45,8 +45,8 @@ public class FeatureEngineeringController {
     public Map<String,Object> materialize(@Valid @RequestBody MaterializeRequest request, Authentication auth) {
         access.require(auth, request.featureSetName(), true);
         FeatureSetRef feature = db.query("""
-            SELECT id,version FROM feature_sets WHERE name=? AND tenant_id=?
-            """, rs -> rs.next() ? new FeatureSetRef(rs.getObject("id", UUID.class), rs.getInt("version")) : null,
+            SELECT id,version,dataset_id FROM feature_sets WHERE name=? AND tenant_id=?
+            """, rs -> rs.next() ? new FeatureSetRef(rs.getObject("id", UUID.class), rs.getInt("version"),rs.getObject("dataset_id",UUID.class)) : null,
             request.featureSetName(), tenants == null ? java.util.UUID.fromString("00000000-0000-0000-0000-000000000001") : tenants.tenantId(auth));
         if (feature == null) throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.NOT_FOUND, "Feature set not found");
