@@ -2,6 +2,7 @@ package com.sbase.platform.bi;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,14 +12,16 @@ import java.util.*;
 @Service
 public class BiWorkspaceService {
  private final JdbcTemplate db;private final ObjectMapper mapper;private final GovernedBiQueryService queries;
- public BiWorkspaceService(@Qualifier("jdbcTemplate") JdbcTemplate db,ObjectMapper mapper,GovernedBiQueryService queries){this.db=db;this.mapper=mapper;this.queries=queries;}
+ private final com.sbase.catalog.CatalogLineageService lineage;
+ @Autowired public BiWorkspaceService(@Qualifier("jdbcTemplate") JdbcTemplate db,ObjectMapper mapper,GovernedBiQueryService queries,com.sbase.catalog.CatalogLineageService lineage){this.db=db;this.mapper=mapper;this.queries=queries;this.lineage=lineage;}
+ public BiWorkspaceService(@Qualifier("jdbcTemplate") JdbcTemplate db,ObjectMapper mapper,GovernedBiQueryService queries){this(db,mapper,queries,null);}
  public List<Map<String,Object>> tables(){return queries.tables();}
  public Map<String,Object> query(UUID tenant,String subject,GovernedBiQueryService.QueryDefinition d){return queries.execute(tenant,subject,d);}
  public Map<String,Object> drillDown(UUID tenant,String subject,GovernedBiQueryService.QueryDefinition d,String dimension,Object value,List<String> nextDimensions){return queries.drillDown(tenant,subject,d,dimension,value,nextDimensions);}
  public Map<String,Object> drillThrough(UUID tenant,String subject,String table,List<String> columns,List<GovernedBiQueryService.Filter> filters,Integer limit){return queries.drillThrough(tenant,subject,table,columns,filters,limit);}
  @Transactional
  public UUID createReport(UUID tenant,String subject,String name,String description,GovernedBiQueryService.QueryDefinition definition){
-  UUID id=UUID.randomUUID();db.update("INSERT INTO sbase_bi_reports(id,tenant_id,name,description,definition_json,owner_subject) VALUES(?,?,?,?,CAST(? AS jsonb),?)",id,tenant,name,description,write(definition),subject);return id;
+  UUID id=UUID.randomUUID();String json=write(definition);db.update("INSERT INTO sbase_bi_reports(id,tenant_id,name,description,definition_json,owner_subject) VALUES(?,?,?,?,CAST(? AS jsonb),?)",id,tenant,name,description,json,subject);if(lineage!=null)lineage.synchronizeReport(id,tenant,name,description,subject,json);return id;
  }
  public List<Map<String,Object>> reports(UUID tenant,String subject){
   return db.queryForList("""
@@ -39,7 +42,7 @@ public class BiWorkspaceService {
  }
  @Transactional
  public UUID createDashboard(UUID tenant,String subject,String name,String description,Map<String,Object> layout,boolean shared){
-  UUID id=UUID.randomUUID();db.update("INSERT INTO sbase_bi_dashboards(id,tenant_id,name,description,layout_json,owner_subject,is_shared) VALUES(?,?,?, ?,CAST(? AS jsonb),?,?)",id,tenant,name,description,write(layout==null?Map.of():layout),subject,shared);return id;
+  UUID id=UUID.randomUUID();db.update("INSERT INTO sbase_bi_dashboards(id,tenant_id,name,description,layout_json,owner_subject,is_shared) VALUES(?,?,?, ?,CAST(? AS jsonb),?,?)",id,tenant,name,description,write(layout==null?Map.of():layout),subject,shared);if(lineage!=null)lineage.synchronizeDashboard(id,tenant,name,description,subject);return id;
  }
  public List<Map<String,Object>> dashboards(UUID tenant,String subject){
   return db.queryForList("""
@@ -72,7 +75,7 @@ public class BiWorkspaceService {
   if(report!=null)reportRow(tenant,subject,report,"READ");
   if(!Set.of("TABLE","BAR","LINE","PIE","KPI","AREA").contains(type))throw new IllegalArgumentException("Unsupported widget type");
   UUID id=UUID.randomUUID();db.update("INSERT INTO sbase_bi_widgets(id,dashboard_id,report_id,title,widget_type,position_json,options_json) VALUES(?,?,?,?,?,CAST(? AS jsonb),CAST(? AS jsonb))",id,dashboard,report,title,type,write(position==null?Map.of():position),write(options==null?Map.of():options));
-  db.update("UPDATE sbase_bi_dashboards SET version=version+1,updated_at=now() WHERE id=?",dashboard);return id;
+  db.update("UPDATE sbase_bi_dashboards SET version=version+1,updated_at=now() WHERE id=?",dashboard);if(lineage!=null)lineage.synchronizeWidget(id,tenant,dashboard,report,title,type,subject);return id;
  }
  @Transactional
  public void shareDashboard(UUID tenant,String owner,UUID id,String subject,String permission){

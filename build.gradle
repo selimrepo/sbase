@@ -36,10 +36,9 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
 
     implementation "org.apache.spark:spark-sql_2.12:${sparkVersion}"
-    // Keep ANTLR aligned with Spark 3.5.6's generated parser ATN format.
-    implementation('org.antlr:antlr4-runtime:4.9.3') {
-        version { strictly '4.9.3' }
-    }
+    // Spring Data JPA 3.5 uses ANTLR 4.13 serialized HQL parser ATN.
+    // ANTLR 4.13 remains backward-compatible with Spark 3.5's 4.9-generated parsers.
+    implementation 'org.antlr:antlr4-runtime:4.13.2'
     // Spark 3.5 still links against the javax.servlet API even when its embedded UI is disabled.
     implementation 'javax.servlet:javax.servlet-api:4.0.1'
     implementation "org.apache.spark:spark-mllib_2.12:${sparkVersion}"

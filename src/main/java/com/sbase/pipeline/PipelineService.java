@@ -16,8 +16,10 @@ public class PipelineService {
     private final PipelineDefinitionValidator validator;
     private final TenantContext tenants;
     private final ResourceAclService acl;
-    public PipelineService(PipelineRepository repository,PipelineDefinitionValidator validator,TenantContext tenants,ResourceAclService acl) {
-        this.repository=repository; this.validator=validator; this.tenants=tenants; this.acl=acl;
+    private final com.sbase.catalog.CatalogLineageService lineage;
+    public PipelineService(PipelineRepository repository,PipelineDefinitionValidator validator,TenantContext tenants,
+            ResourceAclService acl,com.sbase.catalog.CatalogLineageService lineage) {
+        this.repository=repository; this.validator=validator; this.tenants=tenants; this.acl=acl; this.lineage=lineage;
     }
     private boolean admin(Authentication auth) {
         return auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("PERM_platform:admin"));
@@ -25,7 +27,9 @@ public class PipelineService {
     @Transactional public PipelineEntity create(PipelineRequest request,Authentication auth) {
         tenants.requireWrite(auth);
         validator.parseAndValidate(request.definitionJson());
-        return repository.save(new PipelineEntity(tenants.tenantId(auth),tenants.subject(auth),request.name(),request.description(),request.definitionJson(),request.enabled()));
+        PipelineEntity saved=repository.save(new PipelineEntity(tenants.tenantId(auth),tenants.subject(auth),request.name(),request.description(),request.definitionJson(),request.enabled()));
+        lineage.synchronizePipeline(saved);
+        return saved;
     }
     @Transactional(readOnly=true) public List<PipelineEntity> list(Authentication auth) {
         UUID tenant=tenants.tenantId(auth); String subject=tenants.subject(auth);
@@ -43,9 +47,15 @@ public class PipelineService {
         tenants.requireWrite(auth);
         validator.parseAndValidate(request.definitionJson());
         PipelineEntity p=get(id,auth); require(p,auth,true);
-        p.update(request.name(),request.description(),request.definitionJson(),request.enabled()); return p;
+        p.update(request.name(),request.description(),request.definitionJson(),request.enabled());
+        lineage.synchronizePipeline(p);
+        return p;
     }
-    @Transactional public void delete(UUID id,Authentication auth) { tenants.requireWrite(auth); PipelineEntity p=get(id,auth); require(p,auth,true); repository.delete(p); }
+    @Transactional public void delete(UUID id,Authentication auth) {
+        tenants.requireWrite(auth); PipelineEntity p=get(id,auth); require(p,auth,true);
+        lineage.deprecateAsset(p.getTenantId(),"PIPELINE",p.getId().toString());
+        repository.delete(p);
+    }
     private boolean canRead(UUID tenant,UUID id,String subject) {
         try { acl.require(tenant,"PIPELINE",id,subject,false,false); return true; }
         catch(org.springframework.security.access.AccessDeniedException e) { return false; }

@@ -15,8 +15,9 @@ public class DatasetService {
     private final DatasetRepository repository;
     private final TenantContext tenants;
     private final ResourceAclService acl;
-    public DatasetService(DatasetRepository repository,TenantContext tenants,ResourceAclService acl) {
-        this.repository=repository; this.tenants=tenants; this.acl=acl;
+    private final CatalogLineageService lineage;
+    public DatasetService(DatasetRepository repository,TenantContext tenants,ResourceAclService acl,CatalogLineageService lineage) {
+        this.repository=repository; this.tenants=tenants; this.acl=acl; this.lineage=lineage;
     }
     private boolean admin(Authentication auth) {
         return auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("PERM_platform:admin"));
@@ -26,8 +27,10 @@ public class DatasetService {
         UUID tenant=tenants.tenantId(auth);
         if(repository.findByTenantIdAndNamespaceAndTableName(tenant,request.namespace(),request.tableName()).isPresent())
             throw new ResponseStatusException(HttpStatus.CONFLICT,"Dataset table is already registered");
-        return repository.save(new DatasetEntity(tenant,tenants.subject(auth),request.name(),request.namespace(),request.tableName(),
+        DatasetEntity saved=repository.save(new DatasetEntity(tenant,tenants.subject(auth),request.name(),request.namespace(),request.tableName(),
             request.description(),request.sourceType(),normalizeSchema(request.schemaJson())));
+        lineage.synchronizeDataset(saved);
+        return saved;
     }
     @Transactional(readOnly=true) public List<DatasetEntity> list(Authentication auth) {
         UUID tenant=tenants.tenantId(auth); String subject=tenants.subject(auth);
@@ -45,9 +48,15 @@ public class DatasetService {
             .filter(other -> !other.getId().equals(id)).ifPresent(other -> {throw new ResponseStatusException(HttpStatus.CONFLICT,"Dataset table is already registered");});
         if(!d.getNamespace().equals(request.namespace()) || !d.getTableName().equals(request.tableName()))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Dataset namespace and table name are immutable");
-        d.update(request.name(),request.description(),normalizeSchema(request.schemaJson())); return d;
+        d.update(request.name(),request.description(),normalizeSchema(request.schemaJson()));
+        lineage.synchronizeDataset(d);
+        return d;
     }
-    @Transactional public void delete(UUID id,Authentication auth) { tenants.requireWrite(auth); DatasetEntity d=get(id,auth); require(d,auth,true); repository.delete(d); }
+    @Transactional public void delete(UUID id,Authentication auth) {
+        tenants.requireWrite(auth); DatasetEntity d=get(id,auth); require(d,auth,true);
+        lineage.deprecateDataset(d.getTenantId(),d.getId());
+        repository.delete(d);
+    }
     private boolean canRead(UUID tenant,UUID id,String subject) {
         try { acl.require(tenant,"DATASET",id,subject,false,false); return true; } catch(org.springframework.security.access.AccessDeniedException e) { return false; }
     }
