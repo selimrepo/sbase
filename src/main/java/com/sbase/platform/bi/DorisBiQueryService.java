@@ -13,16 +13,24 @@ public class DorisBiQueryService {
  private static final Pattern SAFE=Pattern.compile("(?is)^\\s*select\\s+.+?\\s+from\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)\\b.*$");
  private static final Pattern LIMIT=Pattern.compile("(?is)\\blimit\\s+(\\d+)\\s*$");
  private static final Pattern UNSUPPORTED=Pattern.compile("(?is)\\b(union|join|with|into|outfile|load_file|sleep|benchmark|insert|update|delete|drop|alter|create|grant|revoke|set|use|call|offset)\\b");
+ private static final Pattern CLAUSE=Pattern.compile("(?is)\\s+(group\\s+by|order\\s+by|limit)\\b");
  private final Set<String> allowed;
  public DorisBiQueryService(@Value("${sbase.doris.allowed-tables:}") String tables,@Qualifier("dorisJdbcTemplate") JdbcTemplate doris){
   this.doris=doris;this.allowed=new HashSet<>();for(String t:tables.split(","))if(!t.isBlank())allowed.add(t.trim().toLowerCase(Locale.ROOT));
  }
- public List<Map<String,Object>> query(String sql){
+
+ /**
+  * Legacy SQL is tenant-scoped at the database boundary. A caller cannot provide
+  * or override tenant_id; the authenticated tenant is always injected as a bind.
+  */
+ public List<Map<String,Object>> query(UUID tenantId,String sql){
+  if(tenantId==null)throw new IllegalArgumentException("Tenant ID is required for Doris queries");
   if(sql==null||sql.isBlank()||sql.length()>12000||sql.contains(";")||sql.contains("--")||sql.contains("/*"))
    throw new IllegalArgumentException("Only one bounded SELECT statement is allowed");
   String normalized=sql.strip();
-  if(UNSUPPORTED.matcher(normalized).find()||countSelects(normalized)!=1||Pattern.compile("(?is)\\bfrom\\s+[A-Za-z_][A-Za-z0-9_.]*\\s*,").matcher(normalized).find())
-   throw new IllegalArgumentException("Only a single-table SELECT without joins or subqueries is allowed");
+  if(UNSUPPORTED.matcher(normalized).find()||countSelects(normalized)!=1||Pattern.compile("(?is)\\bfrom\\s+[A-Za-z_][A-Za-z0-9_.]*\\s*,").matcher(normalized).find()
+      ||Pattern.compile("(?is)\\btenant_id\\b").matcher(normalized).find())
+   throw new IllegalArgumentException("Only a single-table SELECT without joins, subqueries or tenant overrides is allowed");
   Matcher table=SAFE.matcher(normalized);
   if(!table.matches()||!allowed.contains(table.group(1).toLowerCase(Locale.ROOT)))
    throw new IllegalArgumentException("Query must select from an allow-listed Doris table");
@@ -35,9 +43,21 @@ public class DorisBiQueryService {
    if(Pattern.compile("(?is)\\blimit\\b").matcher(normalized).find())throw new IllegalArgumentException("Invalid query limit");
    normalized += " LIMIT 1000";
   }
-  return doris.queryForList(normalized);
+  Matcher clause=CLAUSE.matcher(normalized);
+  String suffix="";
+  if(clause.find()){suffix=normalized.substring(clause.start());normalized=normalized.substring(0,clause.start());}
+  Matcher where=Pattern.compile("(?is)\\bwhere\\b").matcher(normalized);
+  if(where.find()){
+   normalized=normalized.substring(0,where.start())+"WHERE ("+normalized.substring(where.end()).strip()+") AND tenant_id = ?";
+  }else{
+   normalized += " WHERE tenant_id = ?";
+  }
+  return doris.queryForList(normalized+suffix,tenantId.toString());
  }
- private static int countSelects(String sql){
-  Matcher matcher=Pattern.compile("(?i)\\bselect\\b").matcher(sql);int count=0;while(matcher.find())count++;return count;
+ /** Prevent accidental use of the historical unscoped API. */
+ @Deprecated
+ public List<Map<String,Object>> query(String sql){
+  throw new IllegalStateException("Unscoped Doris queries are disabled; supply the authenticated tenant ID");
  }
+ private static int countSelects(String sql){Matcher matcher=Pattern.compile("(?i)\\bselect\\b").matcher(sql);int count=0;while(matcher.find())count++;return count;}
 }
