@@ -3,6 +3,7 @@
 services:
   sbase:
     image: ${SBASE_IMAGE:?Set SBASE_IMAGE to a pinned production image}
+    pull_policy: always
     environment:
       SPRING_PROFILES_ACTIVE: production,docker
       JAVA_TOOL_OPTIONS: -Xms1g -Xmx3g
