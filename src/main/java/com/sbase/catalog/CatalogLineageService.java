@@ -192,9 +192,9 @@ public class CatalogLineageService {
 
     @Transactional
     public void synchronizeFeatureLineage(UUID lineageId,UUID tenant,UUID featureSetId,UUID sourceDatasetId,
-            List<String> sourceColumns,List<UUID> parentFeatureIds,String transformation,String owner) {
+            List<String> sourceColumns,List<UUID> parentFeatureIds,String transformation,String featureName,String owner) {
         CatalogAssetEntity feature=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"FEATURE_SET",featureSetId.toString())
-            .orElseGet(()->upsertAsset(tenant,"FEATURE_SET",featureSetId.toString(),"Feature set "+featureSetId,owner,null));
+            .orElseGet(()->upsertAsset(tenant,"FEATURE_SET",featureSetId.toString(),featureName==null?"Feature set "+featureSetId:featureName,owner,null));
         if(sourceDatasetId!=null) {
             CatalogAssetEntity table=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"TABLE",sourceDatasetId.toString()).orElse(null);
             if(table!=null) {
