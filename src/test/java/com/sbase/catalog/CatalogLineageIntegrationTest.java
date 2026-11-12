@@ -151,7 +151,7 @@ class CatalogLineageIntegrationTest {
         var auth=new TestingAuthenticationToken("lineage-owner","n/a");
         when(tenantContext.tenantId(auth)).thenReturn(tenant);
         when(tenantContext.subject(auth)).thenReturn("lineage-owner");
-        CatalogLineageService lineage=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper());
+        CatalogLineageService lineage=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper(),schemaVersions);
         DatasetService datasetService=new DatasetService(datasets,tenantContext,mock(com.sbase.platform.tenant.ResourceAclService.class),lineage);
         DatasetEntity source=datasetService.create(new DatasetRequest("Orders","warehouse","orders",null,"POSTGRESQL",
             "[{\"name\":\"order_id\",\"type\":\"UUID\"}]"),auth);
