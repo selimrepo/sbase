@@ -16,14 +16,14 @@ class BiReportScheduleWorkerTenantIsolationTest {
         var worker=new BiReportScheduleWorker(db,query,new ObjectMapper(),executor);
         UUID tenant=UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         String definition="""
-            {"table":"analytics.orders","dimensions":["region"],
+            {"table":"orders","dimensions":["region"],
              "metrics":[{"column":"amount","alias":"total","function":"SUM"}],
              "filters":[],"limit":25}
             """;
         Method run=BiReportScheduleWorker.class.getDeclaredMethod("runQuery",UUID.class,String.class);
         run.setAccessible(true);
         run.invoke(worker,tenant,definition);
-        verify(query).query(eq(tenant),eq("SELECT region,SUM(amount) AS total FROM analytics.orders GROUP BY region LIMIT 25"));
+        verify(query).query(eq(tenant),eq("SELECT region,SUM(amount) AS total FROM orders GROUP BY region LIMIT 25"));
         verify(query,never()).query(anyString());
     }
 }
