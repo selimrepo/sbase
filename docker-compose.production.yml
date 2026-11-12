@@ -1,0 +1,29 @@
+# Production overlay. Keep docker-compose.yml as the shared service definition.
+# Required in the production .env: POSTGRES_PASSWORD, SBASE_IMAGE,
+# JWT_ISSUER_URI, JWT_JWK_SET_URI, DORIS_USERNAME, DORIS_PASSWORD,
+# MINIO_ROOT_USER and MINIO_ROOT_PASSWORD (when object-storage is enabled).
+services:
+  sbase:
+    image: ${SBASE_IMAGE:?Set SBASE_IMAGE to a pinned production image}
+    environment:
+      SPRING_PROFILES_ACTIVE: production,docker
+      JAVA_TOOL_OPTIONS: -Xms1g -Xmx3g
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI:?Set JWT_ISSUER_URI for production}
+      JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:?Set JWT_JWK_SET_URI for production}
+      DORIS_USERNAME: ${DORIS_USERNAME:?Set DORIS_USERNAME for production}
+      DORIS_PASSWORD: ${DORIS_PASSWORD:?Set DORIS_PASSWORD for production}
+    restart: unless-stopped
+  postgres:
+    restart: unless-stopped
+  spark-master:
+    restart: unless-stopped
+  spark-worker:
+    restart: unless-stopped
+  doris-fe:
+    restart: unless-stopped
+  doris-be:
+    restart: unless-stopped
+  minio:
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER when object-storage is enabled}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD when object-storage is enabled}
