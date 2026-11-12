@@ -74,7 +74,7 @@ public class CatalogLineageService {
                 classification(request.classification()==null?table.getClassification():request.classification()),
                 writeTags(request.tags()),writeMetadata(request.metadata()));
         column=assets.save(column);
-        columns.save(new CatalogColumnEntity(column.getId(),tenant,tableId,ordinal,request.dataType().trim(),request.nullable()));
+        columns.save(new CatalogColumnEntity(column.getId(),tenant,tableId,ordinal,request.dataType().trim(),request.nullable()==null || request.nullable()));
         saveEdge(tenant,tableId,column.getId(),"CONTAINS","USER_DECLARED","column:"+column.getId(),null,BigDecimal.ONE,1,null);
         return view(column,columns.findById(column.getId()).orElseThrow());
     }
@@ -91,6 +91,16 @@ public class CatalogLineageService {
             result=assets.findAllByTenantIdAndAssetTypeOrderByUpdatedAtDesc(tenant,normalized,PageRequest.of(0,limit));
         }
         return result.stream().map(a->view(a,a.getAssetType().equals("COLUMN")?columns.findById(a.getId()).orElse(null):null)).toList();
+    }
+
+    @Transactional(readOnly=true)
+    public List<AssetView> columns(UUID tableId,Authentication auth) {
+        UUID tenant=tenants.tenantId(auth);
+        CatalogAssetEntity table=requireAsset(tenant,tableId);
+        if(!"TABLE".equals(table.getAssetType())) throw bad("Columns can only be listed for TABLE assets");
+        return columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId).stream()
+            .map(col->assets.findByIdAndTenantId(col.getId(),tenant).map(a->view(a,col)).orElse(null))
+            .filter(Objects::nonNull).toList();
     }
 
     @Transactional(readOnly=true)
@@ -236,9 +246,7 @@ public class CatalogLineageService {
     public record CreateAsset(String assetType,String externalKey,String displayName,String namespace,String physicalName,
             String description,String ownerTeam,String domain,String classification,List<String> tags,Map<String,Object> metadata,UUID parentId) {}
     public record CreateColumn(String name,String dataType,Boolean nullable,Integer ordinalPosition,String description,
-            String ownerTeam,String classification,List<String> tags,Map<String,Object> metadata) {
-        public boolean nullable(){return nullable==null||nullable;}
-    }
+            String ownerTeam,String classification,List<String> tags,Map<String,Object> metadata) {}
     public record GovernanceUpdate(String description,String ownerSubject,String ownerTeam,String domain,String classification,
             List<String> tags,Map<String,Object> metadata,String lifecycleState) {}
     public record CreateEdge(UUID fromAssetId,UUID toAssetId,String edgeType,String evidenceType,String evidenceRef,
