@@ -1,6 +1,8 @@
 package com.sbase.catalog;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -19,8 +21,8 @@ public class CatalogAssetEntity {
     @Column(name="owner_team",length=160) private String ownerTeam;
     @Column(length=120) private String domain;
     @Column(nullable=false,length=24) private String classification="INTERNAL";
-    @Column(name="tags_json",nullable=false,columnDefinition="jsonb") private String tagsJson="[]";
-    @Column(name="metadata_json",nullable=false,columnDefinition="jsonb") private String metadataJson="{}";
+    @JdbcTypeCode(SqlTypes.JSON) @Column(name="tags_json",nullable=false,columnDefinition="jsonb") private java.util.List<String> tags=java.util.List.of();
+    @JdbcTypeCode(SqlTypes.JSON) @Column(name="metadata_json",nullable=false,columnDefinition="jsonb") private java.util.Map<String,Object> metadata=java.util.Map.of();
     @Column(name="parent_id") private UUID parentId;
     @Column(name="lifecycle_state",nullable=false,length=24) private String lifecycleState="ACTIVE";
     @Column(name="schema_fingerprint",length=64) private String schemaFingerprint;
@@ -33,9 +35,9 @@ public class CatalogAssetEntity {
         this.id=UUID.randomUUID(); this.tenantId=tenantId; this.assetType=assetType; this.externalKey=externalKey;
         this.displayName=displayName; this.ownerSubject=ownerSubject; this.createdAt=Instant.now(); this.updatedAt=createdAt;
     }
-    public void updateGovernance(String description,String ownerTeam,String domain,String classification,String tagsJson,String metadataJson) {
+    public void updateGovernance(String description,String ownerTeam,String domain,String classification,java.util.List<String> tags,java.util.Map<String,Object> metadata) {
         this.description=description; this.ownerTeam=ownerTeam; this.domain=domain; this.classification=classification;
-        this.tagsJson=tagsJson; this.metadataJson=metadataJson; this.updatedAt=Instant.now();
+        this.tags=tags; this.metadata=metadata; this.updatedAt=Instant.now();
     }
     public void setPhysicalLocation(String namespace,String physicalName) { this.namespace=namespace; this.physicalName=physicalName; this.updatedAt=Instant.now(); }
     public void updateSourceDetails(String displayName,String description,String namespace,String physicalName) {
@@ -51,7 +53,7 @@ public class CatalogAssetEntity {
     public String getDescription(){return description;} public String getOwnerSubject(){return ownerSubject;}
     public String getOwnerTeam(){return ownerTeam;} public String getDomain(){return domain;}
     public String getClassification(){return classification;} public String getTagsJson(){return tagsJson;}
-    public String getMetadataJson(){return metadataJson;} public UUID getParentId(){return parentId;}
+    public java.util.Map<String,Object> getMetadata(){return metadata;} public java.util.List<String> getTags(){return tags;} public UUID getParentId(){return parentId;}
     public String getLifecycleState(){return lifecycleState;} public String getSchemaFingerprint(){return schemaFingerprint;}
     public Instant getCreatedAt(){return createdAt;} public Instant getUpdatedAt(){return updatedAt;} public long getRowVersion(){return rowVersion;}
 }
