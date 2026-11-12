@@ -6,4 +6,6 @@ import java.util.UUID;
 
 public interface CatalogColumnRepository extends JpaRepository<CatalogColumnEntity,UUID> {
     List<CatalogColumnEntity> findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(UUID tenantId,UUID tableAssetId);
+    List<CatalogColumnEntity> findAllByTenantIdAndTableAssetIdAndCurrentTrueOrderByOrdinalPosition(UUID tenantId,UUID tableAssetId);
+    boolean existsByTenantIdAndTableAssetIdAndOrdinalPositionAndCurrentTrue(UUID tenantId,UUID tableAssetId,int ordinalPosition);
 }
