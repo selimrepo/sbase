@@ -19,7 +19,7 @@ ON CONFLICT (tenant_id,asset_type,external_key) DO NOTHING;
 
 INSERT INTO catalog_assets(id,tenant_id,asset_type,external_key,display_name,owner_subject,parent_id,metadata_json)
 SELECT md5('registered-model-version:'||v.id::text)::uuid,v.tenant_id,'MODEL','registered-version:'||v.id::text,
- m.name||' v'||v.version,v.created_by,md5('registered-model:'||m.id::text)::uuid,
+ m.name||' v'||v.version,m.owner_subject,md5('registered-model:'||m.id::text)::uuid,
  jsonb_build_object('version',v.version,'framework',v.framework,'stage',v.stage)
 FROM model_versions v JOIN registered_models m ON m.id=v.model_id AND m.tenant_id=v.tenant_id
 ON CONFLICT (tenant_id,asset_type,external_key) DO NOTHING;
