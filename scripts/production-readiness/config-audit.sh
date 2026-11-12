@@ -29,7 +29,7 @@ check_present() {
 }
 
 check_absent '\$\{POSTGRES_PASSWORD:-[^}]*\}|\$\{SPRING_DATASOURCE_PASSWORD:[^}]*\}' "$compose" "Compose has no default database password fallback"
-check_present 'POSTGRES_PASSWORD:[?]Set POSTGRES_PASSWORD in [.][e]nv' "$compose" "Compose requires PostgreSQL password from environment"
+check_present 'POSTGRES_PASSWORD: \$\{POSTGRES_PASSWORD:\?Set POSTGRES_PASSWORD in [.][e]nv' "$compose" "Compose requires PostgreSQL password from environment"
 check_absent 'password:.*\$\{SPRING_DATASOURCE_PASSWORD:[^}]*\}' "$application" "Spring has no default datasource password"
 check_present 'password: \$\{SPRING_DATASOURCE_PASSWORD\}' "$application" "Spring datasource password is environment-only"
 check_present 'ddl-auto: validate' "$application" "Hibernate schema validation enabled"
@@ -37,8 +37,8 @@ check_present 'include: health,info,metrics' "$application" "Actuator exposure i
 check_present 'probes:' "$application" "Actuator probe configuration present"
 check_present 'SPRING_PROFILES_ACTIVE: development,docker' "$dev_compose" "Development Compose activates development profile"
 check_present 'SPRING_PROFILES_ACTIVE: production,docker' "$prod_compose" "Production Compose activates production profile"
-check_present 'SBASE_IMAGE:[?]Set SBASE_IMAGE' "$prod_compose" "Production requires an explicit image"
-check_present 'JWT_ISSUER_URI:[?]Set JWT_ISSUER_URI' "$prod_compose" "Production requires identity issuer"
-check_present 'JWT_JWK_SET_URI:[?]Set JWT_JWK_SET_URI' "$prod_compose" "Production requires JWK endpoint"
+check_present 'image: \$\{SBASE_IMAGE:\?Set SBASE_IMAGE' "$prod_compose" "Production requires an explicit image"
+check_present 'JWT_ISSUER_URI: \$\{JWT_ISSUER_URI:\?Set JWT_ISSUER_URI' "$prod_compose" "Production requires identity issuer"
+check_present 'JWT_JWK_SET_URI: \$\{JWT_JWK_SET_URI:\?Set JWT_JWK_SET_URI' "$prod_compose" "Production requires JWK endpoint"
 
 exit "$fail"
