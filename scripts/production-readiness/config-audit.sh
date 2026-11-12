@@ -28,7 +28,7 @@ check_present() {
   fi
 }
 
-check_absent '\\$\\{POSTGRES_PASSWORD:-[^}]*\\}|\\$\\{SPRING_DATASOURCE_PASSWORD:[^}]*\\}' "$compose" "Compose has no default database password fallback"
+check_absent '\$\{POSTGRES_PASSWORD:-[^}]*\}|\$\{SPRING_DATASOURCE_PASSWORD:[^}]*\}' "$compose" "Compose has no default database password fallback"
 check_present 'POSTGRES_PASSWORD:[?]Set POSTGRES_PASSWORD in [.][e]nv' "$compose" "Compose requires PostgreSQL password from environment"
 check_absent 'password:.*\$\{SPRING_DATASOURCE_PASSWORD:[^}]*\}' "$application" "Spring has no default datasource password"
 check_present 'password: \$\{SPRING_DATASOURCE_PASSWORD\}' "$application" "Spring datasource password is environment-only"
