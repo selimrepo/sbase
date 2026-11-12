@@ -61,6 +61,10 @@ public class CatalogLineageController {
         return service.updateGovernance(id,new CatalogLineageService.GovernanceUpdate(r.description(),r.ownerSubject(),
             r.ownerTeam(),r.domain(),r.classification(),r.tags(),r.metadata(),r.lifecycleState()),auth);
     }
+    @GetMapping("/assets/{id}/schema-versions")
+    public List<CatalogLineageService.SchemaVersionView> schemaHistory(@PathVariable UUID id,Authentication auth) {
+        permissions.require(auth,"catalog:read"); return service.schemaHistory(id,auth);
+    }
     @GetMapping("/assets/{id}/columns")
     public List<CatalogLineageService.AssetView> columns(@PathVariable UUID id,Authentication auth) {
         permissions.require(auth,"catalog:read"); return service.columns(id,auth);
