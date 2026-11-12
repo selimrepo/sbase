@@ -114,6 +114,31 @@ public class CatalogLineageService {
         }
         for(JsonNode step:steps) {
             String id=firstText(step,"id"), type=firstText(step,"type");
+            if(!"doris_read".equals(type) || id==null) continue;
+            CatalogAssetEntity source=resolveTable(tenant,firstText(step,"table"));
+            if(source!=null) {
+                sourceTables.put(id,Set.of(source.getId()));
+                saveEdge(tenant,source.getId(),stepAssets.get(id).getId(),"READS_FROM","PIPELINE_DEFINITION",
+                    pipeline.getId()+":"+id,null,BigDecimal.ONE,pipeline.getVersion(),null);
+            }
+        }
+        for(int pass=0;pass<steps.size();pass++) {
+            boolean changed=false;
+            for(JsonNode step:steps) {
+                String id=firstText(step,"id");
+                if(id==null || stepAssets.get(id)==null) continue;
+                JsonNode deps=step.get("dependsOn");
+                if(deps==null || !deps.isArray()) continue;
+                Set<UUID> inherited=new LinkedHashSet<>(sourceTables.getOrDefault(id,Set.of()));
+                for(JsonNode dep:deps) inherited.addAll(sourceTables.getOrDefault(dep.asText(),Set.of()));
+                if(!inherited.isEmpty() && !inherited.equals(sourceTables.get(id))) {
+                    sourceTables.put(id,inherited); changed=true;
+                }
+            }
+            if(!changed) break;
+        }
+        for(JsonNode step:steps) {
+            String id=firstText(step,"id"), type=firstText(step,"type");
             if(id==null || type==null || !stepAssets.containsKey(id)) continue;
             CatalogAssetEntity target=stepAssets.get(id);
             Set<UUID> inputs=new LinkedHashSet<>();
