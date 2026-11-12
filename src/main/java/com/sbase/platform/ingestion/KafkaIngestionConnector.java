@@ -28,6 +28,8 @@ public class KafkaIngestionConnector implements IngestionConnector {
     @Override public ConnectorResult ingest(ConnectorRequest request) {
         Map<String,String> o=request.options();
         UUID connectorId=UUID.fromString(required(o,"connectorId"));
+        UUID tenantId=UUID.fromString(required(o,"tenantId"));
+        String tenantHeader=o.getOrDefault("tenantHeader","sbase-tenant-id");
         String topic=required(o,"topic"), bootstrap=required(o,"bootstrapServers");
         String group=o.getOrDefault("groupId","sbase-"+connectorId);
         String registry=o.getOrDefault("schemaRegistryUrl","");
@@ -78,9 +80,12 @@ public class KafkaIngestionConnector implements IngestionConnector {
                 List<DurableRecordSink.Envelope> envelopes=new ArrayList<>();
                 Map<TopicPartition,Long> nextOffsets=new HashMap<>();
                 for(ConsumerRecord<String,byte[]> r:batch) {
+                    TenantEnvelopeValidator.requireTrustedHeader(r.headers(),tenantHeader,tenantId);
                     String key=topic+":"+r.partition()+":"+r.offset();
                     byte[] bytes=r.value()==null?new byte[0]:r.value();
+                    if(bytes.length<5 || bytes[0]!=0) TenantEnvelopeValidator.requireJsonTenantIfPresent(mapper,new String(bytes,StandardCharsets.UTF_8),tenantId);
                     Map<String,Object> payload=new LinkedHashMap<>();
+                    payload.put("tenant_id",tenantId.toString());
                     payload.put("topic",topic); payload.put("partition",r.partition()); payload.put("offset",r.offset());
                     payload.put("key",r.key()); payload.put("timestamp",r.timestamp());
                     payload.put("valueBase64",Base64.getEncoder().encodeToString(bytes));

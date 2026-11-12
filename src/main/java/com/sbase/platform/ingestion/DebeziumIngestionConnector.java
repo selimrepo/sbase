@@ -13,12 +13,15 @@ import java.util.*;
 @Component
 public class DebeziumIngestionConnector implements IngestionConnector {
     private final DurableRecordSink sink;
-    public DebeziumIngestionConnector(DurableRecordSink sink, ObjectMapper mapper) { this.sink=sink; }
+    private final ObjectMapper mapper;
+    public DebeziumIngestionConnector(DurableRecordSink sink,ObjectMapper mapper) { this.sink=sink;this.mapper=mapper; }
     @Override public String type() { return "debezium"; }
 
     @Override public ConnectorResult ingest(ConnectorRequest request) {
         Map<String,String> o=request.options();
         UUID id=UUID.fromString(required(o,"connectorId"));
+        UUID tenantId=UUID.fromString(required(o,"tenantId"));
+        String tenantHeader=o.getOrDefault("tenantHeader","sbase-tenant-id");
         String topic=required(o,"topic");
         Properties p=new Properties();
         p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,required(o,"bootstrapServers"));
@@ -37,8 +40,11 @@ public class DebeziumIngestionConnector implements IngestionConnector {
                 List<DurableRecordSink.Envelope> batch=new ArrayList<>();
                 Map<TopicPartition,Long> offsets=new HashMap<>();
                 for(ConsumerRecord<String,String> r:records){
+                    TenantEnvelopeValidator.requireTrustedHeader(r.headers(),tenantHeader,tenantId);
+                    TenantEnvelopeValidator.requireJsonTenantIfPresent(mapper,r.value(),tenantId);
                     String sourceKey=topic+":"+r.partition()+":"+r.offset();
                     Map<String,Object> payload=new LinkedHashMap<>();
+                    payload.put("tenant_id",tenantId.toString());
                     payload.put("key",r.key()); payload.put("envelope",r.value());
                     payload.put("topic",topic); payload.put("partition",r.partition()); payload.put("offset",r.offset());
                     // Debezium's before/after/op/source/ts_ms envelope is retained without lossy flattening.

@@ -9,6 +9,9 @@ import com.sbase.platform.bi.BiWorkspaceService;
 import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -35,6 +38,36 @@ class TenantWorkerIsolationIntegrationTest {
         HikariDataSource ds=new HikariDataSource();
         ds.setJdbcUrl(POSTGRES.getJdbcUrl()); ds.setUsername(POSTGRES.getUsername()); ds.setPassword(POSTGRES.getPassword());
         return ds;
+    }
+
+    @Test
+    void durableSinkRejectsRowsWhoseTenantDoesNotMatchConnectorOwnership() {
+        try(HikariDataSource ds=dataSource()) {
+            JdbcTemplate db=new JdbcTemplate(ds);
+            db.execute("CREATE TABLE ingestion_connectors(id UUID PRIMARY KEY,tenant_id UUID NOT NULL)");
+            db.execute("""
+                CREATE TABLE ingestion_records(
+                  id UUID PRIMARY KEY,connector_id UUID NOT NULL,tenant_id UUID NOT NULL,
+                  source_key TEXT NOT NULL,payload JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL,
+                  UNIQUE(connector_id,source_key))
+                """);
+            db.execute("""
+                CREATE TABLE ingestion_checkpoints(
+                  connector_id UUID NOT NULL,tenant_id UUID NOT NULL,checkpoint_key TEXT NOT NULL,
+                  checkpoint_value TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL,
+                  PRIMARY KEY(connector_id,checkpoint_key))
+                """);
+            UUID tenantA=UUID.randomUUID(),tenantB=UUID.randomUUID(),connectorA=UUID.randomUUID();
+            db.update("INSERT INTO ingestion_connectors VALUES(?,?)",connectorA,tenantA);
+            DurableRecordSink sink=new DurableRecordSink(db,new TransactionTemplate(new DataSourceTransactionManager(ds)),new ObjectMapper());
+            var valid=new DurableRecordSink.Envelope("row-1",Map.of("tenant_id",tenantA.toString(),"value","owned"));
+            assertEquals(1L,sink.write(connectorA,"test",List.of(valid),null,null));
+            var foreign=new DurableRecordSink.Envelope("row-2",Map.of("tenant_id",tenantB.toString(),"value","foreign"));
+            assertThrows(AccessDeniedException.class,()->sink.write(connectorA,"test",List.of(foreign),null,null));
+            var missing=new DurableRecordSink.Envelope("row-3",Map.of("value","unowned"));
+            assertThrows(AccessDeniedException.class,()->sink.write(connectorA,"test",List.of(missing),null,null));
+            assertThat(db.queryForObject("SELECT count(*) FROM ingestion_records WHERE connector_id=?",Integer.class,connectorA)).isEqualTo(1);
+        }
     }
 
     @Test

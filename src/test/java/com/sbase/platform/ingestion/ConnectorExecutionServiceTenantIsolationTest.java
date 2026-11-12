@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.web.server.ResponseStatusException;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -26,21 +27,28 @@ class ConnectorExecutionServiceTenantIsolationTest {
         return new ConnectorExecutionService(List.of(connector),db,new ObjectMapper(),2,Runnable::run);
     }
 
-    @Test
-    void foreignTenantCannotEnqueueRunsForAnotherTenantsConnector() {
+    @Test void foreignTenantCannotEnqueueRunsForAnotherTenantsConnector() {
         when(db.query(eq(LOOKUP),any(ResultSetExtractor.class),eq(connectorA),eq(tenantB))).thenReturn(null);
-        assertThrows(ResponseStatusException.class,()->service().execute("file",connectorA,null,
-            "source","target",Map.of(),"key",tenantB,"bob"));
+        assertThrows(ResponseStatusException.class,()->service().execute("file",connectorA,null,"source","target",Map.of(),"key",tenantB,"bob"));
         verify(db).query(eq(LOOKUP),any(ResultSetExtractor.class),eq(connectorA),eq(tenantB));
         verify(db,never()).update(startsWith("INSERT INTO ingestion_runs"),any(Object[].class));
     }
 
-    @Test
-    void connectorLookupAlwaysUsesTheCallerTenantEvenForKnownConnectorIds() {
+    @Test void connectorLookupAlwaysUsesCallerTenantEvenForKnownConnectorIds() {
         when(db.query(eq(LOOKUP),any(ResultSetExtractor.class),eq(connectorA),eq(tenantA))).thenReturn(null);
-        assertThrows(ResponseStatusException.class,()->service().execute("file",connectorA,null,
-            "source","target",Map.of(),"key",tenantA,"alice"));
+        assertThrows(ResponseStatusException.class,()->service().execute("file",connectorA,null,"source","target",Map.of(),"key",tenantA,"alice"));
         verify(db).query(eq(LOOKUP),any(ResultSetExtractor.class),eq(connectorA),eq(tenantA));
         verify(db,never()).update(startsWith("INSERT INTO ingestion_runs"),any(Object[].class));
+    }
+
+    @Test void workerClaimJoinsRunAndConnectorOnTenantOwnership() throws Exception {
+        ConnectorExecutionService service=service();
+        Method claim=ConnectorExecutionService.class.getDeclaredMethod("claimOne");
+        claim.setAccessible(true);
+        assertNull(claim.invoke(service));
+        org.mockito.ArgumentCaptor<String> sql=org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(db).query(sql.capture(),any(ResultSetExtractor.class),anyString());
+        assertTrue(sql.getValue().contains("c.id=r.connector_id AND c.tenant_id=r.tenant_id"));
+        assertTrue(sql.getValue().contains("FOR UPDATE OF r SKIP LOCKED"));
     }
 }

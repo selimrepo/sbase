@@ -9,23 +9,37 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
+import org.springframework.beans.factory.annotation.Value;
 
 @Component
 public class FileIngestionConnector implements IngestionConnector {
     private static final int BATCH_SIZE=500;
     private final DurableRecordSink sink;
     private final ObjectMapper mapper;
-    public FileIngestionConnector(DurableRecordSink sink,ObjectMapper mapper){this.sink=sink;this.mapper=mapper;}
+    private final Path configuredRoot;
+    public FileIngestionConnector(DurableRecordSink sink,ObjectMapper mapper,
+            @Value("${sbase.ingestion.file.root:./data/ingestion}") String configuredRoot){
+        this.sink=sink;this.mapper=mapper;this.configuredRoot=Path.of(configuredRoot).toAbsolutePath().normalize();
+    }
     @Override public String type(){return "file";}
 
     @Override
     public ConnectorResult ingest(ConnectorRequest request) {
         Map<String,String> o=request.options();
         UUID connectorId=UUID.fromString(required(o,"connectorId"));
-        Path path=Path.of(required(o,"path")).toAbsolutePath().normalize();
-        Path root=Path.of(required(o,"allowedRoot")).toAbsolutePath().normalize();
+        UUID tenantId=UUID.fromString(required(o,"tenantId"));
+        Path supplied=Path.of(required(o,"path"));
         try {
-            Path realRoot=root.toRealPath();
+            Files.createDirectories(configuredRoot.resolve("tenants"));
+            Path realBase=configuredRoot.toRealPath();
+            Path tenantsRoot=realBase.resolve("tenants");
+            Files.createDirectories(tenantsRoot);
+            Path realTenants=tenantsRoot.toRealPath();
+            Path expectedTenantRoot=realTenants.resolve(tenantId.toString());
+            Files.createDirectories(expectedTenantRoot);
+            Path realRoot=expectedTenantRoot.toRealPath();
+            if(!realRoot.equals(expectedTenantRoot)) throw new IllegalArgumentException("Tenant ingestion directory must not be a symlink");
+            Path path=supplied.isAbsolute()?supplied:realRoot.resolve(supplied);
             Path realFile=path.toRealPath();
             if(!realFile.startsWith(realRoot)||!Files.isRegularFile(realFile))
                 throw new IllegalArgumentException("File must resolve to a regular file under allowedRoot");

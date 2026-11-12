@@ -106,7 +106,7 @@ public class ConnectorExecutionService {
                 SELECT id FROM ingestion_runs
                  WHERE status='QUEUED' OR (status='RETRY_WAIT' AND next_attempt_at<=now()) OR (status='RUNNING' AND lease_until<now())
                  ORDER BY submitted_at,id
-                 FOR UPDATE SKIP LOCKED LIMIT 1
+                 FOR UPDATE OF r SKIP LOCKED LIMIT 1
             )
             UPDATE ingestion_runs r
                SET status='RUNNING', started_at=COALESCE(r.started_at,now()),
@@ -132,6 +132,14 @@ public class ConnectorExecutionService {
         try {
             Map<String, Object> payload = mapper.readValue(run.payload(), new TypeReference<>() {});
             String type = (String) payload.get("type");
+            Boolean connectorOwned=db.query("""
+                SELECT EXISTS(SELECT 1 FROM ingestion_runs r
+                    JOIN ingestion_connectors c ON c.id=r.connector_id AND c.tenant_id=r.tenant_id
+                 WHERE r.id=? AND r.tenant_id=? AND r.connector_id=? AND c.enabled=true
+                   AND LOWER(c.connector_type)=LOWER(?))
+                """,rs->rs.next()&&rs.getBoolean(1),run.id(),run.tenantId(),run.connectorId(),type);
+            if(!Boolean.TRUE.equals(connectorOwned))
+                throw new SecurityException("Ingestion run connector ownership or tenant binding is invalid");
             Map<String, String> options = mapper.convertValue(payload.get("options"), new TypeReference<>() {});
             options = new HashMap<>(options == null ? Map.of() : options);
             options.put("connectorId", run.connectorId().toString());
@@ -142,7 +150,7 @@ public class ConnectorExecutionService {
             db.update("""
                 UPDATE ingestion_runs SET status='SUCCEEDED',finished_at=now(),records_read=?,
                     records_written=?,lease_owner=NULL,lease_until=NULL
-                 WHERE id=? AND tenant_id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now() AND lease_until>now()
+                 WHERE id=? AND tenant_id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now()
                 """, result.recordsRead(), result.recordsWritten(), run.id(), run.tenantId(), workerId, run.fencingToken());
             return;
         } catch (Exception ex) {
