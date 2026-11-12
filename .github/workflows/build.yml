@@ -33,6 +33,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14'
+      - name: Audit production and environment configuration
+        run: bash scripts/production-readiness/config-audit.sh
       - name: Test and package
         run: gradle --no-daemon clean test bootJar
 
