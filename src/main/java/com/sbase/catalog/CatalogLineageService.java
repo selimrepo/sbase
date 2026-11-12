@@ -204,10 +204,7 @@ public class CatalogLineageService {
         return asset;
     }
     private CatalogAssetEntity resolveTable(UUID tenant,String reference) {
-        return assets.findAllByTenantIdAndAssetTypeOrderByUpdatedAtDesc(tenant,"TABLE",PageRequest.of(0,200)).stream()
-            .filter(a->reference.equalsIgnoreCase(Objects.toString(a.getPhysicalName(),""))
-                || reference.equalsIgnoreCase(Objects.toString(a.getNamespace(),"")+"."+Objects.toString(a.getPhysicalName(),"")))
-            .findFirst().orElse(null);
+        return assets.resolveTableReference(tenant,reference,PageRequest.of(0,1)).stream().findFirst().orElse(null);
     }
     private void addColumnUse(UUID tenant,UUID tableId,String columnName,UUID consumer,String evidence,long version) {
         columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId).stream()
@@ -379,8 +376,9 @@ public class CatalogLineageService {
         for(int level=0;level<depth && !frontier.isEmpty();level++) {
             List<UUID> ids=List.copyOf(frontier); frontier=new LinkedHashSet<>();
             List<LineageEdgeEntity> batch=new ArrayList<>();
-            if(direction.equals("DOWNSTREAM") || direction.equals("BOTH")) batch.addAll(edges.findAllByTenantIdAndFromAssetIdIn(tenant,ids));
-            if(direction.equals("UPSTREAM") || direction.equals("BOTH")) batch.addAll(edges.findAllByTenantIdAndToAssetIdIn(tenant,ids));
+            if(direction.equals("DOWNSTREAM") || direction.equals("BOTH")) batch.addAll(edges.findTop2001ByTenantIdAndFromAssetIdIn(tenant,ids));
+            if(direction.equals("UPSTREAM") || direction.equals("BOTH")) batch.addAll(edges.findTop2001ByTenantIdAndToAssetIdIn(tenant,ids));
+            if(batch.size()>=2001) truncated=true;
             for(LineageEdgeEntity edge:batch) {
                 if(foundEdges.size()>=maxEdges) {truncated=true;break;}
                 foundEdges.putIfAbsent(edge.getId(),edge);
@@ -409,7 +407,7 @@ public class CatalogLineageService {
         if(version<1) throw bad("Effective lineage version must be positive");
         if(evidenceRef!=null && evidenceRef.length()>512) throw bad("Lineage evidence reference is too long");
         if(expression!=null && expression.length()>20000) throw bad("Lineage expression is too long");
-        String fingerprint=sha256(tenant+"|"+from+"|"+to+"|"+type+"|"+evidence+"|"+Objects.toString(evidenceRef,"")+"|"+Objects.toString(expression,"")+"|"+version);
+        String fingerprint=sha256(tenant+"|"+from+"|"+to+"|"+type+"|"+evidence+"|"+Objects.toString(evidenceRef,"")+"|"+Objects.toString(expression,"")+"|"+confidence.stripTrailingZeros().toPlainString()+"|"+version);
         return edges.findByTenantIdAndEdgeFingerprint(tenant,fingerprint).orElseGet(() ->
             edges.save(new LineageEdgeEntity(tenant,from,to,type,evidence,evidenceRef,expression,confidence,version,runId,fingerprint)));
     }
