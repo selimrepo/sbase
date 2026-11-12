@@ -11,10 +11,7 @@ CROSS JOIN (VALUES ('catalog:read'),('lineage:read')) p(permission)
 WHERE r.name IN ('DATA_SCIENTIST','BI_VIEWER')
 ON CONFLICT DO NOTHING;
 
--- Ordinal changes are applied as a set by schema discovery; defer uniqueness until transaction commit.
-ALTER TABLE catalog_columns DROP CONSTRAINT IF EXISTS uq_catalog_column_ordinal;
-ALTER TABLE catalog_columns ADD CONSTRAINT uq_catalog_column_ordinal
-  UNIQUE (tenant_id,table_asset_id,ordinal_position) DEFERRABLE INITIALLY DEFERRED;
+-- Active ordinals are protected by the partial unique index; historical columns remain queryable.
 
 -- Re-run pipeline dependency materialization after all step nodes exist (handles forward references).
 DO $$
