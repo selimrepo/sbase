@@ -430,6 +430,17 @@ public class CatalogLineageService {
     }
 
     @Transactional(readOnly=true)
+    public List<SchemaVersionView> schemaHistory(UUID tableId,Authentication auth) {
+        UUID tenant=tenants.tenantId(auth);
+        CatalogAssetEntity table=requireAsset(tenant,tableId);
+        if(!"TABLE".equals(table.getAssetType())) throw bad("Schema history is available only for TABLE assets");
+        if(schemaVersions==null) return List.of();
+        return schemaVersions.findTop100ByTenantIdAndTableAssetIdOrderByObservedAtDesc(tenant,tableId).stream()
+            .map(v->new SchemaVersionView(v.getId(),v.getSchemaFingerprint(),v.getSchemaJson(),v.getSourceRef(),v.getObservedAt(),v.getCreatedBy()))
+            .toList();
+    }
+
+    @Transactional(readOnly=true)
     public AssetView get(UUID id,Authentication auth) {
         UUID tenant=tenants.tenantId(auth);
         CatalogAssetEntity asset=requireAsset(tenant,id);
@@ -592,6 +603,7 @@ public class CatalogLineageService {
             String description,String ownerSubject,String ownerTeam,String domain,String classification,List<String> tags,
             Map<String,Object> metadata,UUID parentId,String lifecycleState,String schemaFingerprint,Instant createdAt,Instant updatedAt,
             Integer ordinalPosition,String dataType,Boolean nullable) {}
+    public record SchemaVersionView(UUID id,String fingerprint,JsonNode schema,String sourceRef,Instant observedAt,String createdBy) {}
     public record EdgeView(UUID id,UUID fromAssetId,UUID toAssetId,String edgeType,String evidenceType,String evidenceRef,
             String expressionText,BigDecimal confidence,Instant observedAt,long effectiveVersion,UUID runId) {}
     public record GraphView(UUID rootId,String direction,int depth,boolean truncated,List<AssetView> nodes,List<EdgeView> edges) {}
