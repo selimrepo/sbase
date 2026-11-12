@@ -221,7 +221,7 @@ public class PipelineExecutionService {
 
     private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs, UUID runId, String idempotencyKey) {
         return switch (type) {
-            case "doris_read" -> readDoris(step.path("table").asText());
+            case "doris_read" -> readDoris(step.path("table").asText(), tenantForRun(runId));
             case "filter" -> filter(input, step);
             case "select" -> select(input, step);
             case "with_column" -> withColumn(input, step);
@@ -229,7 +229,7 @@ public class PipelineExecutionService {
             case "join" -> join(inputs, step);
             case "union" -> union(inputs, step);
             case "feature_store_write" -> { requireFeatureWrite(step.path("featureSet").asText(), runId); writeOnlineFeatures(requireInput(input), step, runId); yield input; }
-            case "doris_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey); yield input; }
+            case "doris_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey, tenantForRun(runId)); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
         };
     }
@@ -267,11 +267,27 @@ public class PipelineExecutionService {
             throw new org.springframework.security.access.AccessDeniedException("Pipeline submitter has no WRITE grant for feature set " + featureSet);
     }
 
-    private Dataset<Row> readDoris(String table) {
+    private UUID tenantForRun(UUID runId) {
+        return runs.findById(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline run not found"))
+                .getTenantId();
+    }
+
+    /**
+     * Doris is a shared analytical data plane. Every physical source read is
+     * scoped by the immutable tenant captured in the durable run record.
+     */
+    private Dataset<Row> readDoris(String table, UUID tenantId) {
         requireAllowed(table);
-        return sparkProvider.getObject().read().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
+        Dataset<Row> source = sparkProvider.getObject().read().format("jdbc")
+                .option("url", doris.jdbcUrl()).option("dbtable", table)
                 .option("user", doris.username()).option("password", doris.password())
                 .option("driver", "com.mysql.cj.jdbc.Driver").load();
+        if (!Arrays.asList(source.columns()).contains("tenant_id")) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Doris source table must expose tenant_id for tenant-isolated pipeline reads");
+        }
+        return source.filter(col("tenant_id").equalTo(lit(tenantId.toString())));
     }
 
 
@@ -372,7 +388,7 @@ public class PipelineExecutionService {
         return df.groupBy(groups.toArray(Column[]::new)).agg(metrics.get(0), metrics.subList(1, metrics.size()).toArray(Column[]::new));
     }
 
-    private void writeDoris(Dataset<Row> df, JsonNode step, UUID runId, String idempotencyKey) {
+    private void writeDoris(Dataset<Row> df, JsonNode step, UUID runId, String idempotencyKey, UUID tenantId) {
         String table = step.path("table").asText();
         requireAllowed(table);
         String mode = step.path("mode").asText("append");
@@ -382,6 +398,16 @@ public class PipelineExecutionService {
         String[] keyColumns = new String[keys.size()];
         for (int i = 0; i < keys.size(); i++) { keyColumns[i] = keys.get(i).asText(); PipelineDefinitionValidator.identifier(keyColumns[i]); }
         verifyDorisUniqueKey(table, keyColumns);
+        if (!Arrays.asList(df.columns()).contains("tenant_id")) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Doris target data must include tenant_id; cross-tenant writes are not permitted");
+        }
+        // Reject the whole batch if any row is missing or belongs to another tenant.
+        if (df.filter(col("tenant_id").isNull()
+                .or(col("tenant_id").notEqual(lit(tenantId.toString())))).limit(1).count() > 0) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Doris write contains rows outside the pipeline run tenant");
+        }
         Dataset<Row> stable = df.dropDuplicates(keyColumns);
         // The run-level Spark job group is set by executeClaimed, allowing
         // cancellation to interrupt this external write as well.

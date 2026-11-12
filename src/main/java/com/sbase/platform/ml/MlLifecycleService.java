@@ -63,17 +63,16 @@ public class MlLifecycleService {
    VALUES(?,?,?,?,?,?,'QUEUED',CAST(? AS jsonb),CAST(? AS jsonb),?,CAST(? AS jsonb),?,?,?)
    """,id,tenant,experiment,runName,algorithm,task,parameters==null?"{}":parameters.toString(),
     searchSpace==null?"{}":searchSpace.toString(),table,featuresJson(features),label,folds,subject);
-  try{executor.execute(()->train(id,tenant,table,features,label,algorithm,task,folds,parameters,searchSpace));}catch(RuntimeException ex){db.update("UPDATE sbase_ml_runs SET status='FAILED',error_message=?,finished_at=now() WHERE id=?",ex.getMessage(),id);throw ex;}
+  try{executor.execute(()->train(id,tenant,table,features,label,algorithm,task,folds,parameters,searchSpace));}catch(RuntimeException ex){db.update("UPDATE sbase_ml_runs SET status='FAILED',error_message=?,finished_at=now() WHERE id=? AND tenant_id=?",ex.getMessage(),id,tenant);throw ex;}
   return id;
  }
  private void train(UUID id,UUID tenant,String table,List<String> features,String label,String algorithm,String task,int folds,JsonNode parameters,JsonNode search) {
-  db.update("UPDATE sbase_ml_runs SET status='RUNNING',started_at=now() WHERE id=? AND status='QUEUED'",id);
+  if (db.update("UPDATE sbase_ml_runs SET status='RUNNING',started_at=now() WHERE id=? AND tenant_id=? AND status='QUEUED'",id,tenant) != 1) return;
   try {
    SparkSession session=spark.getObject();
    Properties props=new Properties();props.setProperty("user",user);props.setProperty("password",password);props.setProperty("driver","org.postgresql.Driver");
-   String projection=String.join(",",features)+","+label;
-   Dataset<Row> data=session.read().jdbc(jdbcUrl,"(SELECT "+projection+" FROM "+table+" WHERE tenant_id='"+tenant+"' AND "+label+" IS NOT NULL) s",props)
-     .na().drop(new String[]{label});
+   String scopedSource=tenantScopedTrainingQuery(table,features,label,tenant);
+   Dataset<Row> data=session.read().jdbc(jdbcUrl,scopedSource,props).na().drop(new String[]{label});
    if(data.limit(2).count()<2)throw new IllegalArgumentException("Training dataset must contain at least two labeled rows");
    VectorAssembler assembler=new VectorAssembler().setInputCols(features.toArray(String[]::new)).setOutputCol("features").setHandleInvalid("skip");
    PipelineStage estimator=estimator(algorithm,label,parameters);
@@ -99,11 +98,11 @@ public class MlLifecycleService {
    Files.createDirectories(target.getParent());fitted.write().overwrite().save(target.toString());
    Map<String,Object> metrics=new LinkedHashMap<>();metrics.put(metricName,metric);metrics.put("trainingRows",train.count());metrics.put("validationRows",test.count());metrics.put("crossValidationFolds",folds);
    Map<String,Object> baseline=featureBaseline(data,features);
-   db.update("UPDATE sbase_ml_runs SET status='SUCCEEDED',metrics_json=CAST(? AS jsonb),best_parameters_json=CAST(? AS jsonb),feature_baseline_json=CAST(? AS jsonb),artifact_uri=?,finished_at=now() WHERE id=?",
-    json.writeValueAsString(metrics),json.writeValueAsString(best),json.writeValueAsString(baseline),target.toUri().toString(),id);
+   db.update("UPDATE sbase_ml_runs SET status='SUCCEEDED',metrics_json=CAST(? AS jsonb),best_parameters_json=CAST(? AS jsonb),feature_baseline_json=CAST(? AS jsonb),artifact_uri=?,finished_at=now() WHERE id=? AND tenant_id=?",
+    json.writeValueAsString(metrics),json.writeValueAsString(best),json.writeValueAsString(baseline),target.toUri().toString(),id,tenant);
   } catch(Exception ex) {
    String msg=ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage();
-   db.update("UPDATE sbase_ml_runs SET status='FAILED',error_message=?,finished_at=now() WHERE id=?",msg.substring(0,Math.min(msg.length(),4000)),id);
+   db.update("UPDATE sbase_ml_runs SET status='FAILED',error_message=?,finished_at=now() WHERE id=? AND tenant_id=?",msg.substring(0,Math.min(msg.length(),4000)),id,tenant);
   }
  }
  private Map<String,Object> featureBaseline(Dataset<Row> data,List<String> features) {
@@ -140,7 +139,7 @@ public class MlLifecycleService {
   Map<String,Object> r=db.queryForMap("SELECT artifact_uri,algorithm,task_type,metrics_json,feature_columns_json,label_column,feature_baseline_json FROM sbase_ml_runs WHERE id=? AND tenant_id=? AND status='SUCCEEDED'",run,tenant);
   UUID model=db.query("SELECT id FROM sbase_ml_models WHERE tenant_id=? AND name=?",(rs)->rs.next()?rs.getObject(1,UUID.class):null,tenant,name);
   if(model==null){model=UUID.randomUUID();db.update("INSERT INTO sbase_ml_models(id,tenant_id,name,description,owner_subject) VALUES(?,?,?,?,?)",model,tenant,name,description,subject);}
-  Integer version=db.queryForObject("SELECT COALESCE(MAX(version),0)+1 FROM sbase_ml_model_versions WHERE model_id=?",Integer.class,model);
+  Integer version=db.queryForObject("SELECT COALESCE(MAX(version),0)+1 FROM sbase_ml_model_versions WHERE model_id=? AND tenant_id=?",Integer.class,model,tenant);
   db.update("INSERT INTO sbase_ml_model_versions(id,tenant_id,model_id,run_id,version,artifact_uri,framework,algorithm,task_type,metrics_json,signature_json,feature_baseline_json,created_by) VALUES(?,?,?,?,?,?,'Spark MLlib',?,?,CAST(? AS jsonb),CAST(? AS jsonb),CAST(? AS jsonb),?)",
     UUID.randomUUID(),tenant,model,run,version,r.get("artifact_uri"),r.get("algorithm"),r.get("task_type"),r.get("metrics_json").toString(),signatureJson(r.get("feature_columns_json").toString(),r.get("label_column")),r.get("feature_baseline_json").toString(),subject);
   return model;
@@ -162,11 +161,14 @@ public class MlLifecycleService {
    List<String> cols=(List<String>)signature.getOrDefault("features",List.of());
    if(cols.isEmpty())throw new IllegalStateException("Model signature is missing feature columns");
    for(String c:cols)if(!input.containsKey(c))throw new IllegalArgumentException("Missing feature: "+c);
+   String artifact=(String)m.get("artifact_uri");
+   Path artifactPath=tenantArtifactPath(tenant,artifact);
+   String cacheKey=tenant+":"+artifactPath;
    StructField[] fields=cols.stream().map(c->DataTypes.createStructField(c,DataTypes.DoubleType,true)).toArray(StructField[]::new);
    StructType schema=DataTypes.createStructType(fields);
    Row row=RowFactory.create(cols.stream().map(c->((Number)input.get(c)).doubleValue()).toArray());
    Dataset<Row> frame=spark.getObject().createDataFrame(List.of(row),schema);
-   String artifact=(String)m.get("artifact_uri");PipelineModel model=loadedModels.computeIfAbsent(artifact,PipelineModel::load);
+   PipelineModel model=loadedModels.computeIfAbsent(cacheKey,key->PipelineModel.load(artifactPath.toString()));
    Row prediction=model.transform(frame).select("prediction").first();
    result.put("prediction",prediction.get(0));ok=true;return result;
   } catch(Exception ex){result.put("error",ex.getMessage());throw new IllegalStateException("Model prediction failed",ex);}
@@ -213,16 +215,47 @@ public class MlLifecycleService {
   if(created==0)throw new IllegalArgumentException("Active deployment not found");
   List<Map<String,Object>> payload=List.copyOf(rows);
   try{executor.execute(()->{
-   db.update("UPDATE sbase_ml_batch_jobs SET status='RUNNING' WHERE id=? AND status='QUEUED'",id);
+   db.update("UPDATE sbase_ml_batch_jobs SET status='RUNNING' WHERE id=? AND tenant_id=? AND status='QUEUED'",id,tenant);
    try{List<Map<String,Object>> predictions=new ArrayList<>();for(Map<String,Object> row:payload)predictions.add(predict(tenant,deployment,row));
-    db.update("UPDATE sbase_ml_batch_jobs SET status='SUCCEEDED',row_count=?,result_json=CAST(? AS jsonb),finished_at=now() WHERE id=?",predictions.size(),toJson(predictions),id);
-   }catch(Exception ex){String message=ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage();db.update("UPDATE sbase_ml_batch_jobs SET status='FAILED',error_message=?,finished_at=now() WHERE id=?",message.substring(0,Math.min(4000,message.length())),id);}
-  });}catch(RuntimeException ex){db.update("UPDATE sbase_ml_batch_jobs SET status='FAILED',error_message=?,finished_at=now() WHERE id=?",ex.getMessage(),id);throw ex;}
+    db.update("UPDATE sbase_ml_batch_jobs SET status='SUCCEEDED',row_count=?,result_json=CAST(? AS jsonb),finished_at=now() WHERE id=? AND tenant_id=?",predictions.size(),toJson(predictions),id,tenant);
+   }catch(Exception ex){String message=ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage();db.update("UPDATE sbase_ml_batch_jobs SET status='FAILED',error_message=?,finished_at=now() WHERE id=? AND tenant_id=?",message.substring(0,Math.min(4000,message.length())),id,tenant);}
+  });}catch(RuntimeException ex){db.update("UPDATE sbase_ml_batch_jobs SET status='FAILED',error_message=?,finished_at=now() WHERE id=? AND tenant_id=?",ex.getMessage(),id,tenant);throw ex;}
   return id;
  }
  private String toJson(Object value){try{return json.writeValueAsString(value);}catch(Exception ex){return "{}";}}
  private String signatureJson(String featureJson,Object label){try{return json.writeValueAsString(Map.of("features",json.readValue(featureJson,List.class),"label",String.valueOf(label)));}catch(Exception ex){throw new IllegalStateException("Unable to build model signature",ex);}}
- private String uriPath(String uri){if(uri.startsWith("file:"))return Paths.get(java.net.URI.create(uri)).toString();return uri;}
+ private Path tenantArtifactPath(UUID tenant,String artifactUri) {
+  if (tenant==null || artifactUri==null || artifactUri.isBlank())
+   throw new org.springframework.security.access.AccessDeniedException("Model artifact is not available for this tenant");
+  try {
+   java.net.URI uri=java.net.URI.create(artifactUri);
+   if (!"file".equalsIgnoreCase(uri.getScheme()))
+    throw new org.springframework.security.access.AccessDeniedException("Unsupported model artifact location");
+   Path base=Paths.get(artifactRoot).toAbsolutePath().normalize();
+   Path root=base.resolve(tenant.toString()).normalize();
+   Path artifact=Paths.get(uri).toAbsolutePath().normalize();
+   if (!root.startsWith(base) || !artifact.startsWith(root) || artifact.equals(root) || Files.isSymbolicLink(root))
+    throw new org.springframework.security.access.AccessDeniedException("Model artifact belongs to a different tenant");
+   Path realBase=base.toRealPath();
+   Path realRoot=root.toRealPath();
+   Path realArtifact=artifact.toRealPath();
+   if (!realRoot.getParent().equals(realBase) || !realArtifact.startsWith(realRoot) || realArtifact.equals(realRoot))
+    throw new org.springframework.security.access.AccessDeniedException("Model artifact resolves outside its tenant directory");
+   return realArtifact;
+  } catch (org.springframework.security.access.AccessDeniedException ex) { throw ex; }
+    catch (RuntimeException | java.io.IOException ex) {
+     throw new org.springframework.security.access.AccessDeniedException("Invalid model artifact location");
+    }
+ }
+ public static String tenantScopedTrainingQuery(String table,List<String> features,String label,UUID tenant) {
+  if (tenant==null) throw new IllegalArgumentException("Tenant is required for ML training");
+  identifier(table);
+  if (features==null || features.isEmpty()) throw new IllegalArgumentException("ML features are required");
+  features.forEach(MlLifecycleService::identifier);
+  identifier(label);
+  return "(SELECT "+String.join(",",features)+","+label+" FROM "+table+
+    " WHERE tenant_id='"+tenant+"' AND "+label+" IS NOT NULL) s";
+ }
  private void validateTable(String table){identifier(table);if(!tables.contains(table.toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Training table is not allow-listed");}
  private static void identifier(String s){if(s==null||!s.matches("[A-Za-z_][A-Za-z0-9_]{0,127}(\\.[A-Za-z_][A-Za-z0-9_]{0,127})?"))throw new IllegalArgumentException("Unsafe SQL identifier");}
  private String featuresJson(List<String> f){try{return json.writeValueAsString(f);}catch(Exception e){throw new IllegalArgumentException(e);}}
