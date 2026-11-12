@@ -77,7 +77,7 @@ class CatalogLineageIntegrationTest {
         assertThat(impact.edges()).extracting(CatalogLineageService.EdgeView::id).contains(edge.id());
 
         var duplicate=service.connect(new CatalogLineageService.CreateEdge(column.id(),pipeline.id(),"READS_FROM",
-            "USER_DECLARED","pipeline:orders-enrichment","ignored duplicate",new BigDecimal("0.950"),1L,null),auth);
+            "USER_DECLARED","pipeline:orders-enrichment","customer_id join key",new BigDecimal("0.950"),1L,null),auth);
         assertThat(duplicate.id()).isEqualTo(edge.id());
         assertThat(edges.findAllByTenantIdAndFromAssetIdIn(tenant,List.of(column.id()))).hasSize(1);
 
