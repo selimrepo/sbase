@@ -71,9 +71,8 @@ public class MlLifecycleService {
   try {
    SparkSession session=spark.getObject();
    Properties props=new Properties();props.setProperty("user",user);props.setProperty("password",password);props.setProperty("driver","org.postgresql.Driver");
-   String projection=String.join(",",features)+","+label;
-   Dataset<Row> data=session.read().jdbc(jdbcUrl,"(SELECT "+projection+" FROM "+table+" WHERE tenant_id='"+tenant+"' AND "+label+" IS NOT NULL) s",props)
-     .na().drop(new String[]{label});
+   String scopedSource=tenantScopedTrainingQuery(table,features,label,tenant);
+   Dataset<Row> data=session.read().jdbc(jdbcUrl,scopedSource,props).na().drop(new String[]{label});
    if(data.limit(2).count()<2)throw new IllegalArgumentException("Training dataset must contain at least two labeled rows");
    VectorAssembler assembler=new VectorAssembler().setInputCols(features.toArray(String[]::new)).setOutputCol("features").setHandleInvalid("skip");
    PipelineStage estimator=estimator(algorithm,label,parameters);
@@ -245,6 +244,15 @@ public class MlLifecycleService {
     catch (RuntimeException | java.io.IOException ex) {
      throw new org.springframework.security.access.AccessDeniedException("Invalid model artifact location");
     }
+ }
+ static String tenantScopedTrainingQuery(String table,List<String> features,String label,UUID tenant) {
+  if (tenant==null) throw new IllegalArgumentException("Tenant is required for ML training");
+  identifier(table);
+  if (features==null || features.isEmpty()) throw new IllegalArgumentException("ML features are required");
+  features.forEach(MlLifecycleService::identifier);
+  identifier(label);
+  return "(SELECT "+String.join(",",features)+","+label+" FROM "+table+
+    " WHERE tenant_id='"+tenant+"' AND "+label+" IS NOT NULL) s";
  }
  private void validateTable(String table){identifier(table);if(!tables.contains(table.toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Training table is not allow-listed");}
  private static void identifier(String s){if(s==null||!s.matches("[A-Za-z_][A-Za-z0-9_]{0,127}(\\.[A-Za-z_][A-Za-z0-9_]{0,127})?"))throw new IllegalArgumentException("Unsafe SQL identifier");}

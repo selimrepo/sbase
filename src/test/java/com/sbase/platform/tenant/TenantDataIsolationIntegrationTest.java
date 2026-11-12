@@ -102,8 +102,17 @@ class TenantDataIsolationIntegrationTest {
         MlLifecycleService ml=new MlLifecycleService(jdbc,mapper,mock(ObjectProvider.class),Runnable::run,
             POSTGRES.getJdbcUrl(),POSTGRES.getUsername(),POSTGRES.getPassword(),artifactRoot.toString(),"analytics.training");
 
+        jdbc.execute("CREATE TABLE tenant_ml_training_iso(tenant_id UUID NOT NULL,feature DOUBLE PRECISION,label DOUBLE PRECISION)");
+        jdbc.update("INSERT INTO tenant_ml_training_iso(tenant_id,feature,label) VALUES(?,?,?)",ids[0],1.0,1.0);
+        jdbc.update("INSERT INTO tenant_ml_training_iso(tenant_id,feature,label) VALUES(?,?,?)",ids[1],9.0,9.0);
+        String scoped= MlLifecycleService.tenantScopedTrainingQuery("tenant_ml_training_iso",List.of("feature"),"label",ids[0]);
+        assertThat(jdbc.queryForList("SELECT feature,label FROM "+scoped)).hasSize(1);
+        assertThat(jdbc.queryForList("SELECT feature,label FROM "+scoped)).first().containsEntry("feature",1.0);
+
         UUID experimentA=ml.createExperiment(ids[0],"exp-a","tenant A","alice");
         UUID experimentB=ml.createExperiment(ids[1],"exp-b","tenant B","bob");
+        assertThrows(AccessDeniedException.class,()->ml.submit(ids[1],experimentA,"foreign-run",
+            "LINEAR_REGRESSION","REGRESSION","analytics.training",List.of("feature"),"label",1,null,null,"bob"));
         assertThat(ml.experiments(ids[0],"alice")).extracting("id").contains(experimentA);
         assertThat(ml.experiments(ids[1],"alice")).isEmpty();
 
