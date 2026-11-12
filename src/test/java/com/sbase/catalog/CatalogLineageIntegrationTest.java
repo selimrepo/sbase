@@ -45,6 +45,7 @@ class CatalogLineageIntegrationTest {
     @Autowired com.sbase.pipeline.PipelineRepository pipelines;
     @Autowired CatalogColumnRepository columns;
     @Autowired LineageEdgeRepository edges;
+    @Autowired CatalogSchemaVersionRepository schemaVersions;
     @Autowired JdbcTemplate jdbc;
 
     @Test
@@ -56,7 +57,7 @@ class CatalogLineageIntegrationTest {
         var auth=new TestingAuthenticationToken("catalog-owner","n/a");
         when(tenantContext.tenantId(auth)).thenReturn(tenant);
         when(tenantContext.subject(auth)).thenReturn("catalog-owner");
-        CatalogLineageService service=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper());
+        CatalogLineageService service=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper(),schemaVersions);
 
         var table=service.createAsset(new CatalogLineageService.CreateAsset("TABLE","warehouse.orders","Orders",
             "warehouse","orders","Curated order facts","Data Engineering","Sales","CONFIDENTIAL",
@@ -100,7 +101,7 @@ class CatalogLineageIntegrationTest {
         var auth=new TestingAuthenticationToken("owner","n/a");
         when(tenantContext.tenantId(auth)).thenReturn(tenant);
         when(tenantContext.subject(auth)).thenReturn("owner");
-        CatalogLineageService service=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper());
+        CatalogLineageService service=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper(),schemaVersions);
         var table=service.createAsset(new CatalogLineageService.CreateAsset("TABLE","crm.contacts","Contacts",
             "crm","contacts",null,null,null,null,List.of(),Map.of(),null),auth);
         var col=service.registerColumn(table.id(),new CatalogLineageService.CreateColumn("email","VARCHAR",true,1,
