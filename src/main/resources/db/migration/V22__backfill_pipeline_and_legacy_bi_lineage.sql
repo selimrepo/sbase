@@ -24,6 +24,21 @@ SELECT md5('lineage:legacy-dashboard-widget:'||w.id::text)::uuid,d.tenant_id,
 FROM dashboard_widgets w JOIN dashboards d ON d.id=w.dashboard_id
 ON CONFLICT (tenant_id,edge_fingerprint) DO NOTHING;
 
+
+INSERT INTO lineage_edges(id,tenant_id,from_asset_id,to_asset_id,edge_type,evidence_type,evidence_ref,edge_fingerprint)
+SELECT md5('lineage:widget-dashboard-publish:'||w.id::text)::uuid,d.tenant_id,
+ md5('bi-widget:'||w.id::text)::uuid,md5('bi-dashboard:'||d.id::text)::uuid,
+ 'PUBLISHES','BI_DEFINITION',w.id::text,md5('widget-dashboard-publish:'||w.id::text)
+FROM sbase_bi_widgets w JOIN sbase_bi_dashboards d ON d.id=w.dashboard_id
+ON CONFLICT (tenant_id,edge_fingerprint) DO NOTHING;
+
+INSERT INTO lineage_edges(id,tenant_id,from_asset_id,to_asset_id,edge_type,evidence_type,evidence_ref,edge_fingerprint)
+SELECT md5('lineage:legacy-widget-dashboard-publish:'||w.id::text)::uuid,d.tenant_id,
+ md5('legacy-widget:'||w.id::text)::uuid,md5('legacy-dashboard:'||d.id::text)::uuid,
+ 'PUBLISHES','BI_DEFINITION',w.id::text,md5('legacy-widget-dashboard-publish:'||w.id::text)
+FROM dashboard_widgets w JOIN dashboards d ON d.id=w.dashboard_id
+ON CONFLICT (tenant_id,edge_fingerprint) DO NOTHING;
+
 -- SQL-backed BI report definitions point from the governed physical table to the report asset.
 INSERT INTO lineage_edges(id,tenant_id,from_asset_id,to_asset_id,edge_type,evidence_type,evidence_ref,confidence,edge_fingerprint)
 SELECT md5('lineage:bi-report-table:'||r.id::text||':'||d.id::text)::uuid,r.tenant_id,
