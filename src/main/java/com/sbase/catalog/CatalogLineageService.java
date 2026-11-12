@@ -77,7 +77,12 @@ public class CatalogLineageService {
 
     @Transactional
     public void deprecateDataset(UUID tenant,UUID datasetId) {
-        assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"TABLE",datasetId.toString())
+        deprecateAsset(tenant,"TABLE",datasetId.toString());
+    }
+
+    @Transactional
+    public void deprecateAsset(UUID tenant,String type,String externalKey) {
+        assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,type,externalKey)
             .ifPresent(asset->asset.setLifecycleState("DEPRECATED"));
     }
 
