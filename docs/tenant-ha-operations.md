@@ -20,9 +20,11 @@ Content-Type: application/json
 
 Mining job records, ingestion execution/idempotency, DLQ list/replay, feature-set access, online feature reads/writes and pipeline runs now carry or validate tenant scope. S3 artifact helper methods support tenant-prefixed keys under `tenants/<tenant-uuid>/`.
 
-This is not yet proof of complete data-plane isolation. Existing Doris table names and some model/dashboard/BI management endpoints still need end-to-end tenant-aware query enforcement, and trusted background workers must be audited individually. Do not expose a shared multi-tenant service until cross-tenant integration tests cover every endpoint, Spark/Doris query path, schedule, model, artifact and connector registration.
+Pipeline Spark reads now require a physical `tenant_id` column and apply the tenant from the immutable pipeline-run row before transformations. Pipeline writes reject missing or foreign tenant IDs instead of silently filtering bad records. Governed BI aggregate and drill-through queries also require and predicate on `tenant_id`. This is defense in depth, not a claim of complete isolation: ML lifecycle source scans, legacy raw Doris query paths, every dashboard/model/artifact endpoint and all trusted workers still require end-to-end verification. Do not expose a shared multi-tenant service until cross-tenant integration tests cover every endpoint, Spark/Doris query path, schedule, model, artifact and connector registration.
 
 ## Audit and API throttling
+
+Audit events currently capture API request outcome, subject, tenant claim, request ID and peer metadata. This is request-level operational evidence; high-value data mutations and worker lifecycle transitions should also emit domain audit events before regulated production use.
 
 Every `/api/**` request is recorded in `platform_audit_events` with subject, tenant claim, route, method, outcome, status, request ID, peer IP and user agent. The API `GET /api/platform/audit-events` exposes tenant-scoped, paginated events to subjects with `audit:read`. Audit records are retained for 180 days by default (configurable with `sbase.audit.retention-days`).
 
