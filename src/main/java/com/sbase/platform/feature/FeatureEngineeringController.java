@@ -76,7 +76,7 @@ public class FeatureEngineeringController {
                 mapper.writeValueAsString(sourceColumns),transformation,auth.getName());
             if(catalogLineage!=null) catalogLineage.synchronizeFeatureLineage(lineageId,
                 tenants==null?UUID.fromString("00000000-0000-0000-0000-000000000001"):tenants.tenantId(auth),
-                feature.id(),feature.datasetId(),sourceColumns,List.of(),transformation,auth.getName());
+                feature.id(),feature.datasetId(),sourceColumns,List.of(),transformation,request.featureSetName(),auth.getName());
             return Map.of("id", materializationId, "status", "SUCCEEDED", "featureSet", request.featureSetName(),
                 "version", feature.version(), "outputUri", request.outputUri(), "operationCount", operations.size());
         } catch (Exception ex) {
