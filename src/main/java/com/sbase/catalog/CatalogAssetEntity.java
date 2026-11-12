@@ -52,7 +52,7 @@ public class CatalogAssetEntity {
     public String getNamespace(){return namespace;} public String getPhysicalName(){return physicalName;}
     public String getDescription(){return description;} public String getOwnerSubject(){return ownerSubject;}
     public String getOwnerTeam(){return ownerTeam;} public String getDomain(){return domain;}
-    public String getClassification(){return classification;} public String getTagsJson(){return tagsJson;}
+    public String getClassification(){return classification;}
     public java.util.Map<String,Object> getMetadata(){return metadata;} public java.util.List<String> getTags(){return tags;} public UUID getParentId(){return parentId;}
     public String getLifecycleState(){return lifecycleState;} public String getSchemaFingerprint(){return schemaFingerprint;}
     public Instant getCreatedAt(){return createdAt;} public Instant getUpdatedAt(){return updatedAt;} public long getRowVersion(){return rowVersion;}
