@@ -38,6 +38,9 @@ public class CatalogAssetEntity {
         this.tagsJson=tagsJson; this.metadataJson=metadataJson; this.updatedAt=Instant.now();
     }
     public void setPhysicalLocation(String namespace,String physicalName) { this.namespace=namespace; this.physicalName=physicalName; this.updatedAt=Instant.now(); }
+    public void updateSourceDetails(String displayName,String description,String namespace,String physicalName) {
+        this.displayName=displayName; this.description=description; this.namespace=namespace; this.physicalName=physicalName; this.updatedAt=Instant.now();
+    }
     public void setParentId(UUID parentId) { this.parentId=parentId; this.updatedAt=Instant.now(); }
     public void setOwnerSubject(String ownerSubject) { this.ownerSubject=ownerSubject; this.updatedAt=Instant.now(); }
     public void setLifecycleState(String lifecycleState) { this.lifecycleState=lifecycleState; this.updatedAt=Instant.now(); }
