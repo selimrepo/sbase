@@ -40,14 +40,15 @@ CREATE TABLE catalog_columns (
     ordinal_position INTEGER NOT NULL CHECK (ordinal_position > 0),
     data_type VARCHAR(160) NOT NULL,
     nullable BOOLEAN NOT NULL DEFAULT TRUE,
+    is_current BOOLEAN NOT NULL DEFAULT TRUE,
     default_expression TEXT,
     generated_expression TEXT,
     CONSTRAINT fk_catalog_column_table FOREIGN KEY (tenant_id,table_asset_id)
       REFERENCES catalog_assets(tenant_id,id) ON DELETE CASCADE,
-    CONSTRAINT uq_catalog_column_ordinal UNIQUE (tenant_id,table_asset_id,ordinal_position) DEFERRABLE INITIALLY DEFERRED,
     CONSTRAINT uq_catalog_column_name UNIQUE (tenant_id,table_asset_id,id)
 );
 CREATE INDEX idx_catalog_columns_table ON catalog_columns(tenant_id,table_asset_id,ordinal_position);
+CREATE UNIQUE INDEX uq_catalog_column_current_ordinal ON catalog_columns(tenant_id,table_asset_id,ordinal_position) WHERE is_current;
 
 CREATE TABLE lineage_edges (
     id UUID PRIMARY KEY,
