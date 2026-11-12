@@ -139,8 +139,9 @@ class CatalogLineageIntegrationTest {
             "Curated order facts","POSTGRESQL","[{\"name\":\"order_id\",\"type\":\"UUID\"}]"),auth);
         assertThat(updated.getName()).isEqualTo("Orders curated");
         assertThat(lineage.schemaHistory(table.getId(),auth)).hasSize(2);
-        assertThat(lineage.columns(table.getId(),auth)).filteredOn(col->col.displayName().equals("amount"))
-            .singleElement().extracting(CatalogLineageService.AssetView::lifecycleState).isEqualTo("DEPRECATED");
+        CatalogAssetEntity retiredAmount=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"COLUMN",dataset.getId()+":amount").orElseThrow();
+        assertThat(retiredAmount.getLifecycleState()).isEqualTo("DEPRECATED");
+        assertThat(columns.findById(retiredAmount.getId()).orElseThrow().isCurrent()).isFalse();
     }
 
     @Test
