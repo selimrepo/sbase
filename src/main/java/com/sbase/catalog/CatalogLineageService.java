@@ -207,9 +207,11 @@ public class CatalogLineageService {
         return assets.resolveTableReference(tenant,reference,PageRequest.of(0,1)).stream().findFirst().orElse(null);
     }
     private void addColumnUse(UUID tenant,UUID tableId,String columnName,UUID consumer,String evidence,long version) {
-        columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId).stream()
-            .filter(c->assets.findByIdAndTenantId(c.getId(),tenant).map(a->a.getDisplayName().equalsIgnoreCase(columnName)).orElse(false))
-            .findFirst().ifPresent(c->saveEdge(tenant,c.getId(),consumer,"USES_COLUMN","PIPELINE_DEFINITION",
+        List<CatalogColumnEntity> details=columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId);
+        List<UUID> ids=details.stream().map(CatalogColumnEntity::getId).toList();
+        assets.findAllByTenantIdAndIdIn(tenant,ids).stream()
+            .filter(a->a.getDisplayName().equalsIgnoreCase(columnName)).findFirst()
+            .ifPresent(a->saveEdge(tenant,a.getId(),consumer,"USES_COLUMN","PIPELINE_DEFINITION",
                 evidence+":"+columnName,null,BigDecimal.ONE,version,null));
     }
     private List<String> referencedColumns(JsonNode step) {
@@ -304,9 +306,11 @@ public class CatalogLineageService {
         UUID tenant=tenants.tenantId(auth);
         CatalogAssetEntity table=requireAsset(tenant,tableId);
         if(!"TABLE".equals(table.getAssetType())) throw bad("Columns can only be listed for TABLE assets");
-        return columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId).stream()
-            .map(col->assets.findByIdAndTenantId(col.getId(),tenant).map(a->view(a,col)).orElse(null))
-            .filter(Objects::nonNull).toList();
+        List<CatalogColumnEntity> details=columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId);
+        Map<UUID,CatalogColumnEntity> byId=new HashMap<>(); details.forEach(col->byId.put(col.getId(),col));
+        return assets.findAllByTenantIdAndIdIn(tenant,List.copyOf(byId.keySet())).stream()
+            .sorted(Comparator.comparingInt(a->byId.get(a.getId()).getOrdinalPosition()))
+            .map(a->view(a,byId.get(a.getId()))).toList();
     }
 
     @Transactional(readOnly=true)
