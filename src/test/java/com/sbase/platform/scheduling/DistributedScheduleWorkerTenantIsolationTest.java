@@ -27,7 +27,7 @@ class DistributedScheduleWorkerTenantIsolationTest {
         worker().claim();
         org.mockito.ArgumentCaptor<String> sql=org.mockito.ArgumentCaptor.forClass(String.class);
         verify(db).query(sql.capture(),any(RowMapper.class),eq(10),anyString(),eq(120L));
-        assertTrue(sql.getValue().contains("JOIN pipelines p ON p.id = s.pipeline_id AND p.tenant_id = s.tenant_id"));
+        assertTrue(sql.getValue().contains("LEFT JOIN pipelines p ON p.id = s.pipeline_id AND p.tenant_id = s.tenant_id"));
         assertTrue(sql.getValue().contains("parent.tenant_id = s.tenant_id"));
     }
 
