@@ -167,7 +167,7 @@ public class CatalogLineageService {
             }
             sourceTables.put(id,inputs);
             for(String columnName:referencedColumns(step)) {
-                for(UUID input:inputs) addColumnUse(tenant,input,columnName,target.getId(),pipeline.getId()+":"+id,pipeline.getVersion());
+                for(UUID input:inputs) addColumnUse(tenant,input,columnName,target.getId(),"PIPELINE_DEFINITION",pipeline.getId()+":"+id,pipeline.getVersion());
             }
             if("doris_write".equals(type)) {
                 String tableName=firstText(step,"table");
@@ -196,7 +196,7 @@ public class CatalogLineageService {
         if(table!=null) {
             saveEdge(tenant,table.getId(),report.getId(),"READS_FROM","BI_DEFINITION",id.toString(),null,
                 new BigDecimal("0.950"),1,null);
-            for(String columnName:reportColumns(definition)) addColumnUse(tenant,table.getId(),columnName,report.getId(),id.toString(),1);
+            for(String columnName:reportColumns(definition)) addColumnUse(tenant,table.getId(),columnName,report.getId(),"BI_DEFINITION",id.toString(),1);
         }
     }
 
@@ -233,12 +233,12 @@ public class CatalogLineageService {
         if(matches.size()!=1 && !reference.contains(".")) return null;
         return matches.stream().findFirst().orElse(null);
     }
-    private void addColumnUse(UUID tenant,UUID tableId,String columnName,UUID consumer,String evidence,long version) {
+    private void addColumnUse(UUID tenant,UUID tableId,String columnName,UUID consumer,String evidenceType,String evidence,long version) {
         List<CatalogColumnEntity> details=columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId);
         List<UUID> ids=details.stream().map(CatalogColumnEntity::getId).toList();
         assets.findAllByTenantIdAndIdIn(tenant,ids).stream()
             .filter(a->a.getDisplayName().equalsIgnoreCase(columnName)).findFirst()
-            .ifPresent(a->saveEdge(tenant,a.getId(),consumer,"USES_COLUMN","PIPELINE_DEFINITION",
+            .ifPresent(a->saveEdge(tenant,a.getId(),consumer,"USES_COLUMN",evidenceType,
                 evidence+":"+columnName,null,BigDecimal.ONE,version,null));
     }
     private List<String> referencedColumns(JsonNode step) {
@@ -303,9 +303,9 @@ public class CatalogLineageService {
                 ? columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId).size()+1
                 : request.ordinalPosition();
         if(ordinal<1 || ordinal>100000) throw bad("Invalid column ordinal position");
-        CatalogAssetEntity column=new CatalogAssetEntity(tenant,"COLUMN",external,request.name(),tenants.subject(auth));
+        CatalogAssetEntity column=new CatalogAssetEntity(tenant,"COLUMN",external,request.name(),table.getOwnerSubject());
         column.setParentId(tableId);
-        column.updateGovernance(request.description(),request.ownerTeam(),table.getDomain(),
+        column.updateGovernance(request.description(),request.ownerTeam()==null?table.getOwnerTeam():request.ownerTeam(),table.getDomain(),
                 classification(request.classification()==null?table.getClassification():request.classification()),
                 writeTags(request.tags()),writeMetadata(request.metadata()));
         column=assets.save(column);
