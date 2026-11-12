@@ -3,6 +3,8 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "\${BASH_SOURCE[0]}")/../.." && pwd)"
 compose="$ROOT/docker-compose.yml"
 application="$ROOT/src/main/resources/application.yml"
+dev_compose="$ROOT/docker-compose.development.yml"
+prod_compose="$ROOT/docker-compose.production.yml"
 fail=0
 check_absent() {
   local pattern="$1" file="$2" label="$3"
@@ -19,5 +21,13 @@ check_present 'POSTGRES_PASSWORD:\?Set POSTGRES_PASSWORD in \.env' "$compose" "C
 check_absent 'password:.*\$\{SPRING_DATASOURCE_PASSWORD:sbase\}' "$application" "Spring has no default datasource password"
 check_present 'ddl-auto: validate' "$application" "Hibernate schema validation enabled"
 check_present 'include: health,info,metrics' "$application" "Actuator exposure is allow-listed"
-check_present 'probes:[[:space:]]*$' "$application" "Actuator probe configuration present"
+check_present 'probes:[[:space:]]*
+exit "$fail"
+ "$application" "Actuator probe configuration present"
+check_present 'SPRING_PROFILES_ACTIVE: development,docker' "$dev_compose" "Development Compose activates development profile"
+check_present 'SPRING_PROFILES_ACTIVE: production,docker' "$prod_compose" "Production Compose activates production profile"
+check_present 'SBASE_IMAGE:\?Set SBASE_IMAGE' "$prod_compose" "Production requires an explicit image"
+check_present 'JWT_ISSUER_URI:\?Set JWT_ISSUER_URI' "$prod_compose" "Production requires identity issuer"
+check_present 'JWT_JWK_SET_URI:\?Set JWT_JWK_SET_URI' "$prod_compose" "Production requires JWK endpoint"
+check_present 'password: \\?\$\{SPRING_DATASOURCE_PASSWORD\}' "$application" "Spring datasource password has no fallback"
 exit "$fail"
