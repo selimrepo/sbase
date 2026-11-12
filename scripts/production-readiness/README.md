@@ -6,6 +6,21 @@ Deployment-facing checks for a staging environment. Do not run load or restore t
 
 Bash, curl, PostgreSQL client tools (psql/pg_dump/pg_restore), k6, and a deployed SBase environment.
 
+## Environment configuration
+
+Docker Compose automatically reads a project-root `.env` file. Create it from the template and replace the placeholder with a strong, unique password:
+
+```bash
+cp .env.example .env
+# Generate a secret, then paste it as POSTGRES_PASSWORD in .env:
+openssl rand -base64 36
+chmod 600 .env
+docker compose config
+docker compose up -d --build
+```
+
+`POSTGRES_PASSWORD` is mandatory: Compose refuses to start if it is missing or empty. The same value is injected into PostgreSQL and the SBase application as `SPRING_DATASOURCE_PASSWORD`. The checked-in `.env.example` is only a template; never commit the real `.env` file. For running Spring Boot outside Compose, export `SPRING_DATASOURCE_PASSWORD` in the process environment.
+
 ## Smoke and readiness
 
 \`\`\`bash
