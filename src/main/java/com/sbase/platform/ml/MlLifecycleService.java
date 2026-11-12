@@ -225,7 +225,27 @@ public class MlLifecycleService {
  }
  private String toJson(Object value){try{return json.writeValueAsString(value);}catch(Exception ex){return "{}";}}
  private String signatureJson(String featureJson,Object label){try{return json.writeValueAsString(Map.of("features",json.readValue(featureJson,List.class),"label",String.valueOf(label)));}catch(Exception ex){throw new IllegalStateException("Unable to build model signature",ex);}}
- private String uriPath(String uri){if(uri.startsWith("file:"))return Paths.get(java.net.URI.create(uri)).toString();return uri;}
+ private Path tenantArtifactPath(UUID tenant,String artifactUri) {
+  if (tenant==null || artifactUri==null || artifactUri.isBlank())
+   throw new org.springframework.security.access.AccessDeniedException("Model artifact is not available for this tenant");
+  try {
+   java.net.URI uri=java.net.URI.create(artifactUri);
+   if (!"file".equalsIgnoreCase(uri.getScheme()))
+    throw new org.springframework.security.access.AccessDeniedException("Unsupported model artifact location");
+   Path root=Paths.get(artifactRoot).toAbsolutePath().normalize().resolve(tenant.toString()).normalize();
+   Path artifact=Paths.get(uri).toAbsolutePath().normalize();
+   if (!artifact.startsWith(root) || artifact.equals(root))
+    throw new org.springframework.security.access.AccessDeniedException("Model artifact belongs to a different tenant");
+   Path realRoot=root.toRealPath();
+   Path realArtifact=artifact.toRealPath();
+   if (!realArtifact.startsWith(realRoot) || realArtifact.equals(realRoot))
+    throw new org.springframework.security.access.AccessDeniedException("Model artifact resolves outside its tenant directory");
+   return realArtifact;
+  } catch (org.springframework.security.access.AccessDeniedException ex) { throw ex; }
+    catch (RuntimeException | java.io.IOException ex) {
+     throw new org.springframework.security.access.AccessDeniedException("Invalid model artifact location");
+    }
+ }
  private void validateTable(String table){identifier(table);if(!tables.contains(table.toLowerCase(Locale.ROOT)))throw new IllegalArgumentException("Training table is not allow-listed");}
  private static void identifier(String s){if(s==null||!s.matches("[A-Za-z_][A-Za-z0-9_]{0,127}(\\.[A-Za-z_][A-Za-z0-9_]{0,127})?"))throw new IllegalArgumentException("Unsafe SQL identifier");}
  private String featuresJson(List<String> f){try{return json.writeValueAsString(f);}catch(Exception e){throw new IllegalArgumentException(e);}}

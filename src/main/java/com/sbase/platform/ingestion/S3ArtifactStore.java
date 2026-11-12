@@ -22,12 +22,12 @@ public class S3ArtifactStore implements AutoCloseable {
   else b.credentialsProvider(DefaultCredentialsProvider.create());
   client=b.build();
  }
- public String put(String key,InputStream input,long size,String contentType){
+ private String put(String key,InputStream input,long size,String contentType){
   client.putObject(PutObjectRequest.builder().bucket(bucket).key(key).contentType(contentType).build(),software.amazon.awssdk.core.sync.RequestBody.fromInputStream(input,size));
   return "s3://"+bucket+"/"+key;
  }
- public ResponseInputStream<GetObjectResponse> get(String key){return client.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build());}
- public void delete(String key){client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());}
+ private ResponseInputStream<GetObjectResponse> get(String key){return client.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build());}
+ private void delete(String key){client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());}
  public String putForTenant(java.util.UUID tenantId,String key,InputStream input,long size,String contentType){
   return put(tenantKey(tenantId,key),input,size,contentType);
  }
