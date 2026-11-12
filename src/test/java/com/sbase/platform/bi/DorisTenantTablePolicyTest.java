@@ -11,7 +11,7 @@ import static org.mockito.Mockito.*;
 class DorisTenantTablePolicyTest {
     private static final String REGISTRY="""
         SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
-         WHERE schema_name=? AND table_name=? AND enabled=true AND tenant_column='tenant_id' AND classification='TENANT_DATA')
+         WHERE schema_name=? AND table_name=? AND enabled=true AND tenant_column='tenant_id' AND classification='TENANT_DATA' AND verification_status='VERIFIED' AND verified_at IS NOT NULL AND invalid_tenant_rows=0)
         """;
     private final JdbcTemplate postgres=mock(JdbcTemplate.class);
     private final JdbcTemplate doris=mock(JdbcTemplate.class);

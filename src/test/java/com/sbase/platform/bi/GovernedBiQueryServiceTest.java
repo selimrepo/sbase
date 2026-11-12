@@ -54,6 +54,14 @@ class GovernedBiQueryServiceTest {
    List.of(new GovernedBiQueryService.Metric("revenue","SUM","total")),List.of(),List.of(),100);
   assertThrows(org.springframework.security.access.AccessDeniedException.class,()->service.compile(definition,tenant));
  }
+ @Test void drillThroughUsesTheAuthenticatedTenantExecutionBoundary(){
+  doReturn(List.of(Map.of("region","north"))).when(doris).query(eq(tenant),anyString());
+  service.drillThrough(tenant,"alice","analytics.sales",List.of("region"),List.of(),25);
+  var sql=org.mockito.ArgumentCaptor.forClass(String.class);
+  verify(doris).query(eq(tenant),sql.capture());
+  assertTrue(sql.getValue().contains("FROM analytics.sales"));
+  assertFalse(sql.getValue().contains("tenant_id"));
+ }
  @Test void preventsSelectingOrFilteringTheTenantDiscriminator(){
   var definition=new GovernedBiQueryService.QueryDefinition("analytics.sales",List.of("tenant_id"),
    List.of(new GovernedBiQueryService.Metric("*","COUNT","total")),List.of(),List.of(),10);
