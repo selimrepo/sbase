@@ -11,7 +11,7 @@ services:
     environment:
       POSTGRES_DB: sbase
       POSTGRES_USER: sbase
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting SBase}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -39,7 +39,7 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
       SPRING_DATASOURCE_USERNAME: sbase
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting SBase}
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://localhost:8081/realms/sbase}
       JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077
@@ -311,7 +311,7 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sbase
       SPRING_DATASOURCE_USERNAME: sbase
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sbase}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting SBase}
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://localhost:8081/realms/sbase}
       JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077
