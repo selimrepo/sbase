@@ -47,7 +47,7 @@ SELECT md5('lineage:bi-report-table:'||r.id::text||':'||d.id::text)::uuid,r.tena
 FROM sbase_bi_reports r
 JOIN LATERAL (SELECT r.definition_json->>'table' AS table_name) q ON q.table_name IS NOT NULL
 JOIN datasets d ON d.tenant_id=r.tenant_id
- AND (q.table_name=d.namespace||'.'||d.table_name OR q.table_name=d.table_name)
+ AND (q.table_name=d.namespace||'.'||d.table_name OR (q.table_name=d.table_name AND (SELECT count(*) FROM datasets d2 WHERE d2.tenant_id=d.tenant_id AND d2.table_name=q.table_name)=1))
 ON CONFLICT (tenant_id,edge_fingerprint) DO NOTHING;
 
 DO $$
@@ -90,7 +90,7 @@ BEGIN
        table_name := step->>'table';
        SELECT a.id INTO table_asset FROM catalog_assets a
        JOIN datasets d ON a.id=md5('dataset:'||d.id::text)::uuid
-       WHERE d.tenant_id=p.tenant_id AND (d.namespace||'.'||d.table_name=table_name OR d.table_name=table_name)
+       WHERE d.tenant_id=p.tenant_id AND (d.namespace||'.'||d.table_name=table_name OR (d.table_name=table_name AND (SELECT count(*) FROM datasets d2 WHERE d2.tenant_id=d.tenant_id AND d2.table_name=table_name)=1))
        LIMIT 1;
        IF table_asset IS NOT NULL THEN
          INSERT INTO lineage_edges(id,tenant_id,from_asset_id,to_asset_id,edge_type,evidence_type,evidence_ref,edge_fingerprint)
