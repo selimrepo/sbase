@@ -204,7 +204,9 @@ public class CatalogLineageService {
         return asset;
     }
     private CatalogAssetEntity resolveTable(UUID tenant,String reference) {
-        return assets.resolveTableReference(tenant,reference,PageRequest.of(0,1)).stream().findFirst().orElse(null);
+        List<CatalogAssetEntity> matches=assets.resolveTableReference(tenant,reference,PageRequest.of(0,2));
+        if(matches.size()!=1 && !reference.contains(".")) return null;
+        return matches.stream().findFirst().orElse(null);
     }
     private void addColumnUse(UUID tenant,UUID tableId,String columnName,UUID consumer,String evidence,long version) {
         List<CatalogColumnEntity> details=columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId);
