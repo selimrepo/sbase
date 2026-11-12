@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useState} from 'react'
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query'
-import {api,get,errorText,date,type} from './api'
-import {Activity,ArrowDownRight,ArrowUpRight,Boxes,Database,GitBranch,Layers3,RefreshCw,Save,ShieldCheck,Tag,Users} from 'lucide-react'
+import {api,get,errorText,date} from './api'
+import {Activity,ArrowDownRight,Boxes,Database,GitBranch,Layers3,RefreshCw,Save,ShieldCheck,Tag} from 'lucide-react'
 import './CatalogLineageStudio.css'
 
 type Asset={
@@ -25,12 +25,13 @@ export default function CatalogLineageStudio(){
  const [ownerTeam,setOwnerTeam]=useState(''),[ownerSubject,setOwnerSubject]=useState(''),[domain,setDomain]=useState(''),[classificationValue,setClassificationValue]=useState('INTERNAL'),[tags,setTags]=useState(''),[description,setDescription]=useState('')
  const assets=useQuery({queryKey:['catalog-assets',type],queryFn:()=>api.get<Asset[]>('/api/catalog/assets',{params:{type:type==='ALL'?undefined:type,limit:200}}).then(r=>r.data),staleTime:15000})
  const filtered=useMemo(()=> (assets.data||[]).filter(a=>[a.displayName,a.externalKey,a.namespace||'',a.ownerSubject,a.ownerTeam||'',a.domain||''].join(' ').toLowerCase().includes(search.toLowerCase())),[assets.data,search])
- useEffect(()=>{if(!rootId&&filtered.length)setRootId(filtered[0].id)},[filtered,rootId])
+ useEffect(()=>{if(filtered.length&&!filtered.some(a=>a.id===rootId))setRootId(filtered[0].id);else if(!filtered.length)setRootId('')},[filtered,rootId])
  const selected=assets.data?.find(a=>a.id===rootId)
  useEffect(()=>{if(selected){setOwnerTeam(selected.ownerTeam||'');setOwnerSubject(selected.ownerSubject||'');setDomain(selected.domain||'');setClassificationValue(selected.classification);setTags((selected.tags||[]).join(', '));setDescription(selected.description||'')}},[rootId,selected?.updatedAt])
  const graph=useQuery({queryKey:['catalog-lineage-graph',rootId,mode],queryFn:()=>get<Graph>(mode==='impact'?'/api/catalog/lineage/impact?assetId='+rootId+'&depth=8':'/api/catalog/lineage/graph?rootId='+rootId+'&direction=BOTH&depth=4'),enabled:!!rootId,staleTime:10000})
  const save=useMutation({mutationFn:()=>api.patch('/api/catalog/assets/'+rootId+'/governance',{description,ownerSubject,ownerTeam,domain,classification:classificationValue,tags:tags.split(',').map(x=>x.trim()).filter(Boolean)}),onSuccess:()=>{qc.invalidateQueries({queryKey:['catalog-assets']});qc.invalidateQueries({queryKey:['catalog-lineage-graph']})}})
  const nodeById=useMemo(()=>new Map((graph.data?.nodes||[]).map(n=>[n.id,n])),[graph.data])
+ const childColumns=graph.data?.nodes.filter(n=>n.assetType==='COLUMN'&&n.parentId===selected?.id)||[]
  const choose=(id:string)=>{setRootId(id);setMode('graph')}
  return <div className="catalog-lineage-page">
   <div className="pagehead"><div><label>GOVERNANCE / METADATA GRAPH</label><h1>Catalog & lineage.</h1><p>Explore governed data assets, column metadata and end-to-end dependencies across pipelines, reports and dashboards.</p></div><button className="btn ghost" onClick={()=>{assets.refetch();graph.refetch()}}><RefreshCw size={15}/> Refresh</button></div>
@@ -56,7 +57,7 @@ export default function CatalogLineageStudio(){
       <div className="catalog-governance-form"><h3>Governance metadata</h3><label>Description<input className="input" value={description} onChange={e=>setDescription(e.target.value)} placeholder="Business meaning and intended use"/></label><div className="catalog-form-grid"><label>Data owner subject<input className="input" value={ownerSubject} onChange={e=>setOwnerSubject(e.target.value)}/></label><label>Responsible team<input className="input" value={ownerTeam} onChange={e=>setOwnerTeam(e.target.value)}/></label><label>Domain<input className="input" value={domain} onChange={e=>setDomain(e.target.value)}/></label><label>Classification<select className="input" value={classificationValue} onChange={e=>setClassificationValue(e.target.value)}>{classification.map(x=><option key={x}>{x}</option>)}</select></label></div><label>Tags (comma separated)<input className="input" value={tags} onChange={e=>setTags(e.target.value)} placeholder="finance, gold, pii"/></label><button className="btn primary" onClick={()=>save.mutate()} disabled={save.isPending}><Save size={15}/>{save.isPending?'Saving…':'Save governance'}</button>{save.isError&&<div className="error">{errorText(save.error)}</div>}</div>
      </Panel>
      {selected.assetType==='TABLE'&&<Panel title="Column dictionary" sub="First-class column contracts">
-      {graph.data?.nodes.filter(n=>n.assetType==='COLUMN'&&n.parentId===selected.id).length?graph.data.nodes.filter(n=>n.assetType==='COLUMN'&&n.parentId===selected.id).map(n=><button key={n.id} className="catalog-column-row" onClick={()=>choose(n.id)}><span><b>{n.displayName}</b><small>{n.description||'No business description'}</small></span><code>{n.dataType||'UNKNOWN'}</code><small>{n.nullable?'NULL':'NOT NULL'}</small></button>):<Empty>Column details appear when a table graph is loaded</Empty>}
+      {childColumns.length?childColumns.map(n=><button key={n.id} className="catalog-column-row" onClick={()=>choose(n.id)}><span><b>{n.displayName}</b><small>{n.description||'No business description'}</small></span><code>{n.dataType||'UNKNOWN'}</code><small>{n.nullable?'NULL':'NOT NULL'}</small></button>):<Empty>Column details appear when a table graph is loaded</Empty>}
      </Panel>}
     </>:<Panel title="Asset details" sub="Select a catalog asset"><Empty>No asset selected</Empty></Panel>}
     <Panel title={mode==='impact'?'Downstream impact':'Lineage explorer'} sub={mode==='impact'?'All reachable downstream consumers and dependencies':'Upstream and downstream graph, bounded to four hops'} extra={<div className="catalog-mode-switch"><button className={mode==='graph'?'active':''} onClick={()=>setMode('graph')}><GitBranch size={13}/> Graph</button><button className={mode==='impact'?'active':''} onClick={()=>setMode('impact')}><ArrowDownRight size={13}/> Impact</button></div>}>
