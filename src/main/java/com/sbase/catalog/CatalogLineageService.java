@@ -191,6 +191,27 @@ public class CatalogLineageService {
     }
 
     @Transactional
+    public void synchronizeFeatureLineage(UUID lineageId,UUID tenant,UUID featureSetId,UUID sourceDatasetId,
+            List<String> sourceColumns,List<UUID> parentFeatureIds,String transformation,String owner) {
+        CatalogAssetEntity feature=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"FEATURE_SET",featureSetId.toString())
+            .orElseGet(()->upsertAsset(tenant,"FEATURE_SET",featureSetId.toString(),"Feature set "+featureSetId,owner,null));
+        if(sourceDatasetId!=null) {
+            CatalogAssetEntity table=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"TABLE",sourceDatasetId.toString()).orElse(null);
+            if(table!=null) {
+                saveEdge(tenant,table.getId(),feature.getId(),"DERIVES_FROM","USER_DECLARED",lineageId.toString(),
+                    transformation,new BigDecimal("0.950"),1,null);
+                for(String columnName:sourceColumns==null?List.<String>of():sourceColumns)
+                    addColumnUse(tenant,table.getId(),columnName,feature.getId(),"USER_DECLARED",lineageId.toString(),1);
+            }
+        }
+        if(parentFeatureIds!=null) for(UUID parentId:parentFeatureIds) {
+            assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"FEATURE_SET",parentId.toString())
+                .ifPresent(parent->saveEdge(tenant,parent.getId(),feature.getId(),"DERIVES_FROM","USER_DECLARED",
+                    lineageId.toString()+":parent:"+parentId,transformation,new BigDecimal("0.950"),1,null));
+        }
+    }
+
+    @Transactional
     public void synchronizeReport(UUID id,UUID tenant,String name,String description,String owner,String definitionJson) {
         CatalogAssetEntity report=upsertAsset(tenant,"REPORT",id.toString(),name,owner,null);
         report.updateSourceDetails(name,description,null,null); assets.save(report);
