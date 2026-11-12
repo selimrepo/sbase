@@ -42,6 +42,7 @@ class CatalogLineageIntegrationTest {
 
     @Autowired CatalogAssetRepository assets;
     @Autowired DatasetRepository datasets;
+    @Autowired com.sbase.pipeline.PipelineRepository pipelines;
     @Autowired CatalogColumnRepository columns;
     @Autowired LineageEdgeRepository edges;
     @Autowired JdbcTemplate jdbc;
@@ -138,6 +139,50 @@ class CatalogLineageIntegrationTest {
         assertThat(updated.getName()).isEqualTo("Orders curated");
         assertThat(lineage.columns(table.getId(),auth)).filteredOn(col->col.displayName().equals("amount"))
             .singleElement().extracting(CatalogLineageService.AssetView::lifecycleState).isEqualTo("DEPRECATED");
+    }
+
+    @Test
+    void tracesSourceColumnThroughPipelineReportWidgetToDashboard() {
+        UUID tenant=UUID.randomUUID();
+        jdbc.update("INSERT INTO tenants(id,slug,display_name,status) VALUES(?,?,?,'ACTIVE')",tenant,"lineage-e2e-"+tenant,"Lineage E2E");
+        TenantContext tenantContext=mock(TenantContext.class);
+        var auth=new TestingAuthenticationToken("lineage-owner","n/a");
+        when(tenantContext.tenantId(auth)).thenReturn(tenant);
+        when(tenantContext.subject(auth)).thenReturn("lineage-owner");
+        CatalogLineageService lineage=new CatalogLineageService(assets,columns,edges,tenantContext,new ObjectMapper());
+        DatasetService datasetService=new DatasetService(datasets,tenantContext,mock(com.sbase.platform.tenant.ResourceAclService.class),lineage);
+        DatasetEntity source=datasetService.create(new DatasetRequest("Orders","warehouse","orders",null,"POSTGRESQL",
+            "[{\"name\":\"order_id\",\"type\":\"UUID\"}]"),auth);
+        DatasetEntity output=datasetService.create(new DatasetRequest("Orders archive","warehouse","orders_archive",null,"DORIS",
+            "[{\"name\":\"order_id\",\"type\":\"UUID\"}]"),auth);
+
+        String definition="{\"steps\":["
+            +"{\"id\":\"source\",\"type\":\"doris_read\",\"table\":\"warehouse.orders\"},"
+            +"{\"id\":\"projection\",\"type\":\"select\",\"dependsOn\":[\"source\"],\"columns\":[\"order_id\"]},"
+            +"{\"id\":\"publish\",\"type\":\"doris_write\",\"dependsOn\":[\"projection\"],"
+            +"\"table\":\"warehouse.orders_archive\",\"idempotencyColumns\":[\"order_id\"]}]}";
+        var pipelineService=new com.sbase.pipeline.PipelineService(pipelines,
+            new com.sbase.pipeline.PipelineDefinitionValidator(new ObjectMapper()),tenantContext,
+            mock(com.sbase.platform.tenant.ResourceAclService.class),lineage);
+        var pipeline=pipelineService.create(new com.sbase.pipeline.PipelineRequest("Orders ETL","Lineage integration",definition,true),auth);
+
+        UUID reportId=UUID.randomUUID(),dashboardId=UUID.randomUUID(),widgetId=UUID.randomUUID();
+        lineage.synchronizeReport(reportId,tenant,"Order totals",null,"lineage-owner",
+            "{\"table\":\"warehouse.orders_archive\",\"dimensions\":[\"order_id\"],\"metrics\":[{\"column\":\"order_id\",\"aggregate\":\"count\"}]}");
+        lineage.synchronizeDashboard(dashboardId,tenant,"Sales dashboard",null,"lineage-owner");
+        lineage.synchronizeWidget(widgetId,tenant,dashboardId,reportId,"Order totals","KPI","lineage-owner");
+
+        CatalogAssetEntity sourceTable=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"TABLE",source.getId().toString()).orElseThrow();
+        CatalogAssetEntity sourceColumn=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"COLUMN",source.getId()+":order_id").orElseThrow();
+        var impact=lineage.impact(sourceColumn.getId(),8,auth);
+        assertThat(impact.nodes()).extracting(CatalogLineageService.AssetView::assetType)
+            .contains("PIPELINE_STEP","TABLE","REPORT","WIDGET","DASHBOARD");
+        assertThat(impact.nodes()).extracting(CatalogLineageService.AssetView::id).contains(
+            assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"DASHBOARD",dashboardId.toString()).orElseThrow().getId());
+        assertThat(impact.edges()).extracting(CatalogLineageService.EdgeView::edgeType)
+            .contains("USES_COLUMN","DEPENDS_ON","WRITES_TO","READS_FROM","DISPLAYS","PUBLISHES");
+        assertThat(sourceTable.getTenantId()).isEqualTo(tenant);
+        assertThat(pipeline.getTenantId()).isEqualTo(tenant);
     }
 
 }
