@@ -220,9 +220,53 @@ public class CatalogLineageService {
         widget.updateGovernance(null,null,null,"INTERNAL",List.of(),Map.of("widgetType",widgetType));
         assets.save(widget);
         saveEdge(tenant,dashboard.getId(),widget.getId(),"CONTAINS","BI_DEFINITION",id.toString(),null,BigDecimal.ONE,1,null);
+        saveEdge(tenant,widget.getId(),dashboard.getId(),"PUBLISHES","BI_DEFINITION",id.toString(),null,BigDecimal.ONE,1,null);
         if(reportId!=null) assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"REPORT",reportId.toString())
-            .ifPresent(report->saveEdge(tenant,widget.getId(),report.getId(),"USES_REPORT","BI_DEFINITION",
+            .ifPresent(report->saveEdge(tenant,report.getId(),widget.getId(),"DISPLAYS","BI_DEFINITION",
                 id.toString(),null,BigDecimal.ONE,1,null));
+    }
+
+    @Transactional
+    public void synchronizeLegacyReport(UUID id,UUID tenant,String name,String description,String owner,String definitionJson) {
+        CatalogAssetEntity report=upsertAsset(tenant,"REPORT","legacy:"+id,name,owner,null);
+        report.updateSourceDetails(name,description,null,null); assets.save(report);
+        JsonNode definition;
+        try { definition=mapper.readTree(definitionJson); } catch(Exception invalid) { return; }
+        String tableName=firstText(definition,"table");
+        CatalogAssetEntity table=tableName==null?null:resolveTable(tenant,tableName);
+        if(table!=null) {
+            saveEdge(tenant,table.getId(),report.getId(),"READS_FROM","BI_DEFINITION","legacy:"+id,null,new BigDecimal("0.950"),1,null);
+            for(String columnName:reportColumns(definition))
+                addColumnUse(tenant,table.getId(),columnName,report.getId(),"BI_DEFINITION","legacy:"+id,1);
+        }
+    }
+
+    @Transactional
+    public void synchronizeLegacyDashboard(UUID id,UUID tenant,String name,String description,String owner) {
+        CatalogAssetEntity dashboard=upsertAsset(tenant,"DASHBOARD","legacy:"+id,name,owner,null);
+        dashboard.updateSourceDetails(name,description,null,null); assets.save(dashboard);
+    }
+
+    @Transactional
+    public void synchronizeLegacyWidget(UUID id,UUID tenant,UUID dashboardId,String title,String widgetType,
+            String owner,String queryJson) {
+        CatalogAssetEntity dashboard=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"DASHBOARD","legacy:"+dashboardId)
+            .orElseGet(()->upsertAsset(tenant,"DASHBOARD","legacy:"+dashboardId,"Dashboard "+dashboardId,owner,null));
+        CatalogAssetEntity widget=upsertAsset(tenant,"WIDGET","legacy:"+id,title,owner,dashboard.getId());
+        widget.setParentId(dashboard.getId());
+        widget.updateGovernance(null,null,null,"INTERNAL",List.of(),Map.of("widgetType",widgetType,"workspace","legacy"));
+        assets.save(widget);
+        saveEdge(tenant,dashboard.getId(),widget.getId(),"CONTAINS","BI_DEFINITION",id.toString(),null,BigDecimal.ONE,1,null);
+        saveEdge(tenant,widget.getId(),dashboard.getId(),"PUBLISHES","BI_DEFINITION",id.toString(),null,BigDecimal.ONE,1,null);
+        JsonNode definition;
+        try { definition=mapper.readTree(queryJson); } catch(Exception invalid) { return; }
+        String tableName=firstText(definition,"table");
+        CatalogAssetEntity table=tableName==null?null:resolveTable(tenant,tableName);
+        if(table!=null) {
+            saveEdge(tenant,table.getId(),widget.getId(),"READS_FROM","BI_DEFINITION",id.toString(),null,new BigDecimal("0.900"),1,null);
+            for(String columnName:reportColumns(definition))
+                addColumnUse(tenant,table.getId(),columnName,widget.getId(),"BI_DEFINITION",id.toString(),1);
+        }
     }
 
     private CatalogAssetEntity upsertAsset(UUID tenant,String type,String key,String name,String owner,UUID parent) {
