@@ -59,6 +59,10 @@ public class CatalogLineageController {
         return service.updateGovernance(id,new CatalogLineageService.GovernanceUpdate(r.description(),r.ownerSubject(),
             r.ownerTeam(),r.domain(),r.classification(),r.tags(),r.metadata(),r.lifecycleState()),auth);
     }
+    @GetMapping("/assets/{id}/columns")
+    public List<CatalogLineageService.AssetView> columns(@PathVariable UUID id,Authentication auth) {
+        permissions.require(auth,"catalog:read"); return service.columns(id,auth);
+    }
     @PostMapping("/assets/{id}/columns") @ResponseStatus(HttpStatus.CREATED)
     public CatalogLineageService.AssetView addColumn(@PathVariable UUID id,@Valid @RequestBody CreateColumnRequest r,Authentication auth) {
         permissions.require(auth,"catalog:write");
