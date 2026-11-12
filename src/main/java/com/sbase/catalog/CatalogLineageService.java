@@ -34,6 +34,210 @@ public class CatalogLineageService {
     }
 
     @Transactional
+    public void synchronizeDataset(com.sbase.catalog.DatasetEntity dataset) {
+        UUID tenant=dataset.getTenantId();
+        CatalogAssetEntity table=upsertAsset(tenant,"TABLE",dataset.getId().toString(),dataset.getName(),
+            dataset.getOwnerSubject(),null);
+        table.updateSourceDetails(dataset.getName(),dataset.getDescription(),dataset.getNamespace(),dataset.getTableName());
+        table.setLifecycleState("ACTIVE");
+        table.setSchemaFingerprint(sha256(Objects.toString(dataset.getSchemaJson(),"[]")));
+        assets.save(table);
+        JsonNode schema;
+        try { schema=mapper.readTree(Objects.toString(dataset.getSchemaJson(),"[]")); }
+        catch(Exception invalidSchema) { return; }
+        if(schema==null || !schema.isArray()) return;
+        Set<String> present=new HashSet<>(); int ordinal=0;
+        for(JsonNode item:schema) {
+            ordinal++;
+            if(!item.isObject()) continue;
+            String name=firstText(item,"name","columnName","field");
+            if(name==null) name="column_"+ordinal;
+            if(name.length()>255) continue;
+            String type=firstText(item,"type","dataType");
+            if(type==null) type="UNKNOWN";
+            String key=dataset.getId()+":"+name.toLowerCase(Locale.ROOT);
+            present.add(key);
+            CatalogAssetEntity column=upsertAsset(tenant,"COLUMN",key,name,dataset.getOwnerSubject(),table.getId());
+            column.setParentId(table.getId());
+            column.setLifecycleState("ACTIVE");
+            assets.save(column);
+            boolean nullable=!item.has("nullable") || !item.get("nullable").isBoolean() || item.get("nullable").asBoolean();
+            CatalogColumnEntity detail=columns.findById(column.getId()).orElse(null);
+            if(detail==null) columns.save(new CatalogColumnEntity(column.getId(),tenant,table.getId(),ordinal,type,nullable));
+            else detail.updateSchema(ordinal,type,nullable);
+            saveEdge(tenant,table.getId(),column.getId(),"CONTAINS","USER_DECLARED",
+                "dataset-schema:"+dataset.getId(),null,BigDecimal.ONE,1,null);
+        }
+        for(CatalogColumnEntity old:columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,table.getId())) {
+            CatalogAssetEntity oldAsset=assets.findByIdAndTenantId(old.getId(),tenant).orElse(null);
+            if(oldAsset!=null && !present.contains(oldAsset.getExternalKey())) oldAsset.setLifecycleState("DEPRECATED");
+        }
+    }
+
+    @Transactional
+    public void deprecateDataset(UUID tenant,UUID datasetId) {
+        assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"TABLE",datasetId.toString())
+            .ifPresent(asset->asset.setLifecycleState("DEPRECATED"));
+    }
+
+    @Transactional
+    public void synchronizePipeline(com.sbase.pipeline.PipelineEntity pipeline) {
+        UUID tenant=pipeline.getTenantId();
+        CatalogAssetEntity pipelineAsset=upsertAsset(tenant,"PIPELINE",pipeline.getId().toString(),
+            pipeline.getName(),pipeline.getOwnerSubject(),null);
+        pipelineAsset.updateSourceDetails(pipeline.getName(),pipeline.getDescription(),null,null);
+        pipelineAsset.setLifecycleState(pipeline.isEnabled()?"ACTIVE":"DEPRECATED");
+        pipelineAsset.updateGovernance(pipeline.getDescription(),null,null,"INTERNAL","[]",
+            write(Map.of("legacyPipelineId",pipeline.getId(),"version",pipeline.getVersion(),"enabled",pipeline.isEnabled())));
+        assets.save(pipelineAsset);
+        JsonNode definition;
+        try { definition=mapper.readTree(pipeline.getDefinitionJson()); }
+        catch(Exception invalidDefinition) { return; }
+        JsonNode steps=definition==null?null:definition.get("steps");
+        if(steps==null || !steps.isArray()) return;
+        Map<String,CatalogAssetEntity> stepAssets=new LinkedHashMap<>();
+        Map<String,Set<UUID>> sourceTables=new HashMap<>();
+        for(JsonNode step:steps) {
+            String id=firstText(step,"id"), type=firstText(step,"type");
+            if(id==null || type==null || id.length()>128) continue;
+            String key=pipeline.getId()+":"+id;
+            CatalogAssetEntity stepAsset=upsertAsset(tenant,"PIPELINE_STEP",key,id,pipeline.getOwnerSubject(),pipelineAsset.getId());
+            stepAsset.setParentId(pipelineAsset.getId());
+            stepAsset.updateGovernance(null,null,null,"INTERNAL","[]",
+                write(Map.of("pipelineId",pipeline.getId(),"stepId",id,"stepType",type,"pipelineVersion",pipeline.getVersion())));
+            assets.save(stepAsset); stepAssets.put(id,stepAsset);
+        }
+        for(JsonNode step:steps) {
+            String id=firstText(step,"id"), type=firstText(step,"type");
+            if(id==null || type==null || !stepAssets.containsKey(id)) continue;
+            CatalogAssetEntity target=stepAssets.get(id);
+            Set<UUID> inputs=new LinkedHashSet<>();
+            JsonNode deps=step.get("dependsOn");
+            if(deps!=null && deps.isArray()) for(JsonNode dep:deps) {
+                CatalogAssetEntity dependency=stepAssets.get(dep.asText());
+                if(dependency!=null) {
+                    saveEdge(tenant,dependency.getId(),target.getId(),"DEPENDS_ON","PIPELINE_DEFINITION",
+                        pipeline.getId()+":"+dep.asText()+"->"+id,null,BigDecimal.ONE,pipeline.getVersion(),null);
+                    inputs.addAll(sourceTables.getOrDefault(dep.asText(),Set.of()));
+                }
+            }
+            if(inputs.isEmpty()) {
+                String tableName=firstText(step,"table");
+                if("doris_read".equals(type) && tableName!=null) {
+                    CatalogAssetEntity source=resolveTable(tenant,tableName);
+                    if(source!=null) {
+                        inputs.add(source.getId());
+                        saveEdge(tenant,source.getId(),target.getId(),"READS_FROM","PIPELINE_DEFINITION",
+                            pipeline.getId()+":"+id,null,BigDecimal.ONE,pipeline.getVersion(),null);
+                    }
+                }
+            } else {
+                for(UUID input:inputs) saveEdge(tenant,input,target.getId(),"CONSUMES","PIPELINE_DEFINITION",
+                    pipeline.getId()+":"+id,null,BigDecimal.ONE,pipeline.getVersion(),null);
+            }
+            sourceTables.put(id,inputs);
+            for(String columnName:referencedColumns(step)) {
+                for(UUID input:inputs) addColumnUse(tenant,input,columnName,target.getId(),pipeline.getId()+":"+id,pipeline.getVersion());
+            }
+            if("doris_write".equals(type)) {
+                String tableName=firstText(step,"table");
+                CatalogAssetEntity output=tableName==null?null:resolveTable(tenant,tableName);
+                if(output!=null) saveEdge(tenant,target.getId(),output.getId(),"WRITES_TO","PIPELINE_DEFINITION",
+                    pipeline.getId()+":"+id,null,BigDecimal.ONE,pipeline.getVersion(),null);
+            }
+            if("feature_store_write".equals(type)) {
+                String featureName=firstText(step,"featureSet");
+                if(featureName!=null) assets.findAllByTenantIdAndAssetTypeOrderByUpdatedAtDesc(tenant,"FEATURE_SET",PageRequest.of(0,200))
+                    .stream().filter(f->f.getDisplayName().equals(featureName)).findFirst()
+                    .ifPresent(f->saveEdge(tenant,target.getId(),f.getId(),"WRITES_TO","PIPELINE_DEFINITION",
+                        pipeline.getId()+":"+id,null,BigDecimal.ONE,pipeline.getVersion(),null));
+            }
+        }
+    }
+
+    @Transactional
+    public void synchronizeReport(UUID id,UUID tenant,String name,String description,String owner,String definitionJson) {
+        CatalogAssetEntity report=upsertAsset(tenant,"REPORT",id.toString(),name,owner,null);
+        report.updateSourceDetails(name,description,null,null); assets.save(report);
+        JsonNode definition;
+        try { definition=mapper.readTree(definitionJson); } catch(Exception invalid) { return; }
+        String tableName=firstText(definition,"table");
+        CatalogAssetEntity table=tableName==null?null:resolveTable(tenant,tableName);
+        if(table!=null) {
+            saveEdge(tenant,table.getId(),report.getId(),"READS_FROM","BI_DEFINITION",id.toString(),null,
+                new BigDecimal("0.950"),1,null);
+            for(String columnName:reportColumns(definition)) addColumnUse(tenant,table.getId(),columnName,report.getId(),id.toString(),1);
+        }
+    }
+
+    @Transactional
+    public void synchronizeDashboard(UUID id,UUID tenant,String name,String description,String owner) {
+        CatalogAssetEntity dashboard=upsertAsset(tenant,"DASHBOARD",id.toString(),name,owner,null);
+        dashboard.updateSourceDetails(name,description,null,null); assets.save(dashboard);
+    }
+
+    @Transactional
+    public void synchronizeWidget(UUID id,UUID tenant,UUID dashboardId,UUID reportId,String title,String widgetType,String owner) {
+        CatalogAssetEntity dashboard=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"DASHBOARD",dashboardId.toString())
+            .orElseGet(()->upsertAsset(tenant,"DASHBOARD",dashboardId.toString(),"Dashboard "+dashboardId,owner,null));
+        CatalogAssetEntity widget=upsertAsset(tenant,"WIDGET",id.toString(),title,owner,dashboard.getId());
+        widget.setParentId(dashboard.getId());
+        widget.updateGovernance(null,null,null,"INTERNAL","[]",write(Map.of("widgetType",widgetType)));
+        assets.save(widget);
+        saveEdge(tenant,dashboard.getId(),widget.getId(),"CONTAINS","BI_DEFINITION",id.toString(),null,BigDecimal.ONE,1,null);
+        if(reportId!=null) assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,"REPORT",reportId.toString())
+            .ifPresent(report->saveEdge(tenant,widget.getId(),report.getId(),"USES_REPORT","BI_DEFINITION",
+                id.toString(),null,BigDecimal.ONE,1,null));
+    }
+
+    private CatalogAssetEntity upsertAsset(UUID tenant,String type,String key,String name,String owner,UUID parent) {
+        CatalogAssetEntity asset=assets.findByTenantIdAndAssetTypeAndExternalKey(tenant,type,key).orElse(null);
+        if(asset==null) {
+            asset=new CatalogAssetEntity(tenant,type,key,name,owner);
+            if(parent!=null) asset.setParentId(parent);
+        }
+        return asset;
+    }
+    private CatalogAssetEntity resolveTable(UUID tenant,String reference) {
+        return assets.findAllByTenantIdAndAssetTypeOrderByUpdatedAtDesc(tenant,"TABLE",PageRequest.of(0,200)).stream()
+            .filter(a->reference.equalsIgnoreCase(Objects.toString(a.getPhysicalName(),""))
+                || reference.equalsIgnoreCase(Objects.toString(a.getNamespace(),"")+"."+Objects.toString(a.getPhysicalName(),"")))
+            .findFirst().orElse(null);
+    }
+    private void addColumnUse(UUID tenant,UUID tableId,String columnName,UUID consumer,String evidence,long version) {
+        columns.findAllByTenantIdAndTableAssetIdOrderByOrdinalPosition(tenant,tableId).stream()
+            .filter(c->assets.findByIdAndTenantId(c.getId(),tenant).map(a->a.getDisplayName().equalsIgnoreCase(columnName)).orElse(false))
+            .findFirst().ifPresent(c->saveEdge(tenant,c.getId(),consumer,"USES_COLUMN","PIPELINE_DEFINITION",
+                evidence+":"+columnName,null,BigDecimal.ONE,version,null));
+    }
+    private List<String> referencedColumns(JsonNode step) {
+        List<String> names=new ArrayList<>();
+        for(String field:List.of("column","sourceColumn","leftKey","rightKey")) {
+            String value=firstText(step,field); if(value!=null) names.add(value);
+        }
+        for(String field:List.of("columns","groupBy")) {
+            JsonNode values=step.get(field); if(values!=null && values.isArray()) values.forEach(v->{if(v.isTextual())names.add(v.asText());});
+        }
+        JsonNode metrics=step.get("metrics");
+        if(metrics!=null && metrics.isArray()) metrics.forEach(m->{String value=firstText(m,"column");if(value!=null)names.add(value);});
+        return names.stream().distinct().toList();
+    }
+    private List<String> reportColumns(JsonNode definition) {
+        List<String> names=new ArrayList<>();
+        for(String field:List.of("dimensions")) {
+            JsonNode values=definition.get(field); if(values!=null && values.isArray()) values.forEach(v->{if(v.isTextual())names.add(v.asText());});
+        }
+        JsonNode metrics=definition.get("metrics");
+        if(metrics!=null && metrics.isArray()) metrics.forEach(m->{String value=firstText(m,"column");if(value!=null)names.add(value);});
+        return names.stream().distinct().toList();
+    }
+    private String firstText(JsonNode node,String... fields) {
+        if(node==null) return null;
+        for(String field:fields) { JsonNode value=node.get(field); if(value!=null && value.isTextual() && !value.asText().isBlank()) return value.asText().trim(); }
+        return null;
+    }
+
+    @Transactional
     public AssetView createAsset(CreateAsset request,Authentication auth) {
         tenants.requireWrite(auth);
         UUID tenant=tenants.tenantId(auth);
@@ -197,7 +401,10 @@ public class CatalogLineageService {
 
     private LineageEdgeEntity saveEdge(UUID tenant,UUID from,UUID to,String type,String evidence,String evidenceRef,
             String expression,BigDecimal confidence,long version,UUID runId) {
-        String fingerprint=sha256(tenant+"|"+from+"|"+to+"|"+type+"|"+evidence+"|"+Objects.toString(evidenceRef,"")+"|"+version);
+        if(version<1) throw bad("Effective lineage version must be positive");
+        if(evidenceRef!=null && evidenceRef.length()>512) throw bad("Lineage evidence reference is too long");
+        if(expression!=null && expression.length()>20000) throw bad("Lineage expression is too long");
+        String fingerprint=sha256(tenant+"|"+from+"|"+to+"|"+type+"|"+evidence+"|"+Objects.toString(evidenceRef,"")+"|"+Objects.toString(expression,"")+"|"+version);
         return edges.findByTenantIdAndEdgeFingerprint(tenant,fingerprint).orElseGet(() ->
             edges.save(new LineageEdgeEntity(tenant,from,to,type,evidence,evidenceRef,expression,confidence,version,runId,fingerprint)));
     }
