@@ -59,8 +59,11 @@ jobs:
           DORIS_PASSWORD: ci-doris-password
           JWT_ISSUER_URI: https://identity.example.test/realms/sbase
           JWT_JWK_SET_URI: https://identity.example.test/realms/sbase/protocol/openid-connect/certs
+          SBASE_IMAGE: ghcr.io/selimrepo/sbase:ci-test
         run: |
           docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.development.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
           docker compose --profile app-ha --profile doris-fe-ha config --quiet
           docker compose --profile app-ha --profile doris-fe-ha --profile observability config --quiet
           MINIO_ROOT_USER=ci-minio MINIO_ROOT_PASSWORD=ci-minio-password docker compose --profile object-storage config --quiet
