@@ -161,13 +161,13 @@ public class MlLifecycleService {
    List<String> cols=(List<String>)signature.getOrDefault("features",List.of());
    if(cols.isEmpty())throw new IllegalStateException("Model signature is missing feature columns");
    for(String c:cols)if(!input.containsKey(c))throw new IllegalArgumentException("Missing feature: "+c);
+   String artifact=(String)m.get("artifact_uri");
+   Path artifactPath=tenantArtifactPath(tenant,artifact);
+   String cacheKey=tenant+":"+artifactPath;
    StructField[] fields=cols.stream().map(c->DataTypes.createStructField(c,DataTypes.DoubleType,true)).toArray(StructField[]::new);
    StructType schema=DataTypes.createStructType(fields);
    Row row=RowFactory.create(cols.stream().map(c->((Number)input.get(c)).doubleValue()).toArray());
    Dataset<Row> frame=spark.getObject().createDataFrame(List.of(row),schema);
-   String artifact=(String)m.get("artifact_uri");
-   Path artifactPath=tenantArtifactPath(tenant,artifact);
-   String cacheKey=tenant+":"+artifactPath;
    PipelineModel model=loadedModels.computeIfAbsent(cacheKey,key->PipelineModel.load(artifactPath.toString()));
    Row prediction=model.transform(frame).select("prediction").first();
    result.put("prediction",prediction.get(0));ok=true;return result;
