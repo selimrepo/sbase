@@ -19,6 +19,9 @@ public class CatalogColumnEntity {
         this.id=id; this.tenantId=tenantId; this.tableAssetId=tableAssetId; this.ordinalPosition=ordinalPosition;
         this.dataType=dataType; this.nullable=nullable;
     }
+    public void updateSchema(int ordinalPosition,String dataType,boolean nullable) {
+        this.ordinalPosition=ordinalPosition; this.dataType=dataType; this.nullable=nullable;
+    }
     public UUID getId(){return id;} public UUID getTenantId(){return tenantId;} public UUID getTableAssetId(){return tableAssetId;}
     public int getOrdinalPosition(){return ordinalPosition;} public String getDataType(){return dataType;} public boolean isNullable(){return nullable;}
     public String getDefaultExpression(){return defaultExpression;} public String getGeneratedExpression(){return generatedExpression;}
