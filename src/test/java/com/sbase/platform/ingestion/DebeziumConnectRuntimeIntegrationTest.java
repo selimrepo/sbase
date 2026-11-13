@@ -3,7 +3,6 @@ package com.sbase.platform.ingestion;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariDataSource;
-import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -81,6 +80,7 @@ class DebeziumConnectRuntimeIntegrationTest {
     private JdbcTemplate sinkDb;
     private DurableRecordSink sink;
     private String topic;
+    private String cdcTopic;
     private String connectorName;
 
     @BeforeEach
@@ -119,6 +119,7 @@ class DebeziumConnectRuntimeIntegrationTest {
                 new TransactionTemplate(new DataSourceTransactionManager(sinkDataSource)), mapper);
         topic = "sbase-cdc-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         connectorName = "sbase-postgres-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        cdcTopic = topic + ".public.cdc_events";
     }
 
     @AfterEach
@@ -259,7 +260,7 @@ class DebeziumConnectRuntimeIntegrationTest {
         properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         List<ConsumerRecord<String, String>> result = new ArrayList<>();
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(properties)) {
-            consumer.subscribe(List.of(topic));
+            consumer.subscribe(List.of(cdcTopic));
             long deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos();
             while (result.size() < 2 && System.nanoTime() < deadline) {
                 for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofMillis(500))) {
