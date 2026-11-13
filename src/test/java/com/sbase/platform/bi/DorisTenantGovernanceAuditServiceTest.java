@@ -44,6 +44,21 @@ class DorisTenantGovernanceAuditServiceTest {
         verify(postgres).update(contains("SET enabled=FALSE"),eq("PENDING"),eq(0L),eq("analytics"),eq("late_arrivals"));
     }
 
+
+    @Test void inventoriesEveryNonSystemDorisDatabaseVisibleToTheServiceAccount() {
+        when(doris.queryForList(contains("information_schema.schemata"))).thenReturn(List.of(
+            Map.of("schema_name","analytics"),Map.of("schema_name","warehouse")));
+        when(doris.queryForList(contains("information_schema.tables"),any(Object[].class))).thenReturn(List.of());
+
+        Map<String,Object> result=audit.auditAllDatabases("platform-security-review");
+
+        assertEquals(2,result.get("databaseCount"));
+        assertEquals(0,result.get("tableCount"));
+        assertEquals(true,result.get("complete"));
+        verify(doris).queryForList(contains("information_schema.tables"),aryEq(new Object[]{"analytics"}));
+        verify(doris).queryForList(contains("information_schema.tables"),aryEq(new Object[]{"warehouse"}));
+    }
+
     @Test void rejectsUnsafeDatabaseAndMissingAuditSubject() {
         assertThrows(IllegalArgumentException.class,()->new DorisTenantGovernanceAuditService(postgres,doris,"analytics;DROP"));
         assertThrows(IllegalArgumentException.class,()->audit.auditDatabase(" "));

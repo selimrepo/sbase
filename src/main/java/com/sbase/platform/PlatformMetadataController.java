@@ -161,7 +161,7 @@ public class PlatformMetadataController {
     @PostMapping("/bi/tenant-governance/audit")
     public Map<String,Object> auditDorisTenantGovernance(Authentication auth) {
         require(auth,"platform:admin",false);
-        return dorisGovernanceAudit.auditDatabase(auth.getName());
+        return dorisGovernanceAudit.auditAllDatabases(auth.getName());
     }
 
     @GetMapping("/bi/summary")
