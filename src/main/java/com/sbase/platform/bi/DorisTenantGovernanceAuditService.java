@@ -32,9 +32,9 @@ public class DorisTenantGovernanceAuditService {
     public Map<String,Object> auditDatabase(String subject) {
         if(subject==null || subject.isBlank()) throw new IllegalArgumentException("Audit subject is required");
         List<Map<String,Object>> physical=doris.queryForList("""
-            SELECT TABLE_NAME AS table_name
+            SELECT TABLE_NAME AS table_name, TABLE_TYPE AS table_type
               FROM information_schema.tables
-             WHERE TABLE_SCHEMA=? AND TABLE_TYPE='BASE TABLE'
+             WHERE TABLE_SCHEMA=?
              ORDER BY TABLE_NAME
             """,database);
         List<Map<String,Object>> results=new ArrayList<>();
@@ -52,7 +52,8 @@ public class DorisTenantGovernanceAuditService {
                 SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
                  WHERE schema_name=? AND table_name=? AND enabled=true
                    AND tenant_column='tenant_id' AND classification='TENANT_DATA'
-                   AND verification_status='VERIFIED' AND verified_at IS NOT NULL)
+                   AND verification_status='VERIFIED' AND verified_at IS NOT NULL
+                   AND invalid_tenant_rows=0 AND verified_row_count IS NOT NULL)
                 """,rs->rs.next() && rs.getBoolean(1),database,table);
             long rowCount=0,invalidRows=-1;
             if(hasTenantColumn) {
@@ -64,13 +65,21 @@ public class DorisTenantGovernanceAuditService {
                 rowCount=number(counts.get("row_count"));
                 invalidRows=number(counts.get("invalid_rows"));
             }
+            Boolean rowCountMatches=false;
+            if(hasTenantColumn && Boolean.TRUE.equals(registered)) {
+                rowCountMatches=postgres.query("""
+                    SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
+                     WHERE schema_name=? AND table_name=? AND verified_row_count=? AND invalid_tenant_rows=0)
+                    """,rs->rs.next() && rs.getBoolean(1),database,table,rowCount);
+            }
             String status;
             if(!hasTenantColumn) { status="MISSING_TENANT_COLUMN"; missingDiscriminator++; blocked++; }
             else if(!Boolean.TRUE.equals(registered)) { status="UNREGISTERED_OR_UNVERIFIED"; unregistered++; blocked++; }
             else if(invalidRows!=0) { status="INVALID_TENANT_ROWS"; blocked++; }
+            else if(!rowCountMatches) { status="STALE_VERIFICATION"; blocked++; }
             else { status="VERIFIED_SHAPE"; verified++; }
             Map<String,Object> result=new LinkedHashMap<>();
-            result.put("schema",database); result.put("table",table); result.put("status",status);
+            result.put("schema",database); result.put("table",table); result.put("objectType",Objects.toString(item.get("table_type"),"UNKNOWN")); result.put("status",status);
             result.put("rowCount",rowCount); result.put("invalidTenantRows",invalidRows);
             result.put("registered",Boolean.TRUE.equals(registered)); results.add(result);
             postgres.update("""

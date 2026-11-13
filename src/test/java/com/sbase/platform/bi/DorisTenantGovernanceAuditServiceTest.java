@@ -17,7 +17,7 @@ class DorisTenantGovernanceAuditServiceTest {
 
     @Test void inventoryIncludesEveryPhysicalTableAndMarksUnregisteredOrUnsafeTablesBlocked() {
         when(doris.queryForList(anyString(),eq("analytics"))).thenReturn(List.of(
-            Map.of("table_name","orders"),Map.of("table_name","legacy_events"),Map.of("table_name","raw_dump")));
+            Map.of("table_name","orders","table_type","BASE TABLE"),Map.of("table_name","legacy_events","table_type","BASE TABLE"),Map.of("table_name","raw_dump","table_type","BASE TABLE")));
         when(doris.queryForObject(contains("information_schema.columns"),eq(Integer.class),eq("analytics"),eq("orders"))).thenReturn(1);
         when(doris.queryForObject(contains("information_schema.columns"),eq(Integer.class),eq("analytics"),eq("legacy_events"))).thenReturn(1);
         when(doris.queryForObject(contains("information_schema.columns"),eq(Integer.class),eq("analytics"),eq("raw_dump"))).thenReturn(0);
@@ -25,6 +25,7 @@ class DorisTenantGovernanceAuditServiceTest {
         when(postgres.query(contains("doris_tenant_table_policies"),any(ResultSetExtractor.class),eq("analytics"),eq("legacy_events"))).thenReturn(false);
         when(doris.queryForMap(contains("row_count"),eq("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")))
             .thenReturn(Map.of("row_count",100L,"invalid_rows",0L));
+        when(postgres.query(contains("verified_row_count"),any(ResultSetExtractor.class),eq("analytics"),eq("orders"),eq(100L))).thenReturn(true);
         when(postgres.update(contains("INVENTORY_SCAN"),any(),any(),any(),any(),any())).thenReturn(1);
 
         Map<String,Object> result=audit.auditDatabase("security-review");
