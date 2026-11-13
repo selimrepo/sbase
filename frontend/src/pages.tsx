@@ -1,5 +1,5 @@
 import {useState} from 'react'
-import PipelineCanvas from './PipelineCanvas'
+import PipelineCanvas from './PipelineCanvasDnd'
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query'
 import {Activity,AlertTriangle,ArrowRight,Boxes,CheckCircle2,Clock3,Database,GitBranch,Gauge,Layers3,LoaderCircle,Plus,RefreshCw,Server,ShieldCheck,Sparkles,Workflow} from 'lucide-react'
 import {Bar,BarChart,CartesianGrid,ResponsiveContainer,Tooltip,XAxis,YAxis} from 'recharts'
