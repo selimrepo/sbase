@@ -78,6 +78,24 @@ public class DorisTenantGovernanceAuditService {
             else if(invalidRows!=0) { status="INVALID_TENANT_ROWS"; blocked++; }
             else if(!rowCountMatches) { status="STALE_VERIFICATION"; blocked++; }
             else { status="VERIFIED_SHAPE"; verified++; }
+            if(!"VERIFIED_SHAPE".equals(status) && Boolean.TRUE.equals(registered)) {
+                String rejectedStatus="INVALID_TENANT_ROWS".equals(status) || "MISSING_TENANT_COLUMN".equals(status)
+                    ? "REJECTED" : "PENDING";
+                if(invalidRows>=0) {
+                    postgres.update("""
+                        UPDATE doris_tenant_table_policies
+                           SET enabled=FALSE, verification_status=?, invalid_tenant_rows=?,
+                               verified_at=NULL, updated_at=now()
+                         WHERE schema_name=? AND table_name=?
+                        """,rejectedStatus,invalidRows,database,table);
+                } else {
+                    postgres.update("""
+                        UPDATE doris_tenant_table_policies
+                           SET enabled=FALSE, verification_status=?, verified_at=NULL, updated_at=now()
+                         WHERE schema_name=? AND table_name=?
+                        """,rejectedStatus,database,table);
+                }
+            }
             Map<String,Object> result=new LinkedHashMap<>();
             result.put("schema",database); result.put("table",table); result.put("objectType",Objects.toString(item.get("table_type"),"UNKNOWN")); result.put("status",status);
             result.put("rowCount",rowCount); result.put("invalidTenantRows",invalidRows);
