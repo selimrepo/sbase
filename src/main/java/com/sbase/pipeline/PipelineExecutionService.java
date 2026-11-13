@@ -281,7 +281,7 @@ public class PipelineExecutionService {
         String governedTable=requireAllowed(table);
         // Push the tenant predicate into Doris itself. Filtering only after Spark
         // loads the full table would expose every tenant's rows to executor memory.
-        String tenantSql="(SELECT * FROM "+governedTable+" WHERE tenant_id = '"+tenantId+"') AS sbase_tenant_source";
+        String tenantSql=tenantScopedDbtable(governedTable,tenantId);
         Dataset<Row> source = sparkProvider.getObject().read().format("jdbc")
                 .option("url", doris.jdbcUrl()).option("dbtable", tenantSql)
                 .option("user", doris.username()).option("password", doris.password())
@@ -293,6 +293,15 @@ public class PipelineExecutionService {
         return source.filter(col("tenant_id").equalTo(lit(tenantId.toString())));
     }
 
+
+    static String tenantScopedDbtable(String governedTable, UUID tenantId) {
+        if (tenantId == null || governedTable == null
+                || !governedTable.matches("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?")) {
+            throw new IllegalArgumentException("A governed Doris table and persisted tenant ID are required");
+        }
+        // UUID is a typed, internally loaded value from pipeline_runs, not user SQL.
+        return "(SELECT * FROM " + governedTable + " WHERE tenant_id = '" + tenantId + "') AS sbase_tenant_source";
+    }
 
     private Dataset<Row> join(List<Dataset<Row>> inputs, JsonNode step) {
         if (inputs == null || inputs.size() != 2 || inputs.get(0) == null || inputs.get(1) == null)
