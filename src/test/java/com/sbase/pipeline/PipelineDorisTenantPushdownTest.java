@@ -12,6 +12,17 @@ class PipelineDorisTenantPushdownTest {
             PipelineExecutionService.tenantScopedDbtable("analytics.orders",TENANT));
     }
 
+    @Test void requiresTenantInDorisUniqueKeysToPreventCrossTenantUpsertCollisions() {
+        assertDoesNotThrow(() -> PipelineExecutionService.requireTenantScopedIdempotencyKeys(
+            new String[]{"tenant_id","order_id"}));
+        assertDoesNotThrow(() -> PipelineExecutionService.requireTenantScopedIdempotencyKeys(
+            new String[]{"ORDER_ID","TENANT_ID"}));
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+            () -> PipelineExecutionService.requireTenantScopedIdempotencyKeys(new String[]{"order_id"}));
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+            () -> PipelineExecutionService.requireTenantScopedIdempotencyKeys(new String[0]));
+    }
+
     @Test void rejectsMissingTenantAndUntrustedTableIdentifiersBeforeBuildingJdbcQuery() {
         assertThrows(IllegalArgumentException.class,
             () -> PipelineExecutionService.tenantScopedDbtable("analytics.orders",null));

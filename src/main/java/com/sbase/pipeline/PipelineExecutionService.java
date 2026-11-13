@@ -409,6 +409,7 @@ public class PipelineExecutionService {
             throw new IllegalArgumentException("Doris writes require idempotencyColumns; configure the target as a Doris UNIQUE KEY table using these columns");
         String[] keyColumns = new String[keys.size()];
         for (int i = 0; i < keys.size(); i++) { keyColumns[i] = keys.get(i).asText(); PipelineDefinitionValidator.identifier(keyColumns[i]); }
+        requireTenantScopedIdempotencyKeys(keyColumns);
         verifyDorisUniqueKey(governedTable, keyColumns);
         if (!Arrays.asList(df.columns()).contains("tenant_id")) {
             throw new org.springframework.security.access.AccessDeniedException(
@@ -508,6 +509,13 @@ public class PipelineExecutionService {
                 ex.addSuppressed(cleanupError);
             }
             throw ex;
+        }
+    }
+
+    static void requireTenantScopedIdempotencyKeys(String[] keyColumns) {
+        if (keyColumns == null || Arrays.stream(keyColumns).noneMatch("tenant_id"::equalsIgnoreCase)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                "Doris idempotency keys must include tenant_id to prevent cross-tenant key collisions");
         }
     }
 
