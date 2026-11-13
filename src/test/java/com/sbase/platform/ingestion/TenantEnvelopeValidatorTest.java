@@ -1,6 +1,7 @@
 package com.sbase.platform.ingestion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
@@ -13,16 +14,16 @@ class TenantEnvelopeValidatorTest {
     private final ObjectMapper mapper=new ObjectMapper();
 
     @Test void kafkaHeaderMustBePresentUniqueAndOwnedByConnectorTenant() {
-        RecordHeaders valid=new RecordHeaders().add("sbase-tenant-id",TENANT_A.toString().getBytes(StandardCharsets.UTF_8));
+        Headers valid=new RecordHeaders().add("sbase-tenant-id",TENANT_A.toString().getBytes(StandardCharsets.UTF_8));
         assertDoesNotThrow(()->TenantEnvelopeValidator.requireTrustedHeader(valid,"sbase-tenant-id",TENANT_A));
 
         RecordHeaders missing=new RecordHeaders();
         assertThrows(SecurityException.class,()->TenantEnvelopeValidator.requireTrustedHeader(missing,"sbase-tenant-id",TENANT_A));
 
-        RecordHeaders foreign=new RecordHeaders().add("sbase-tenant-id",TENANT_B.toString().getBytes(StandardCharsets.UTF_8));
+        Headers foreign=new RecordHeaders().add("sbase-tenant-id",TENANT_B.toString().getBytes(StandardCharsets.UTF_8));
         assertThrows(SecurityException.class,()->TenantEnvelopeValidator.requireTrustedHeader(foreign,"sbase-tenant-id",TENANT_A));
 
-        RecordHeaders duplicate=new RecordHeaders()
+        Headers duplicate=new RecordHeaders()
             .add("sbase-tenant-id",TENANT_A.toString().getBytes(StandardCharsets.UTF_8))
             .add("sbase-tenant-id",TENANT_A.toString().getBytes(StandardCharsets.UTF_8));
         assertThrows(SecurityException.class,()->TenantEnvelopeValidator.requireTrustedHeader(duplicate,"sbase-tenant-id",TENANT_A));
