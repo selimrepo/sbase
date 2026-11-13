@@ -1,6 +1,7 @@
 package com.sbase.platform;
 
 import com.sbase.platform.bi.DorisBiAnalyticsService;
+import com.sbase.platform.bi.DorisTenantGovernanceAuditService;
 import com.sbase.platform.security.PermissionService;
 import com.sbase.platform.tenant.TenantContext;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import static org.mockito.Mockito.*;
 class PlatformMetadataControllerTenantIsolationTest {
     private final JdbcTemplate db=mock(JdbcTemplate.class);
     private final DorisBiAnalyticsService analytics=mock(DorisBiAnalyticsService.class);
+    private final DorisTenantGovernanceAuditService governance=mock(DorisTenantGovernanceAuditService.class);
     private final PermissionService permissions=mock(PermissionService.class);
     private final TenantContext tenants=mock(TenantContext.class);
     private final Authentication auth=mock(Authentication.class);

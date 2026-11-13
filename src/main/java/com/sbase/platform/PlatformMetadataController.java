@@ -20,6 +20,8 @@ public class PlatformMetadataController {
     private final com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics;
     private final com.sbase.platform.security.PermissionService permissions;
     private final com.sbase.platform.tenant.TenantContext tenants;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.sbase.platform.bi.DorisTenantGovernanceAuditService dorisGovernanceAudit;
 
     public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db,
             com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics,
@@ -154,6 +156,12 @@ public class PlatformMetadataController {
     public List<Map<String,Object>> dashboards(Authentication auth) {
         require(auth,"bi:read",false);
         return db.queryForList("SELECT * FROM dashboards WHERE tenant_id=? AND owner_subject=? ORDER BY created_at DESC",tenant(auth),auth.getName());
+    }
+
+    @PostMapping("/bi/tenant-governance/audit")
+    public Map<String,Object> auditDorisTenantGovernance(Authentication auth) {
+        require(auth,"platform:admin",false);
+        return dorisGovernanceAudit.auditDatabase(auth.getName());
     }
 
     @GetMapping("/bi/summary")

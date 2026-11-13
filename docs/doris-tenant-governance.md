@@ -79,3 +79,33 @@ operational metadata, not other tenants' row contents.
 UUID format checks and operator attestation cannot independently prove that every
 source record was assigned the correct business tenant. External source ownership,
 Kafka ACLs, external JDBC permissions and object-store IAM must be verified separately.
+
+## Full physical inventory audit
+
+A platform administrator can run the read-only inventory audit through:
+
+```http
+POST /api/platform/bi/tenant-governance/audit
+Authorization: Bearer <platform-admin JWT>
+```
+
+The audit enumerates every object reported by Doris `information_schema.tables`
+in the configured database (not only allow-listed tables), checks the physical
+`tenant_id` column, scans all visible rows for null or malformed UUID values,
+and compares the live row count with the last approved row-count attestation.
+Every result is persisted to `doris_tenant_policy_audit`.
+
+Possible outcomes include `MISSING_TENANT_COLUMN`,
+`UNREGISTERED_OR_UNVERIFIED`, `INVALID_TENANT_ROWS`,
+`STALE_VERIFICATION`, and `VERIFIED_SHAPE`. Any blocked object makes
+`complete=false`. A row-count change invalidates the previous attestation and
+requires a fresh ownership review and verification. The audit never auto-enables
+or auto-approves a table.
+
+A `VERIFIED_SHAPE` result is not proof that the source system assigned the
+correct tenant to each row. Reconcile the actual tenant values against source
+ownership and trusted tenant mapping before updating the policy registry. This
+scan covers the configured Doris database visible to the service account; repeat
+it for every external catalog/database and separately review routine-load,
+materialized-view refresh, broker load, Spark, direct SQL, and administrative
+credentials. The scanner does not prove the absence of out-of-band writers.
