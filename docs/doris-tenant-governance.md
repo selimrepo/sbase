@@ -109,3 +109,11 @@ scan covers the configured Doris database visible to the service account; repeat
 it for every external catalog/database and separately review routine-load,
 materialized-view refresh, broker load, Spark, direct SQL, and administrative
 credentials. The scanner does not prove the absence of out-of-band writers.
+
+The CI Docker Compose integration profile also runs a real Doris tenant-boundary
+integration test after the FE/BE cluster is healthy. It creates an isolated
+temporary Doris database, inserts two tenants' rows, verifies the governed BI
+query returns only the authenticated tenant's row, injects a malformed tenant
+value, runs the inventory audit, and verifies the table is disabled at the
+policy layer. This complements unit tests; production source-to-tenant mapping
+and external broker/object-store ACLs still require deployment-specific review.
