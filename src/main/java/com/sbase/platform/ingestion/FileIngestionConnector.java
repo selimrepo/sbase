@@ -45,14 +45,14 @@ public class FileIngestionConnector implements IngestionConnector {
                 throw new IllegalArgumentException("File must resolve to a regular file under allowedRoot");
             String format=o.getOrDefault("format",extension(realFile)).toLowerCase(Locale.ROOT);
             return switch(format) {
-                case "csv" -> ingestCsv(connectorId,realFile,o);
-                case "jsonl","ndjson" -> ingestJsonLines(connectorId,realFile);
+                case "csv" -> ingestCsv(connectorId,tenantId,realFile,o);
+                case "jsonl","ndjson" -> ingestJsonLines(connectorId,tenantId,realFile);
                 default -> throw new IllegalArgumentException("Supported formats: csv, jsonl, ndjson");
             };
         } catch(IOException ex) { throw new IllegalStateException("File ingestion failed",ex); }
     }
 
-    private ConnectorResult ingestCsv(UUID id,Path path,Map<String,String> o)throws IOException {
+    private ConnectorResult ingestCsv(UUID id,UUID tenantId,Path path,Map<String,String> o)throws IOException {
         boolean header=Boolean.parseBoolean(o.getOrDefault("header","true"));
         String[] supplied=o.containsKey("columns")?Arrays.stream(o.get("columns").split(",")).map(String::trim).toArray(String[]::new):new String[0];
         CSVFormat format=CSVFormat.DEFAULT.builder()
@@ -74,6 +74,7 @@ public class FileIngestionConnector implements IngestionConnector {
                 if(record.size()!=headers.size()) throw new IllegalArgumentException("CSV column count mismatch at record "+record.getRecordNumber());
                 Map<String,Object> row=new LinkedHashMap<>();
                 for(int i=0;i<headers.size();i++) row.put(headers.get(i),record.get(i));
+                requireTenantPayload(row,tenantId);
                 batch.add(new DurableRecordSink.Envelope(path+":"+record.getRecordNumber(),row));
                 read++;
                 if(batch.size()==BATCH_SIZE){written+=sink.write(id,path.toString(),batch,"file:"+path,String.valueOf(record.getRecordNumber()));batch.clear();}
@@ -83,7 +84,7 @@ public class FileIngestionConnector implements IngestionConnector {
         return new ConnectorResult(read,written,"RFC 4180 CSV records persisted with stable record-number keys");
     }
 
-    private ConnectorResult ingestJsonLines(UUID id,Path path)throws IOException {
+    private ConnectorResult ingestJsonLines(UUID id,UUID tenantId,Path path)throws IOException {
         long read=0,written=0,lineNo=0;
         List<DurableRecordSink.Envelope> batch=new ArrayList<>(BATCH_SIZE);
         try(BufferedReader reader=Files.newBufferedReader(path,StandardCharsets.UTF_8)) {
@@ -92,12 +93,22 @@ public class FileIngestionConnector implements IngestionConnector {
                 lineNo++;
                 if(line.isBlank()) continue;
                 Map<String,Object> payload=mapper.readValue(line,new TypeReference<Map<String,Object>>(){});
+                requireTenantPayload(payload,tenantId);
                 batch.add(new DurableRecordSink.Envelope(path+":"+lineNo,payload));read++;
                 if(batch.size()==BATCH_SIZE){written+=sink.write(id,path.toString(),batch,"file:"+path,String.valueOf(lineNo));batch.clear();}
             }
             written+=sink.write(id,path.toString(),batch,"file:"+path,String.valueOf(lineNo));
         }
         return new ConnectorResult(read,written,"JSON Lines records persisted with line-level idempotency");
+    }
+
+    static void requireTenantPayload(Map<String,Object> payload,UUID tenantId) {
+        if(payload==null || tenantId==null || !payload.containsKey("tenant_id")
+                || payload.get("tenant_id")==null
+                || !tenantId.toString().equals(payload.get("tenant_id").toString())) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                "File record must carry the authenticated connector tenant_id");
+        }
     }
 
     private static String extension(Path p){String n=p.getFileName().toString();int i=n.lastIndexOf('.');return i<0?"":n.substring(i+1);}
