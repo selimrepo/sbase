@@ -22,5 +22,7 @@ class DurableRecordSinkTenantBoundaryTest {
             new DurableRecordSink.Envelope("rest:1",Map.of("tenant_id",tenantB.toString()))));
         assertThrows(AccessDeniedException.class,()->DurableRecordSink.normalizeTenantRecord(null,
             new DurableRecordSink.Envelope("file:2",Map.of("name","record"))));
+        assertThrows(AccessDeniedException.class,()->DurableRecordSink.normalizeTenantRecord(tenantA,
+            new DurableRecordSink.Envelope("file:3",java.util.Collections.singletonMap("tenant_id",null))));
     }
 }

@@ -184,7 +184,7 @@ public class DurableRecordSink {
         if(tenantId==null || record==null || record.payload()==null)
             throw new org.springframework.security.access.AccessDeniedException("Persisted connector tenant and record payload are required");
         Object owner=record.payload().get("tenant_id");
-        if(owner!=null && !tenantId.toString().equals(owner.toString()))
+        if(record.payload().containsKey("tenant_id") && (owner==null || !tenantId.toString().equals(owner.toString())))
             throw new org.springframework.security.access.AccessDeniedException("Ingestion record belongs to another tenant");
         Map<String,Object> trustedPayload=new java.util.LinkedHashMap<>(record.payload());
         // Stamp ownership from the persisted connector row, never from request options.
