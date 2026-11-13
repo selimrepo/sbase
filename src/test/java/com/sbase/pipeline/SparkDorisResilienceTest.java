@@ -42,6 +42,10 @@ class SparkDorisResilienceTest {
             createTableWithBackendRetry(statement, createTableSql);
         }
 
+        // SHOW BACKENDS and successful DDL do not prove scan RPCs are usable after FE failover.
+        // Require an actual tablet scan before starting the Spark write workload.
+        awaitBackendQuery(url, user, password, table);
+
         SparkSession spark = SparkSession.builder().appName("sbase-doris-resilience-test")
             .master("local[4]").config("spark.ui.enabled", "false")
             .config("spark.sql.shuffle.partitions", "4")
@@ -57,16 +61,22 @@ class SparkDorisResilienceTest {
                     .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "1000")
                     .mode("append").save();
             }
-            try (var connection = DriverManager.getConnection(url, user, password);
-                 var statement = connection.createStatement();
-                 var result = statement.executeQuery("SELECT COUNT(*) FROM " + table)) {
-                result.next();
-                assertEquals(10_000L, result.getLong(1),
-                    "Repeating a Spark JDBC append to a Doris UNIQUE KEY table must not duplicate entities");
-            }
-            assertEquals(10_000L, spark.read().format("jdbc").option("url", url).option("dbtable", table)
-                .option("user", user).option("password", password)
-                .option("driver", "com.mysql.cj.jdbc.Driver").load().count());
+            long sqlCount = withBackendQueryRetry("Doris SQL verification scan", () -> {
+                try (var connection = DriverManager.getConnection(url, user, password);
+                     var statement = connection.createStatement();
+                     var result = statement.executeQuery("SELECT COUNT(*) FROM " + table)) {
+                    result.next();
+                    return result.getLong(1);
+                }
+            });
+            assertEquals(10_000L, sqlCount,
+                "Repeating a Spark JDBC append to a Doris UNIQUE KEY table must not duplicate entities");
+
+            long sparkCount = withBackendQueryRetry("Spark JDBC verification scan", () ->
+                spark.read().format("jdbc").option("url", url).option("dbtable", table)
+                    .option("user", user).option("password", password)
+                    .option("driver", "com.mysql.cj.jdbc.Driver").load().count());
+            assertEquals(10_000L, sparkCount);
         } finally {
             spark.stop();
             try (var connection = DriverManager.getConnection(url, user, password);
@@ -171,6 +181,57 @@ class SparkDorisResilienceTest {
             "Doris FE recovered, but no Alive, non-decommissioned backend with registered disk capacity "
                 + "was observed for 3 consecutive checks within 3 minutes. Last backend state: " + lastBackendState,
             lastFailure);
+    }
+
+
+    /**
+     * A FE can accept DDL while its BE scan channel is still blacklisted after
+     * failover. A real SELECT is required before declaring the test cluster ready.
+     */
+    private static void awaitBackendQuery(String url, String user, String password, String table) throws Exception {
+        withBackendQueryRetry("Doris backend readiness scan", () -> {
+            try (var connection = DriverManager.getConnection(url, user, password);
+                 var statement = connection.createStatement();
+                 var result = statement.executeQuery("SELECT COUNT(*) FROM " + table)) {
+                result.next();
+                return result.getLong(1);
+            }
+        });
+    }
+
+    private static <T> T withBackendQueryRetry(String operation, SqlOperation<T> action) throws Exception {
+        Exception lastFailure = null;
+        for (int attempt = 1; attempt <= 36; attempt++) {
+            try {
+                return action.execute();
+            } catch (Exception failure) {
+                if (!isTransientBackendUnavailable(failure) || attempt == 36) {
+                    throw failure;
+                }
+                lastFailure = failure;
+                if (attempt == 1 || attempt % 6 == 0) {
+                    System.err.println(operation + " is waiting for Doris BE scan RPC recovery (" + attempt + "/36)");
+                }
+                Thread.sleep(5_000);
+            }
+        }
+        throw new IllegalStateException(operation + " did not recover within 3 minutes", lastFailure);
+    }
+
+    private static boolean isTransientBackendUnavailable(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message != null && (message.contains("There is no scanNode Backend available")
+                    || message.contains("UNAVAILABLE: io exception"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @FunctionalInterface
+    private interface SqlOperation<T> {
+        T execute() throws Exception;
     }
 
     private static boolean hasPositiveCapacity(String capacity) {
