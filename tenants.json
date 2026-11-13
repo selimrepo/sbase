@@ -1,0 +1,12 @@
+[
+  {
+    "name": "tenant-a",
+    "token": "REPLACE_WITH_TENANT_A_JWT",
+    "workers": 2
+  },
+  {
+    "name": "tenant-b",
+    "token": "REPLACE_WITH_TENANT_B_JWT",
+    "workers": 2
+  }
+]
