@@ -144,6 +144,7 @@ public class PipelineExecutionService {
                 Dataset<Row> result = apply(type, step, input, inputs, runId, run.getIdempotencyKey());
                 long stepRecords = 0;
                 String schema = null;
+                String preview = "[]";
                 if (result != null) {
                     outputs.put(id, result);
                     current = result;
@@ -151,15 +152,27 @@ public class PipelineExecutionService {
                     if (!"doris_write".equals(type)) {
                         stepRecords = result.count();
                         processed = stepRecords;
+                        // Bounded sample only: never collect the complete Spark dataset.
+                        List<String> sampleRows = result.limit(20).toJSON().collectAsList();
+                        preview = mapper.writeValueAsString(sampleRows.stream().map(row -> {
+                            try { return mapper.readTree(row); }
+                            catch (Exception parseError) { return mapper.createObjectNode().put("_raw", row); }
+                        }).toList());
+                        if (preview.length() > 131072) {
+                            preview = mapper.writeValueAsString(sampleRows.stream().limit(5).map(row -> {
+                                try { return mapper.readTree(row); }
+                                catch (Exception parseError) { return mapper.createObjectNode().put("_raw", row); }
+                            }).toList());
+                        }
                     }
                 }
                 long duration = Duration.ofNanos(System.nanoTime() - stepStartedNanos).toMillis();
                 jdbc.update("""
                     UPDATE pipeline_step_runs
                        SET status='SUCCEEDED',finished_at=now(),duration_ms=?,
-                           records_processed=?,output_schema_json=?
+                           records_processed=?,output_schema_json=?,output_preview_json=?
                      WHERE pipeline_run_id=? AND step_id=? AND attempt=?
-                    """, duration, stepRecords, schema, runId, id, run.getAttemptCount());
+                    """, duration, stepRecords, schema, preview, runId, id, run.getAttemptCount());
                 stepResults.add(Map.of("stepId", id, "type", type, "status", "SUCCEEDED",
                     "durationMs", duration, "recordsProcessed", stepRecords));
                 currentStepId = null;
@@ -212,7 +225,7 @@ public class PipelineExecutionService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Pipeline run not found");
         return jdbc.queryForList("""
             SELECT step_id,step_type,status,started_at,finished_at,duration_ms,
-                   records_processed,output_schema_json,error_message,attempt
+                   records_processed,output_schema_json,output_preview_json,error_message,attempt
               FROM pipeline_step_runs
              WHERE pipeline_run_id=?
              ORDER BY started_at,step_id
