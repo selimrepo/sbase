@@ -26,6 +26,16 @@ class TenantEnvelopeValidatorTest {
         assertThrows(SecurityException.class,()->TenantEnvelopeValidator.requireJsonTenantIfPresent(new ObjectMapper(),json,tenant));
     }
 
+
+    @Test void rejectsMalformedOrNonObjectDebeziumPayloadsInsteadOfSkippingTenantValidation() {
+        ObjectMapper mapper=new ObjectMapper();
+        assertThrows(SecurityException.class,()->TenantEnvelopeValidator.requireValidJsonTenantIfPresent(mapper,"{broken",tenant));
+        assertThrows(SecurityException.class,()->TenantEnvelopeValidator.requireValidJsonTenantIfPresent(mapper,"[1,2,3]",tenant));
+        assertThrows(SecurityException.class,()->TenantEnvelopeValidator.requireValidJsonTenantIfPresent(mapper," ",tenant));
+        assertDoesNotThrow(()->TenantEnvelopeValidator.requireValidJsonTenantIfPresent(mapper,
+            "{\"before\":{\"tenant_id\":\""+tenant+"\"},\"after\":{\"tenant_id\":\""+tenant+"\"}}",tenant));
+    }
+
     @Test void acceptsMatchingOrHeaderBoundNonJsonPayload() {
         assertDoesNotThrow(()->TenantEnvelopeValidator.requireJsonTenantIfPresent(new ObjectMapper(),
             "{\"tenant_id\":\""+tenant+"\",\"value\":42}",tenant));

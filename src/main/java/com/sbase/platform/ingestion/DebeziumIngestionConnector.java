@@ -41,7 +41,7 @@ public class DebeziumIngestionConnector implements IngestionConnector {
                 Map<TopicPartition,Long> offsets=new HashMap<>();
                 for(ConsumerRecord<String,String> r:records){
                     TenantEnvelopeValidator.requireTrustedHeader(r.headers(),tenantHeader,tenantId);
-                    TenantEnvelopeValidator.requireJsonTenantIfPresent(mapper,r.value(),tenantId);
+                    TenantEnvelopeValidator.requireValidJsonTenantIfPresent(mapper,r.value(),tenantId);
                     String sourceKey=topic+":"+r.partition()+":"+r.offset();
                     Map<String,Object> payload=new LinkedHashMap<>();
                     payload.put("tenant_id",tenantId.toString());

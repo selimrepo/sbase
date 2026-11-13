@@ -32,6 +32,23 @@ final class TenantEnvelopeValidator {
         }
     }
 
+
+    /** Debezium records are JSON envelopes; malformed JSON must never bypass tenant inspection. */
+    static void requireValidJsonTenantIfPresent(ObjectMapper mapper,String json,UUID tenantId) {
+        if(json==null || json.isBlank() || tenantId==null)
+            throw new SecurityException("Debezium JSON envelope and connector tenant are required");
+        try {
+            JsonNode root=mapper.readTree(json);
+            if(root==null || !root.isObject())
+                throw new SecurityException("Debezium record must be a JSON object");
+            inspect(root,tenantId);
+        } catch(SecurityException ex) {
+            throw ex;
+        } catch(Exception malformed) {
+            throw new SecurityException("Debezium record is not valid JSON",malformed);
+        }
+    }
+
     private static void inspect(JsonNode node,UUID tenantId) {
         if(node.isObject()) {
             if(node.has("tenant_id") && (node.get("tenant_id").isNull() ||
