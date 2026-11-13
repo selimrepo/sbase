@@ -62,7 +62,17 @@ class KafkaDebeziumEndToEndIsolationTest {
             one.subscribe(List.of(topic)); Set<TopicPartition> before=assignment(one);
             assertFalse(before.isEmpty());
             two.subscribe(List.of(topic));
-            Set<TopicPartition> a=assignment(one), b=assignment(two);
+            Set<TopicPartition> a=Set.of(), b=Set.of();
+            long rebalanceDeadline=System.nanoTime()+Duration.ofSeconds(25).toNanos();
+            while(System.nanoTime()<rebalanceDeadline) {
+                one.poll(Duration.ofMillis(200));
+                two.poll(Duration.ofMillis(200));
+                a=new HashSet<>(one.assignment());
+                b=new HashSet<>(two.assignment());
+                if(a.size()==1 && b.size()==1) break;
+            }
+            assertEquals(1,a.size(),"first consumer should own one partition after rebalance");
+            assertEquals(1,b.size(),"second consumer should own one partition after rebalance");
             Set<TopicPartition> all=new HashSet<>(a); all.addAll(b);
             assertEquals(Set.of(new TopicPartition(topic,0),new TopicPartition(topic,1)),all);
             Set<TopicPartition> overlap=new HashSet<>(a); overlap.retainAll(b); assertTrue(overlap.isEmpty());
