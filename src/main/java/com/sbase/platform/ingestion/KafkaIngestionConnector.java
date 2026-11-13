@@ -31,7 +31,8 @@ public class KafkaIngestionConnector implements IngestionConnector {
         UUID tenantId=UUID.fromString(required(o,"tenantId"));
         String tenantHeader=o.getOrDefault("tenantHeader","sbase-tenant-id");
         String topic=required(o,"topic"), bootstrap=required(o,"bootstrapServers");
-        String group=o.getOrDefault("groupId","sbase-"+connectorId);
+        String group=TenantEnvelopeValidator.tenantScopedConsumerGroup(
+            o.getOrDefault("groupId","sbase"),tenantId,connectorId);
         String registry=o.getOrDefault("schemaRegistryUrl","");
         int max=Integer.parseInt(o.getOrDefault("maxRecords","500"));
         if(max<1 || max>10000) throw new IllegalArgumentException("maxRecords must be between 1 and 10000");

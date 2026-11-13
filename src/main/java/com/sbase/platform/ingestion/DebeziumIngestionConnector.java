@@ -25,7 +25,8 @@ public class DebeziumIngestionConnector implements IngestionConnector {
         String topic=required(o,"topic");
         Properties p=new Properties();
         p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,required(o,"bootstrapServers"));
-        p.put(ConsumerConfig.GROUP_ID_CONFIG,o.getOrDefault("groupId","sbase-cdc-"+id));
+        p.put(ConsumerConfig.GROUP_ID_CONFIG,TenantEnvelopeValidator.tenantScopedConsumerGroup(
+            o.getOrDefault("groupId","sbase-cdc"),tenantId,id));
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,"false");
         p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,o.getOrDefault("autoOffsetReset","earliest"));
         p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,StringDeserializer.class.getName());

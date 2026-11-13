@@ -10,6 +10,17 @@ import java.util.UUID;
 final class TenantEnvelopeValidator {
     private TenantEnvelopeValidator() {}
 
+    static String tenantScopedConsumerGroup(String requestedGroup,UUID tenantId,UUID connectorId) {
+        if(requestedGroup==null || requestedGroup.isBlank() || tenantId==null || connectorId==null)
+            throw new IllegalArgumentException("Kafka group, connector ID and tenant ID are required");
+        String suffix=tenantId+"-"+connectorId;
+        String prefix=requestedGroup.trim();
+        int maxPrefix=240-suffix.length()-1;
+        if(maxPrefix<1) throw new IllegalArgumentException("Tenant-scoped Kafka group identifier is too long");
+        if(prefix.length()>maxPrefix) prefix=prefix.substring(0,maxPrefix);
+        return prefix+"-"+suffix;
+    }
+
     static void requireTrustedHeader(Headers headers,String headerName,UUID tenantId) {
         if(headers==null || tenantId==null) throw new SecurityException("Tenant identity header is required");
         java.util.Iterator<Header> values=headers.headers(headerName).iterator();

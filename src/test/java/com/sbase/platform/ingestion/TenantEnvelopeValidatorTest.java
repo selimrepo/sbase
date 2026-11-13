@@ -13,6 +13,18 @@ class TenantEnvelopeValidatorTest {
     private static final UUID TENANT_B=UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private final ObjectMapper mapper=new ObjectMapper();
 
+
+    @Test void kafkaConsumerGroupsAreAlwaysNamespacedByPersistedTenantAndConnector() {
+        UUID connector=UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        String groupA=TenantEnvelopeValidator.tenantScopedConsumerGroup("shared-group",TENANT_A,connector);
+        String groupB=TenantEnvelopeValidator.tenantScopedConsumerGroup("shared-group",TENANT_B,connector);
+        assertNotEquals(groupA,groupB);
+        assertTrue(groupA.endsWith(TENANT_A+"-"+connector));
+        assertTrue(groupB.endsWith(TENANT_B+"-"+connector));
+        assertThrows(IllegalArgumentException.class,
+            () -> TenantEnvelopeValidator.tenantScopedConsumerGroup(" ",TENANT_A,connector));
+    }
+
     @Test void kafkaHeaderMustBePresentUniqueAndOwnedByConnectorTenant() {
         Headers valid=new RecordHeaders().add("sbase-tenant-id",TENANT_A.toString().getBytes(StandardCharsets.UTF_8));
         assertDoesNotThrow(()->TenantEnvelopeValidator.requireTrustedHeader(valid,"sbase-tenant-id",TENANT_A));
