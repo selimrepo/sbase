@@ -6,7 +6,6 @@ import org.springframework.jdbc.core.ResultSetExtractor;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Objects;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
