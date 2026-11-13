@@ -85,12 +85,12 @@ Kafka ACLs, external JDBC permissions and object-store IAM must be verified sepa
 A platform administrator can run the read-only inventory audit through:
 
 ```http
-POST /api/platform/bi/tenant-governance/audit
+POST /api/platform/doris/tenant-governance/audit
 Authorization: Bearer <platform-admin JWT>
 ```
 
-The audit enumerates every object reported by Doris `information_schema.tables`
-in the configured database (not only allow-listed tables), checks the physical
+The configured-database audit enumerates every object reported by Doris `information_schema.tables`
+(not only allow-listed tables), checks the physical
 `tenant_id` column, scans all visible rows for null or malformed UUID values,
 and compares the live row count with the last approved row-count attestation.
 Every result is persisted to `doris_tenant_policy_audit`.
