@@ -55,8 +55,10 @@ class DorisTenantGovernanceAuditServiceTest {
         assertEquals(2,result.get("databaseCount"));
         assertEquals(0,result.get("tableCount"));
         assertEquals(true,result.get("complete"));
-        verify(doris).queryForList(contains("information_schema.tables"),aryEq(new Object[]{"analytics"}));
-        verify(doris).queryForList(contains("information_schema.tables"),aryEq(new Object[]{"warehouse"}));
+        org.mockito.ArgumentCaptor<Object[]> schemas = org.mockito.ArgumentCaptor.forClass(Object[].class);
+        verify(doris,times(2)).queryForList(contains("information_schema.tables"),schemas.capture());
+        assertEquals(List.of("analytics","warehouse"),
+            schemas.getAllValues().stream().map(args -> Objects.toString(args[0])).sorted().toList());
     }
 
     @Test void rejectsUnsafeDatabaseAndMissingAuditSubject() {
