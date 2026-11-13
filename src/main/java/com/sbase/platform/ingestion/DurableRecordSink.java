@@ -26,8 +26,8 @@ public class DurableRecordSink {
                 rs->rs.next()?rs.getObject(1,UUID.class):null,connectorId);
             if(tenantId==null) throw new IllegalArgumentException("Unknown ingestion connector");
             long inserted = 0;
-            for (Envelope record : records) {
-                requireTenantRecord(tenantId,record);
+            for (Envelope input : records) {
+                Envelope record=normalizeTenantRecord(tenantId,input);
                 String json;
                 try { json = mapper.writeValueAsString(record.payload()); }
                 catch (Exception e) { throw new IllegalArgumentException("Record is not JSON serializable", e); }
@@ -180,11 +180,22 @@ public class DurableRecordSink {
         });
     }
 
+    static Envelope normalizeTenantRecord(UUID tenantId,Envelope record) {
+        if(tenantId==null || record==null || record.payload()==null)
+            throw new org.springframework.security.access.AccessDeniedException("Persisted connector tenant and record payload are required");
+        Object owner=record.payload().get("tenant_id");
+        if(owner!=null && !tenantId.toString().equals(owner.toString()))
+            throw new org.springframework.security.access.AccessDeniedException("Ingestion record belongs to another tenant");
+        Map<String,Object> trustedPayload=new java.util.LinkedHashMap<>(record.payload());
+        // Stamp ownership from the persisted connector row, never from request options.
+        trustedPayload.put("tenant_id",tenantId.toString());
+        return new Envelope(record.sourceKey(),trustedPayload);
+    }
+
     private static void requireTenantRecord(UUID tenantId,Envelope record) {
         Object owner=record==null || record.payload()==null?null:record.payload().get("tenant_id");
         if(tenantId==null || owner==null || !tenantId.toString().equals(owner.toString()))
-            throw new org.springframework.security.access.AccessDeniedException(
-                "Ingestion record is missing tenant_id or belongs to another tenant");
+            throw new org.springframework.security.access.AccessDeniedException("Ingestion record is missing tenant_id or belongs to another tenant");
     }
 
     public record Envelope(String sourceKey, Map<String,Object> payload) {}
