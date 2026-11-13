@@ -131,11 +131,11 @@ public class PipelineExecutionService {
                 currentStepId = id;
                 stepStartedNanos = System.nanoTime();
                 jdbc.update("""
-                    INSERT INTO pipeline_step_runs(id,pipeline_run_id,step_id,step_type,status,started_at,attempt)
-                    VALUES(?,?,?,?,'RUNNING',now(),?)
+                    INSERT INTO pipeline_step_runs(id,pipeline_run_id,step_id,step_type,status,started_at,attempt,output_preview_json)
+                    VALUES(?,?,?,?,'RUNNING',now(),?,'[]')
                     ON CONFLICT(pipeline_run_id,step_id,attempt) DO UPDATE
                        SET status='RUNNING',started_at=now(),finished_at=NULL,duration_ms=NULL,
-                           records_processed=0,output_schema_json=NULL,error_message=NULL
+                           records_processed=0,output_schema_json=NULL,output_preview_json='[]',error_message=NULL
                     """, UUID.randomUUID(), runId, id, type, run.getAttemptCount());
                 List<String> dependencies = new ArrayList<>();
                 step.path("dependsOn").forEach(d -> dependencies.add(d.asText()));
