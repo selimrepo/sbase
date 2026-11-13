@@ -278,9 +278,12 @@ public class PipelineExecutionService {
      * scoped by the immutable tenant captured in the durable run record.
      */
     private Dataset<Row> readDoris(String table, UUID tenantId) {
-        requireAllowed(table);
+        String governedTable=requireAllowed(table);
+        // Push the tenant predicate into Doris itself. Filtering only after Spark
+        // loads the full table would expose every tenant's rows to executor memory.
+        String tenantSql=tenantScopedDbtable(governedTable,tenantId);
         Dataset<Row> source = sparkProvider.getObject().read().format("jdbc")
-                .option("url", doris.jdbcUrl()).option("dbtable", table)
+                .option("url", doris.jdbcUrl()).option("dbtable", tenantSql)
                 .option("user", doris.username()).option("password", doris.password())
                 .option("driver", "com.mysql.cj.jdbc.Driver").load();
         if (!Arrays.asList(source.columns()).contains("tenant_id")) {
@@ -290,6 +293,15 @@ public class PipelineExecutionService {
         return source.filter(col("tenant_id").equalTo(lit(tenantId.toString())));
     }
 
+
+    static String tenantScopedDbtable(String governedTable, UUID tenantId) {
+        if (tenantId == null || governedTable == null
+                || !governedTable.matches("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?")) {
+            throw new IllegalArgumentException("A governed Doris table and persisted tenant ID are required");
+        }
+        // UUID is a typed, internally loaded value from pipeline_runs, not user SQL.
+        return "(SELECT * FROM " + governedTable + " WHERE tenant_id = '" + tenantId + "') AS sbase_tenant_source";
+    }
 
     private Dataset<Row> join(List<Dataset<Row>> inputs, JsonNode step) {
         if (inputs == null || inputs.size() != 2 || inputs.get(0) == null || inputs.get(1) == null)
@@ -390,14 +402,15 @@ public class PipelineExecutionService {
 
     private void writeDoris(Dataset<Row> df, JsonNode step, UUID runId, String idempotencyKey, UUID tenantId) {
         String table = step.path("table").asText();
-        requireAllowed(table);
+        String governedTable=requireAllowed(table);
         String mode = step.path("mode").asText("append");
         JsonNode keys = step.path("idempotencyColumns");
         if (!keys.isArray() || keys.isEmpty())
             throw new IllegalArgumentException("Doris writes require idempotencyColumns; configure the target as a Doris UNIQUE KEY table using these columns");
         String[] keyColumns = new String[keys.size()];
         for (int i = 0; i < keys.size(); i++) { keyColumns[i] = keys.get(i).asText(); PipelineDefinitionValidator.identifier(keyColumns[i]); }
-        verifyDorisUniqueKey(table, keyColumns);
+        requireTenantScopedIdempotencyKeys(keyColumns);
+        verifyDorisUniqueKey(governedTable, keyColumns);
         if (!Arrays.asList(df.columns()).contains("tenant_id")) {
             throw new org.springframework.security.access.AccessDeniedException(
                     "Doris target data must include tenant_id; cross-tenant writes are not permitted");
@@ -411,7 +424,7 @@ public class PipelineExecutionService {
         Dataset<Row> stable = df.dropDuplicates(keyColumns);
         // The run-level Spark job group is set by executeClaimed, allowing
         // cancellation to interrupt this external write as well.
-        stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", table)
+        stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", governedTable)
                 .option("user", doris.username()).option("password", doris.password())
                 .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "5000")
                 .mode("append").save();
@@ -480,7 +493,7 @@ public class PipelineExecutionService {
                 connection.setAutoCommit(false);
                 statement.executeUpdate("INSERT INTO online_feature_values(tenant_id, feature_set, entity_key, feature_version, feature_values, event_time, materialized_at) " +
                     "SELECT tenant_id::uuid, feature_set, entity_key, feature_version, feature_values::jsonb, COALESCE(event_time, now()), now() FROM " + stageName +
-                    " ON CONFLICT(feature_set, entity_key) DO UPDATE SET feature_version=EXCLUDED.feature_version, " +
+                    " ON CONFLICT(tenant_id,feature_set,entity_key) DO UPDATE SET feature_version=EXCLUDED.feature_version, " +
                     "feature_values=EXCLUDED.feature_values, event_time=EXCLUDED.event_time, materialized_at=now() " +
                     "WHERE EXCLUDED.event_time >= online_feature_values.event_time");
                 statement.execute("DROP TABLE " + stageName);
@@ -496,6 +509,13 @@ public class PipelineExecutionService {
                 ex.addSuppressed(cleanupError);
             }
             throw ex;
+        }
+    }
+
+    static void requireTenantScopedIdempotencyKeys(String[] keyColumns) {
+        if (keyColumns == null || Arrays.stream(keyColumns).noneMatch("tenant_id"::equalsIgnoreCase)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                "Doris idempotency keys must include tenant_id to prevent cross-tenant key collisions");
         }
     }
 
@@ -529,10 +549,45 @@ public class PipelineExecutionService {
         return value.asText();
     }
 
-    private void requireAllowed(String table) {
+    private String requireAllowed(String table) {
         PipelineDefinitionValidator.table(table);
-        if (!allowedTables.contains(table.toLowerCase(Locale.ROOT)))
-            throw new IllegalArgumentException("Doris table is not allow-listed: " + table);
+        String configured=allowedTables.stream()
+            .filter(value -> value.equalsIgnoreCase(table) || value.endsWith("."+table.toLowerCase(Locale.ROOT)))
+            .findFirst().orElseThrow(() -> new IllegalArgumentException("Doris table is not allow-listed: " + table));
+        String[] parts=configured.split("\\.",2);
+        String schema=parts.length==2?parts[0]:defaultDorisSchema();
+        String name=parts.length==2?parts[1]:parts[0];
+        Boolean registered=jdbc.query("""
+            SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
+             WHERE schema_name=? AND table_name=? AND enabled=true AND tenant_column='tenant_id' AND classification='TENANT_DATA' AND verification_status='VERIFIED' AND verified_at IS NOT NULL AND invalid_tenant_rows=0)
+            """,rs->rs.next()&&rs.getBoolean(1),schema,name);
+        if(!Boolean.TRUE.equals(registered))
+            throw new org.springframework.security.access.AccessDeniedException("Doris table has no active tenant isolation policy");
+        Integer tenantColumns;
+        try(java.sql.Connection connection=doris.openConnection();
+            java.sql.PreparedStatement statement=connection.prepareStatement("""
+                SELECT COUNT(*) FROM information_schema.columns
+                 WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND LOWER(COLUMN_NAME)='tenant_id'
+                """)) {
+            statement.setString(1,schema);statement.setString(2,name);
+            try(java.sql.ResultSet result=statement.executeQuery()) {
+                tenantColumns=result.next()?result.getInt(1):0;
+            }
+        } catch(java.sql.SQLException failure) {
+            throw new IllegalStateException("Cannot verify Doris tenant column for "+schema+"."+name,failure);
+        }
+        if(tenantColumns==null || tenantColumns!=1)
+            throw new org.springframework.security.access.AccessDeniedException("Doris table does not expose tenant_id");
+        return schema+"."+name;
+    }
+
+    private String defaultDorisSchema() {
+        String url=doris.jdbcUrl();
+        int start=url.indexOf("://");
+        int slash=url.indexOf('/',start<0?0:start+3);
+        if(slash<0)return "analytics";
+        String path=url.substring(slash+1).split("[?;]",2)[0];
+        return path.isBlank()?"analytics":path.split("/",2)[0];
     }
     private Dataset<Row> requireInput(Dataset<Row> input) {
         if (input == null) throw new IllegalArgumentException("Step requires an input dataset");

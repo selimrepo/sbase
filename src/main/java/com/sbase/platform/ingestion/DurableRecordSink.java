@@ -22,8 +22,12 @@ public class DurableRecordSink {
 
     public long write(UUID connectorId, String source, List<Envelope> records, String checkpointKey, String checkpointValue) {
         return transactions.execute(status -> {
+            UUID tenantId=jdbc.query("SELECT tenant_id FROM ingestion_connectors WHERE id=?",
+                rs->rs.next()?rs.getObject(1,UUID.class):null,connectorId);
+            if(tenantId==null) throw new IllegalArgumentException("Unknown ingestion connector");
             long inserted = 0;
-            for (Envelope record : records) {
+            for (Envelope input : records) {
+                Envelope record=normalizeTenantRecord(tenantId,input);
                 String json;
                 try { json = mapper.writeValueAsString(record.payload()); }
                 catch (Exception e) { throw new IllegalArgumentException("Record is not JSON serializable", e); }
@@ -118,6 +122,7 @@ public class DurableRecordSink {
             UUID tenantId = jdbc.query("SELECT tenant_id FROM ingestion_connectors WHERE id=?",
                 rs -> rs.next() ? rs.getObject(1, UUID.class) : null, connectorId);
             if (tenantId == null) throw new IllegalArgumentException("Unknown ingestion connector");
+            for(Envelope record:records) requireTenantRecord(tenantId,record);
             Map<Integer, List<Envelope>> partitions = new java.util.TreeMap<>();
             for (Envelope record : records) {
                 Object p = record.payload().get("partition");
@@ -173,6 +178,24 @@ public class DurableRecordSink {
             }
             return inserted;
         });
+    }
+
+    static Envelope normalizeTenantRecord(UUID tenantId,Envelope record) {
+        if(tenantId==null || record==null || record.payload()==null)
+            throw new org.springframework.security.access.AccessDeniedException("Persisted connector tenant and record payload are required");
+        Object owner=record.payload().get("tenant_id");
+        if(record.payload().containsKey("tenant_id") && (owner==null || !tenantId.toString().equals(owner.toString())))
+            throw new org.springframework.security.access.AccessDeniedException("Ingestion record belongs to another tenant");
+        Map<String,Object> trustedPayload=new java.util.LinkedHashMap<>(record.payload());
+        // Stamp ownership from the persisted connector row, never from request options.
+        trustedPayload.put("tenant_id",tenantId.toString());
+        return new Envelope(record.sourceKey(),trustedPayload);
+    }
+
+    private static void requireTenantRecord(UUID tenantId,Envelope record) {
+        Object owner=record==null || record.payload()==null?null:record.payload().get("tenant_id");
+        if(tenantId==null || owner==null || !tenantId.toString().equals(owner.toString()))
+            throw new org.springframework.security.access.AccessDeniedException("Ingestion record is missing tenant_id or belongs to another tenant");
     }
 
     public record Envelope(String sourceKey, Map<String,Object> payload) {}

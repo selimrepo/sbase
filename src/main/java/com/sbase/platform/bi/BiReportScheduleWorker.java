@@ -71,36 +71,36 @@ public class BiReportScheduleWorker {
 
     void execute(UUID scheduleId) {
         Schedule schedule = db.query("""
-            SELECT s.id,s.report_id,s.owner_subject,s.cron_expression,s.timezone,r.definition_json
+            SELECT s.id,s.tenant_id,s.report_id,s.owner_subject,s.cron_expression,s.timezone,r.definition_json
               FROM bi_report_schedules s
-              JOIN bi_reports r ON r.id=s.report_id AND r.owner_subject=s.owner_subject
+              JOIN bi_reports r ON r.id=s.report_id AND r.tenant_id=s.tenant_id AND r.owner_subject=s.owner_subject
              WHERE s.id=? AND s.lease_owner=?
-            """, rs -> rs.next() ? new Schedule(rs.getObject("id", UUID.class),
+            """, rs -> rs.next() ? new Schedule(rs.getObject("id", UUID.class), rs.getObject("tenant_id", UUID.class),
                 rs.getObject("report_id", UUID.class), rs.getString("owner_subject"),
                 rs.getString("cron_expression"), rs.getString("timezone"),
                 rs.getString("definition_json")) : null, scheduleId, node);
         if (schedule == null) return;
         UUID runId = UUID.randomUUID();
-        db.update("INSERT INTO bi_report_schedule_runs(id,schedule_id,status,started_at) VALUES(?,?,'RUNNING',now())", runId, scheduleId);
+        db.update("INSERT INTO bi_report_schedule_runs(id,schedule_id,tenant_id,status,started_at) VALUES(?,?,?,'RUNNING',now())", runId, scheduleId, schedule.tenantId());
         try {
-            List<Map<String,Object>> rows = runQuery(schedule.definitionJson());
+            List<Map<String,Object>> rows = runQuery(schedule.tenantId(), schedule.definitionJson());
             String result = mapper.writeValueAsString(Map.of("rows", rows, "rowCount", rows.size()));
             db.update("""
                 UPDATE bi_report_schedule_runs SET status='SUCCEEDED',row_count=?,result_json=?,finished_at=now()
-                 WHERE id=?
-                """, rows.size(), result, runId);
+                 WHERE id=? AND tenant_id=?
+                """, rows.size(), result, runId, schedule.tenantId());
             advance(schedule, true, null);
         } catch (Exception ex) {
             String message = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
             db.update("""
                 UPDATE bi_report_schedule_runs SET status='FAILED',error_message=?,finished_at=now()
-                 WHERE id=?
-                """, message, runId);
+                 WHERE id=? AND tenant_id=?
+                """, message, runId, schedule.tenantId());
             fail(scheduleId, message);
         }
     }
 
-    private List<Map<String,Object>> runQuery(String definitionJson) throws Exception {
+    private List<Map<String,Object>> runQuery(UUID tenantId, String definitionJson) throws Exception {
         JsonNode d = mapper.readTree(definitionJson);
         String table = identifier(d.path("table").asText());
         JsonNode dimensions = d.path("dimensions");
@@ -129,7 +129,7 @@ public class BiReportScheduleWorker {
         int limit = d.path("limit").asInt(1000);
         if (limit<1 || limit>10000) throw new IllegalArgumentException("Report limit must be 1..10000");
         sql.append(" LIMIT ").append(limit);
-        return bi.query(sql.toString());
+        return bi.query(tenantId, sql.toString());
     }
 
     private String filter(JsonNode f) {
@@ -180,9 +180,9 @@ public class BiReportScheduleWorker {
 
     private void fail(UUID id, String message) {
         Schedule schedule = db.query("""
-            SELECT id,report_id,owner_subject,cron_expression,timezone,'' AS definition_json
+            SELECT id,tenant_id,report_id,owner_subject,cron_expression,timezone,'' AS definition_json
               FROM bi_report_schedules WHERE id=? AND lease_owner=?
-            """, rs -> rs.next()?new Schedule(rs.getObject("id",UUID.class),rs.getObject("report_id",UUID.class),
+            """, rs -> rs.next()?new Schedule(rs.getObject("id",UUID.class),rs.getObject("tenant_id",UUID.class),rs.getObject("report_id",UUID.class),
                 rs.getString("owner_subject"),rs.getString("cron_expression"),rs.getString("timezone"),""):null,id,node);
         if (schedule == null) return;
         advance(schedule, false, message==null?"Unknown BI schedule failure":message);
@@ -199,12 +199,12 @@ public class BiReportScheduleWorker {
                        failure_count=CASE WHEN ? THEN 0 ELSE failure_count+1 END,
                        enabled=CASE WHEN ? THEN enabled ELSE failure_count+1<5 END,
                        lease_owner=NULL,lease_until=NULL,updated_at=now()
-                 WHERE id=? AND lease_owner=?
-                """,next.toInstant(),success,success,schedule.id(),node);
+                 WHERE id=? AND tenant_id=? AND lease_owner=?
+                """,next.toInstant(),success,success,schedule.id(),schedule.tenantId(),node);
         } catch (Exception ex) {
-            db.update("UPDATE bi_report_schedules SET enabled=false,lease_owner=NULL,lease_until=NULL,updated_at=now() WHERE id=? AND lease_owner=?",schedule.id(),node);
+            db.update("UPDATE bi_report_schedules SET enabled=false,lease_owner=NULL,lease_until=NULL,updated_at=now() WHERE id=? AND tenant_id=? AND lease_owner=?",schedule.id(),schedule.tenantId(),node);
         }
     }
 
-    private record Schedule(UUID id,UUID reportId,String owner,String cronExpression,String timezone,String definitionJson) {}
+    private record Schedule(UUID id,UUID tenantId,UUID reportId,String owner,String cronExpression,String timezone,String definitionJson) {}
 }

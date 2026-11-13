@@ -206,7 +206,7 @@ jobs:
           SBASE_DORIS_TEST_JDBC_URL: jdbc:mysql://127.0.0.1:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
           SBASE_DORIS_TEST_USERNAME: root
           SBASE_DORIS_TEST_PASSWORD: ""
-        run: gradle --no-daemon test --tests '*SparkDorisResilienceTest'
+        run: gradle --no-daemon test --tests '*SparkDorisResilienceTest' --tests '*DorisTenantIsolationIntegrationTest'
       - name: Show container status
         if: always()
         run: docker compose --profile app-ha --profile doris-fe-ha ps

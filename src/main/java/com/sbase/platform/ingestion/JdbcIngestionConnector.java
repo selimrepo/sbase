@@ -18,9 +18,9 @@ public class JdbcIngestionConnector implements IngestionConnector {
     public ConnectorResult ingest(ConnectorRequest request) {
         Map<String,String> o = request.options();
         String query = required(o,"query");
-        String target = safeIdentifier(required(o,"targetTable"));
-        if (!query.stripLeading().toLowerCase(Locale.ROOT).startsWith("select"))
-            throw new IllegalArgumentException("Only SELECT source queries are allowed");
+        String target = validateTargetTable(required(o,"targetTable"));
+        if (!query.stripLeading().toLowerCase(Locale.ROOT).startsWith("select") || query.contains(";") || query.contains("--") || query.contains("/*"))
+            throw new IllegalArgumentException("Only one bounded SELECT source query is allowed");
 
         String mode = o.getOrDefault("loadMode","full").toLowerCase(Locale.ROOT);
         if (!Set.of("full","incremental").contains(mode)) throw new IllegalArgumentException("loadMode must be full or incremental");
@@ -33,27 +33,37 @@ public class JdbcIngestionConnector implements IngestionConnector {
         if (!incremental && query.contains("{watermark}")) throw new IllegalArgumentException("{watermark} is only valid in incremental mode");
 
         UUID connectorId = UUID.fromString(required(o,"connectorId"));
+        UUID tenantId = UUID.fromString(required(o,"tenantId"));
         String checkpointKey = "jdbc:" + target + ":" + watermarkColumn;
         String watermark = incremental ? checkpoints.checkpoint(connectorId,checkpointKey) : null;
         if (incremental && (watermark == null || watermark.isBlank())) watermark = required(o,"initialWatermark");
-        String executableQuery = incremental ? query.replace("{watermark}","?") : query;
+        String sourceQuery = incremental ? query.replace("{watermark}","?") : query;
+        // Apply tenant filtering in the source database, then validate every returned row again.
+        String executableQuery = "SELECT * FROM ("+sourceQuery+") AS sbase_tenant_source WHERE tenant_id = ?";
         long read=0,written=0;
         Object maxWatermark=null;
 
         try (Connection source = DriverManager.getConnection(required(o,"jdbcUrl"),o.getOrDefault("username",""),o.getOrDefault("password",""));
              PreparedStatement select = source.prepareStatement(executableQuery)) {
-            if (incremental) select.setObject(1,parseWatermark(watermark,o.getOrDefault("watermarkType","string")));
+            if (incremental) {
+                select.setObject(1,parseWatermark(watermark,o.getOrDefault("watermarkType","string")));
+                select.setObject(2,tenantId.toString());
+            } else {
+                select.setObject(1,tenantId.toString());
+            }
             try (ResultSet rs=select.executeQuery()) {
                 ResultSetMetaData md=rs.getMetaData(); int n=md.getColumnCount();
+                int tenantIndex=findColumn(md,"tenant_id");
                 int watermarkIndex=incremental?findColumn(md,watermarkColumn):-1;
                 StringJoiner columns=new StringJoiner(",");
                 for(int i=1;i<=n;i++) columns.add(safeIdentifier(md.getColumnLabel(i)));
                 String insert="INSERT INTO "+target+" ("+columns+") VALUES ("+String.join(",",Collections.nCopies(n,"?"))+")";
-                try(Connection dest=DriverManager.getConnection(required(o,"targetJdbcUrl"),o.getOrDefault("targetUsername",""),o.getOrDefault("targetPassword",""));
+                try(Connection dest=openTargetConnection(o);
                     PreparedStatement ps=dest.prepareStatement(insert)) {
                     dest.setAutoCommit(false);
                     try {
                         while(rs.next()) {
+                            requireTenantRow(tenantId,rs.getObject(tenantIndex));
                             for(int i=1;i<=n;i++) ps.setObject(i,rs.getObject(i));
                             ps.addBatch(); read++;
                             if(incremental) {
@@ -78,6 +88,18 @@ public class JdbcIngestionConnector implements IngestionConnector {
         return new ConnectorResult(read,written,incremental
             ? "Incremental JDBC load completed; watermark="+(maxWatermark==null?watermark:maxWatermark)
             : "Full JDBC load completed");
+    }
+
+    protected String validateTargetTable(String table) { return safeIdentifier(table); }
+
+    protected Connection openTargetConnection(Map<String,String> options) throws SQLException {
+        return DriverManager.getConnection(required(options,"targetJdbcUrl"),
+            options.getOrDefault("targetUsername",""),options.getOrDefault("targetPassword",""));
+    }
+
+    static void requireTenantRow(UUID tenantId,Object rowTenant) throws SQLException {
+        if(tenantId==null || rowTenant==null || !tenantId.toString().equals(rowTenant.toString()))
+            throw new SQLException("JDBC ingestion source returned a row outside the connector tenant");
     }
 
     private static int findColumn(ResultSetMetaData md,String name)throws SQLException {
