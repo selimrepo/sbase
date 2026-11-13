@@ -29,6 +29,7 @@ class SparkDorisResilienceTest {
         if (!url.toLowerCase(java.util.Locale.ROOT).contains("rewritebatchedstatements=")) {
             url += (url.contains("?") ? "&" : "?") + "rewriteBatchedStatements=true";
         }
+        final String testUrl = url;
         String user = System.getenv().getOrDefault("SBASE_DORIS_TEST_USERNAME", "root");
         String password = System.getenv().getOrDefault("SBASE_DORIS_TEST_PASSWORD", "");
         String table = "sbase_it_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
@@ -62,7 +63,7 @@ class SparkDorisResilienceTest {
                     .mode("append").save();
             }
             long sqlCount = withBackendQueryRetry("Doris SQL verification scan", () -> {
-                try (var connection = DriverManager.getConnection(url, user, password);
+                try (var connection = DriverManager.getConnection(testUrl, user, password);
                      var statement = connection.createStatement();
                      var result = statement.executeQuery("SELECT COUNT(*) FROM " + table)) {
                     result.next();
@@ -73,7 +74,7 @@ class SparkDorisResilienceTest {
                 "Repeating a Spark JDBC append to a Doris UNIQUE KEY table must not duplicate entities");
 
             long sparkCount = withBackendQueryRetry("Spark JDBC verification scan", () ->
-                spark.read().format("jdbc").option("url", url).option("dbtable", table)
+                spark.read().format("jdbc").option("url", testUrl).option("dbtable", table)
                     .option("user", user).option("password", password)
                     .option("driver", "com.mysql.cj.jdbc.Driver").load().count());
             assertEquals(10_000L, sparkCount);
