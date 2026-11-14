@@ -17,11 +17,11 @@ import java.util.*;
 @RequestMapping("/api/platform")
 public class PlatformMetadataController {
     private final JdbcTemplate db;
-    private final com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics;
+    private final com.sbase.platform.bi.DorisBiAnalyticsService postgresAnalytics;
     private final com.sbase.platform.security.PermissionService permissions;
     private final com.sbase.platform.tenant.TenantContext tenants;
     @org.springframework.beans.factory.annotation.Autowired
-    private com.sbase.platform.bi.DorisTenantGovernanceAuditService dorisGovernanceAudit;
+    private com.sbase.platform.bi.DorisTenantGovernanceAuditService postgresGovernanceAudit;
 
     public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db,
             com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics,
@@ -173,7 +173,7 @@ public class PlatformMetadataController {
             metadata.put(table,db.queryForObject("SELECT COUNT(*) FROM "+table+" WHERE tenant_id=?",Long.class,tenant));
         Map<String,Object> result=new LinkedHashMap<>();
         result.put("metadata",metadata);
-        // Doris table inventory and audit activity are cluster-wide operational data;
+        // PostgreSQL table inventory and audit activity are cluster-wide operational data;
         // only tenant platform administrators may inspect this legacy endpoint.
         result.put("analytics",dorisAnalytics.summary());
         return result;
