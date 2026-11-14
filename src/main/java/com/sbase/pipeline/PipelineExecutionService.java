@@ -2,7 +2,7 @@ package com.sbase.pipeline;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sbase.doris.DorisClient;
+import com.sbase.doris.PostgreSQLClient;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.expressions.Window;
@@ -149,7 +149,7 @@ public class PipelineExecutionService {
                     outputs.put(id, result);
                     current = result;
                     schema = mapper.writeValueAsString(Arrays.asList(result.columns()));
-                    if (!"doris_write".equals(type)) {
+                    if (!"postgres_write".equals(type)) {
                         stepRecords = result.count();
                         processed = stepRecords;
                         // Bounded sample only: never collect the complete Spark dataset.
@@ -234,7 +234,7 @@ public class PipelineExecutionService {
 
     private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs, UUID runId, String idempotencyKey) {
         return switch (type) {
-            case "doris_read" -> readDoris(step.path("table").asText(), tenantForRun(runId));
+            case "postgres_read" -> readDoris(step.path("table").asText(), tenantForRun(runId));
             case "filter" -> filter(input, step);
             case "select" -> select(input, step);
             case "with_column" -> withColumn(input, step);
@@ -298,7 +298,7 @@ public class PipelineExecutionService {
         Dataset<Row> source = sparkProvider.getObject().read().format("jdbc")
                 .option("url", doris.jdbcUrl()).option("dbtable", tenantSql)
                 .option("user", doris.username()).option("password", doris.password())
-                .option("driver", "com.mysql.cj.jdbc.Driver").load();
+                .option("driver", "org.postgresql.Driver").load();
         if (!Arrays.asList(source.columns()).contains("tenant_id")) {
             throw new org.springframework.security.access.AccessDeniedException(
                     "Doris source table must expose tenant_id for tenant-isolated pipeline reads");
