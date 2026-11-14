@@ -1,7 +1,7 @@
 # Tenant boundary enforcement and connector contracts
 
 ## PostgreSQL
-All tenant-data tables are fail-closed. A table must be in `SBASE_SBASE_ANALYTICS_ALLOWED_TABLES`,
+All tenant-data tables are fail-closed. A table must be in `SBASE_ANALYTICS_ALLOWED_TABLES`,
 registered and approved in `postgres_tenant_table_policies`, and physically expose a
 `tenant_id` column. Legacy SQL and governed BI both call the same policy service;
 the authenticated tenant is injected by the query boundary, not accepted from SQL.
