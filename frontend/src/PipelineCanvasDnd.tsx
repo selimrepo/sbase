@@ -3,23 +3,23 @@ import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query'
 import {Activity,AlertTriangle,CheckCircle2,Clock3,Database,GitBranch,GripVertical,Play,Plus,RefreshCw,Save,Workflow,X} from 'lucide-react'
 import {get,post,date,type Pipeline} from './api'
 
-type Kind='doris_read'|'filter'|'select'|'with_column'|'aggregate'|'join'|'union'|'doris_write'|'feature_store_write'
+type Kind='postgres_read'|'filter'|'select'|'with_column'|'aggregate'|'join'|'union'|'postgres_write'|'feature_store_write'
 type Step=Record<string,any>&{id:string;type:Kind;dependsOn:string[];position:{x:number;y:number}}
 type Run=Record<string,any>&{id:string;status:string}
 const kinds:{type:Kind;label:string;group:string}[]=[
- {type:'doris_read',label:'Doris source',group:'Sources'},{type:'filter',label:'Filter rows',group:'Transform'},{type:'select',label:'Select columns',group:'Transform'},{type:'with_column',label:'Derive column',group:'Transform'},{type:'aggregate',label:'Aggregate',group:'Transform'},{type:'join',label:'Join datasets',group:'Combine'},{type:'union',label:'Union datasets',group:'Combine'},{type:'doris_write',label:'Doris sink',group:'Destinations'},{type:'feature_store_write',label:'Feature store',group:'Destinations'}]
-const initial:Step[]=[{id:'source',type:'doris_read',table:'analytics.events',dependsOn:[],position:{x:40,y:75}},{id:'clean',type:'filter',column:'event_id',operator:'not_null',dependsOn:['source'],position:{x:315,y:75}},{id:'publish',type:'doris_write',table:'analytics.events_clean',mode:'append',idempotencyColumns:['tenant_id','event_id'],dependsOn:['clean'],position:{x:590,y:75}}]
+ {type:'postgres_read',label:'PostgreSQL source',group:'Sources'},{type:'filter',label:'Filter rows',group:'Transform'},{type:'select',label:'Select columns',group:'Transform'},{type:'with_column',label:'Derive column',group:'Transform'},{type:'aggregate',label:'Aggregate',group:'Transform'},{type:'join',label:'Join datasets',group:'Combine'},{type:'union',label:'Union datasets',group:'Combine'},{type:'postgres_write',label:'PostgreSQL sink',group:'Destinations'},{type:'feature_store_write',label:'Feature store',group:'Destinations'}]
+const initial:Step[]=[{id:'source',type:'postgres_read',table:'analytics.events',dependsOn:[],position:{x:40,y:75}},{id:'clean',type:'filter',column:'event_id',operator:'not_null',dependsOn:['source'],position:{x:315,y:75}},{id:'publish',type:'postgres_write',table:'analytics.events_clean',mode:'append',idempotencyColumns:['tenant_id','event_id'],dependsOn:['clean'],position:{x:590,y:75}}]
 const make=(type:Kind,id:string,dependsOn:string[],position:{x:number;y:number}):Step=>{
  const base={id,type,dependsOn,position}
  switch(type){
- case'doris_read':return {...base,table:'analytics.source_table'}
+ case'postgres_read':return {...base,table:'analytics.source_table'}
  case'filter':return {...base,column:'status',operator:'eq',value:'ACTIVE'}
  case'select':return {...base,columns:['id','event_time']}
  case'with_column':return {...base,column:'normalized_name',operation:'lower',sourceColumn:'name'}
  case'aggregate':return {...base,groupBy:['category'],metrics:[{column:'amount',function:'sum',alias:'total_amount'}]}
  case'join':return {...base,joinType:'inner',leftKey:'id',rightKey:'id'}
  case'union':return {...base,mode:'all'}
- case'doris_write':return {...base,table:'analytics.output_table',mode:'append',idempotencyColumns:['tenant_id','id']}
+ case'postgres_write':return {...base,table:'analytics.output_table',mode:'append',idempotencyColumns:['tenant_id','id']}
  case'feature_store_write':return {...base,featureSet:'customer_features',entityKeyColumn:'customer_id',eventTimeColumn:'event_time',featureVersion:1}
  }}
 const title=(t:string)=>kinds.find(x=>x.type===t)?.label||t
@@ -33,7 +33,7 @@ function check(steps:Step[]){
  const errors:string[]=[],byId=new Map(steps.map(s=>[s.id,s])),ids=new Set<string>()
  for(const s of steps){if(!s.id.trim())errors.push('Every node needs an identifier.');if(ids.has(s.id))errors.push('Duplicate node: '+s.id);ids.add(s.id)}
  for(const s of steps){for(const d of s.dependsOn)if(!byId.has(d))errors.push(s.id+' has missing dependency '+d)
- const n=s.dependsOn.length;if(s.type==='doris_read'&&n!==0)errors.push(s.id+': source needs no dependencies');if(['join','union'].includes(s.type)&&n!==2)errors.push(s.id+': '+s.type+' needs exactly two dependencies');if(['filter','select','with_column','aggregate','doris_write','feature_store_write'].includes(s.type)&&n!==1)errors.push(s.id+': '+s.type+' needs exactly one dependency');if(s.type==='doris_write'&&!(s.idempotencyColumns||[]).length)errors.push(s.id+': idempotency columns are required');if(s.type==='doris_write'&&!(s.idempotencyColumns||[]).some((v:string)=>v.toLowerCase()==='tenant_id'))errors.push(s.id+': idempotency columns must include tenant_id')}
+ const n=s.dependsOn.length;if(s.type==='postgres_read'&&n!==0)errors.push(s.id+': source needs no dependencies');if(['join','union'].includes(s.type)&&n!==2)errors.push(s.id+': '+s.type+' needs exactly two dependencies');if(['filter','select','with_column','aggregate','postgres_write','feature_store_write'].includes(s.type)&&n!==1)errors.push(s.id+': '+s.type+' needs exactly one dependency');if(s.type==='postgres_write'&&!(s.idempotencyColumns||[]).length)errors.push(s.id+': idempotency columns are required');if(s.type==='postgres_write'&&!(s.idempotencyColumns||[]).some((v:string)=>v.toLowerCase()==='tenant_id'))errors.push(s.id+': idempotency columns must include tenant_id')}
  const visiting=new Set<string>(),visited=new Set<string>();const visit=(id:string)=>{if(visiting.has(id)){errors.push('Dependency cycle at '+id);return}if(visited.has(id))return;visiting.add(id);for(const d of byId.get(id)?.dependsOn||[])visit(d);visiting.delete(id);visited.add(id)};for(const s of steps)visit(s.id)
  if(!steps.length)errors.push('Add at least one node.');return [...new Set(errors)]
 }
@@ -43,14 +43,14 @@ function NodeFields({step,change}:{step:Step;change:(s:Step)=>void}){
  const set=(k:string,v:any)=>change({...step,[k]:v}),csv=(k:string)=>(step[k]||[]).join(',')
  return <>
  <Field label="Node ID"><input className="input" value={step.id} readOnly/></Field>
- {['doris_read','doris_write'].includes(step.type)&&<Field label="Doris table"><input className="input" value={step.table||''} onChange={e=>set('table',e.target.value)}/></Field>}
+ {['postgres_read','postgres_write'].includes(step.type)&&<Field label="PostgreSQL table"><input className="input" value={step.table||''} onChange={e=>set('table',e.target.value)}/></Field>}
  {step.type==='filter'&&<><Field label="Column"><input className="input" value={step.column||''} onChange={e=>set('column',e.target.value)}/></Field><Field label="Operator"><select className="input" value={step.operator||'eq'} onChange={e=>set('operator',e.target.value)}>{['eq','ne','gt','gte','lt','lte','contains','is_null','not_null','in'].map(v=><option key={v}>{v}</option>)}</select></Field>{!['is_null','not_null'].includes(step.operator)&&<Field label={step.operator==='in'?'Values (JSON array)':'Value'}>{step.operator==='in'?<textarea className="input" rows={3} value={JSON.stringify(step.value||[])} onChange={e=>{try{set('value',JSON.parse(e.target.value))}catch{}}}/>:<input className="input" value={step.value??''} onChange={e=>set('value',e.target.value)}/>}</Field>}</>}
  {step.type==='select'&&<Field label="Columns (comma separated)"><input className="input" value={csv('columns')} onChange={e=>set('columns',e.target.value.split(',').map((v:string)=>v.trim()).filter(Boolean))}/></Field>}
  {step.type==='with_column'&&<><Field label="Output column"><input className="input" value={step.column||''} onChange={e=>set('column',e.target.value)}/></Field><Field label="Supported operation"><select className="input" value={step.operation||'lower'} onChange={e=>set('operation',e.target.value)}>{['cast_double','lower','upper','trim','abs','log1p'].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Source column"><input className="input" value={step.sourceColumn||''} onChange={e=>set('sourceColumn',e.target.value)}/></Field></>}
  {step.type==='aggregate'&&<><Field label="Group-by columns"><input className="input" value={csv('groupBy')} onChange={e=>set('groupBy',e.target.value.split(',').map((v:string)=>v.trim()).filter(Boolean))}/></Field><Field label="Metrics JSON"><textarea className="input" rows={4} value={JSON.stringify(step.metrics||[],null,2)} onChange={e=>{try{set('metrics',JSON.parse(e.target.value))}catch{}}}/></Field></>}
  {step.type==='join'&&<><Field label="Join type"><select className="input" value={step.joinType||'inner'} onChange={e=>set('joinType',e.target.value)}>{['inner','left','right','full'].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Left key"><input className="input" value={step.leftKey||''} onChange={e=>set('leftKey',e.target.value)}/></Field><Field label="Right key"><input className="input" value={step.rightKey||''} onChange={e=>set('rightKey',e.target.value)}/></Field></>}
  {step.type==='union'&&<Field label="Union mode"><select className="input" value={step.mode||'all'} onChange={e=>set('mode',e.target.value)}><option value="all">Union all</option><option value="distinct">Union distinct</option></select></Field>}
- {step.type==='doris_write'&&<><Field label="Idempotency columns"><input className="input" value={csv('idempotencyColumns')} onChange={e=>set('idempotencyColumns',e.target.value.split(',').map((v:string)=>v.trim()).filter(Boolean))}/></Field><small className="hint">Append-only to Doris UNIQUE KEY tables.</small></>}
+ {step.type==='postgres_write'&&<><Field label="Idempotency columns"><input className="input" value={csv('idempotencyColumns')} onChange={e=>set('idempotencyColumns',e.target.value.split(',').map((v:string)=>v.trim()).filter(Boolean))}/></Field><small className="hint">Append-only to PostgreSQL UNIQUE KEY tables.</small></>}
  {step.type==='feature_store_write'&&<><Field label="Feature set"><input className="input" value={step.featureSet||''} onChange={e=>set('featureSet',e.target.value)}/></Field><Field label="Entity key column"><input className="input" value={step.entityKeyColumn||''} onChange={e=>set('entityKeyColumn',e.target.value)}/></Field><Field label="Event-time column (optional)"><input className="input" value={step.eventTimeColumn||''} onChange={e=>set('eventTimeColumn',e.target.value)}/></Field><Field label="Feature version"><input className="input" type="number" min="1" value={step.featureVersion||1} onChange={e=>set('featureVersion',Number(e.target.value))}/></Field></>}
  </>}
 export default function PipelineCanvasDnd(){
