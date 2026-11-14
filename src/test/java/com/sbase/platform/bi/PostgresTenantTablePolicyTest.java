@@ -17,8 +17,8 @@ class PostgresTenantTablePolicyTest {
            AND invalid_tenant_rows=0)
         """;
     private final JdbcTemplate postgres = mock(JdbcTemplate.class);
-    private final DorisTenantTablePolicy policy =
-        new DorisTenantTablePolicy(postgres, "analytics.orders,analytics.events", "analytics");
+    private final PostgresTenantTablePolicy policy =
+        new PostgresTenantTablePolicy(postgres, "analytics.orders,analytics.events", "analytics");
 
     @Test void permitsOnlyRegisteredAllowListedPhysicalTenantTables() {
         when(postgres.query(contains("postgres_tenant_table_policies"), any(ResultSetExtractor.class), eq("analytics"), eq("orders"))).thenReturn(true);
