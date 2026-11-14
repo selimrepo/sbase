@@ -14,7 +14,7 @@ public class DorisBiQueryService {
  private static final Pattern LIMIT=Pattern.compile("(?is)\\blimit\\s+(\\d+)\\s*$");
  private static final Pattern UNSUPPORTED=Pattern.compile("(?is)\\b(union|join|with|into|outfile|load_file|sleep|benchmark|insert|update|delete|drop|alter|create|grant|revoke|set|use|call|offset)\\b");
  private static final Pattern CLAUSE=Pattern.compile("(?is)\\s+(group\\s+by|order\\s+by|limit)\\b");
- public PostgreSQLBiQueryService(@Qualifier("dorisJdbcTemplate") JdbcTemplate postgres,PostgreSQLTenantTablePolicy tablePolicy){
+ public DorisBiQueryService(@Qualifier("dorisJdbcTemplate") JdbcTemplate postgres,DorisTenantTablePolicy tablePolicy){
   this.postgres=postgres;this.tablePolicy=tablePolicy;
  }
 
@@ -42,8 +42,8 @@ public class DorisBiQueryService {
   Matcher clause=CLAUSE.matcher(normalized);String suffix="";
   if(clause.find()){suffix=normalized.substring(clause.start());normalized=normalized.substring(0,clause.start());}
   Matcher where=Pattern.compile("(?is)\\bwhere\\b").matcher(normalized);
-  if(where.find())normalized=normalized.substring(0,where.start())+"WHERE ("+normalized.substring(where.end()).strip()+") AND tenant_id = ?";
-  else normalized += " WHERE tenant_id = ?";
+  if(where.find())normalized=normalized.substring(0,where.start())+"WHERE ("+normalized.substring(where.end()).strip()+") AND tenant_id::text = ?";
+  else normalized += " WHERE tenant_id::text = ?";
   return postgres.queryForList(normalized+suffix,tenantId.toString());
  }
  @Deprecated public List<Map<String,Object>> query(String sql){
