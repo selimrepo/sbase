@@ -46,7 +46,6 @@ dependencies {
     implementation "org.apache.mahout:mahout-math:${mahoutVersion}"
 
     runtimeOnly 'org.postgresql:postgresql'
-    runtimeOnly 'com.mysql:mysql-connector-j'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.testcontainers:junit-jupiter'
