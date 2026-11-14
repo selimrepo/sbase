@@ -9,7 +9,7 @@ import java.util.Map;
 
 /** Platform-admin-only inventory and verification endpoint for the physical Doris catalog. */
 @RestController
-@RequestMapping("/api/platform/doris/tenant-governance")
+@RequestMapping("/api/platform/postgres/tenant-governance")
 public class DorisTenantGovernanceController {
     private final DorisTenantGovernanceAuditService audit;
     private final PermissionService permissions;
