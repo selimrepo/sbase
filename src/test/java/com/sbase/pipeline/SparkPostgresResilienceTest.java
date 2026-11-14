@@ -37,7 +37,7 @@ class SparkPostgresResilienceTest {
         dataSource.setURL(url);
         dataSource.setUser(user);
         dataSource.setPassword(password);
-        DorisClient client = new DorisClient(new PostgresProperties(url, user, password, "org.postgresql.Driver"), dataSource);
+        DorisClient client = new DorisClient(new PostgresProperties(url, user, password, "org.postgresql.Driver", "public", ""), dataSource);
 
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE public.\"" + table + "\" (tenant_id UUID NOT NULL, id BIGINT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id,id))");
