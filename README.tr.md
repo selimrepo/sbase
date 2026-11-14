@@ -46,7 +46,7 @@ Pipeline tanımları sürümlenmiş JSON DAG yapısındadır. Mevcut yürütme m
 | `aggregate` | Gruplama ve toplulaştırma yapar |
 | `join` | İki üst akış veri kümesini birleştirir |
 | `union` | İki üst akış veri kümesini bir araya getirir |
-| `postgres_write` | Sonuçları PostgreSQL UNIQUE constraint or index tablosuna ekler |
+| `postgres_write` | Sonuçları UNIQUE kısıtı veya indeksi bulunan PostgreSQL tablosuna ekler |
 | `feature_store_write` | Özellikleri çevrimiçi özellik deposuna aktarır |
 
 Join işlemi tam olarak iki bağımlılık kabul eder; inner, left, right ve full join türleri desteklenir. Union iki girdiyi kabul eder ve şema uyumlu union-all veya union-distinct işlemi yapar. Daha fazla girdiyi birleştirmek için ardışık birleştirme adımları kullanılabilir.
@@ -68,7 +68,7 @@ Bu mekanizmalar hata sonrası toparlanmayı güçlendirir; ancak keyfî harici s
 
 #### Güvenli PostgreSQL yazma işlemleri
 
-PostgreSQL yazımları ekleme (append) odaklıdır. `postgres_write` adımı `idempotencyColumns` tanımlamalıdır. Hedef tablo, bu sütunları içeren bir PostgreSQL UNIQUE constraint or index tablosu olmalıdır. SBase hedef anahtar tanımını doğrular ve JDBC ile ekleme yapmadan önce her Spark batch'inde yinelenen kayıtları ayıklar. Yıkıcı `overwrite` yazımları reddedilir.
+PostgreSQL yazımları ekleme (append) odaklıdır. `postgres_write` adımı `idempotencyColumns` tanımlamalıdır. Hedef tablo, bu sütunları içeren bir UNIQUE kısıtı veya indeksi bulunan PostgreSQL tablosu olmalıdır. SBase her Spark batch'ini geçici bir PostgreSQL staging tablosuna yükler ve tekrar çalıştırmalarda `ON CONFLICT DO NOTHING` ile yinelenen kayıtları engeller. Yıkıcı `overwrite` yazımları reddedilir.
 
 İş anahtarları dikkatle seçilmelidir. Anahtar bazlı yinelenen kayıt ayıklama, PostgreSQL'in replikasyon, transaction veya depolama garantilerinin yerine geçmez. Kaynak ve hedef tablolar `SBASE_ANALYTICS_ALLOWED_TABLES` listesinde bulunmalıdır.
 
