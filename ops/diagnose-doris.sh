@@ -75,8 +75,8 @@ else
     docker run --rm --network "$network" -e MYSQL_PWD="${DORIS_ROOT_PASSWORD:-}" mysql:8.4 \
       mysql --protocol=TCP --connect-timeout=5 -h doris-fe -P 9030 -uroot "$@"
   }
-  run mysql -e 'SHOW FRONTENDS\\G'
-  run mysql -e 'SHOW BACKENDS\\G'
+  run mysql -e 'SHOW FRONTENDS\G'
+  run mysql -e 'SHOW BACKENDS\G'
 
   probe="sbase_diag_$(date +%s)_$$"
   cleanup_probe() {
@@ -102,4 +102,4 @@ if [ "$failures" -eq 0 ]; then
 else
   echo "$failures diagnostic check(s) need attention. Preserve Doris volumes while investigating; this script does not delete or reset data."
 fi
-exit 0
+exit "$((failures > 0 ? 1 : 0))"
