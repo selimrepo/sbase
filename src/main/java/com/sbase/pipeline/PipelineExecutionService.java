@@ -2,7 +2,7 @@ package com.sbase.pipeline;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sbase.postgres.DorisClient;
+import com.sbase.postgres.PostgresClient;
 import com.sbase.postgres.PostgresSparkWriter;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
@@ -34,7 +34,7 @@ public class PipelineExecutionService {
     private final PipelineDefinitionValidator validator;
     private final ObjectMapper mapper;
     private final ObjectProvider<SparkSession> sparkProvider;
-    private final DorisClient doris;
+    private final PostgresClient postgres;
     private final Executor executor;
     private final Set<String> allowedTables;
     private final int configuredMaxAttempts;
@@ -47,14 +47,14 @@ public class PipelineExecutionService {
 
     public PipelineExecutionService(@Qualifier("jdbcTemplate") JdbcTemplate jdbc, PipelineRepository pipelines, PipelineRunRepository runs,
             PipelineDefinitionValidator validator, ObjectMapper mapper, ObjectProvider<SparkSession> sparkProvider,
-            DorisClient doris, @Qualifier("miningExecutor") Executor executor,
+            PostgresClient postgres, @Qualifier("miningExecutor") Executor executor,
             @Value("${sbase.postgres.allowed-tables:}") String allowedTables,
             @Value("${sbase.pipeline.retry.max-attempts:4}") int configuredMaxAttempts,
             @Value("${spring.datasource.url}") String postgresUrl,
             @Value("${spring.datasource.username}") String postgresUser,
             @Value("${spring.datasource.password}") String postgresPassword) {
         this.jdbc = jdbc; this.pipelines = pipelines; this.runs = runs; this.validator = validator; this.mapper = mapper;
-        this.sparkProvider = sparkProvider; this.doris = doris; this.executor = executor;
+        this.sparkProvider = sparkProvider; this.postgres = postgres; this.executor = executor;
         this.configuredMaxAttempts = Math.max(1, Math.min(20, configuredMaxAttempts));
         this.postgresUrl = postgresUrl; this.postgresUser = postgresUser; this.postgresPassword = postgresPassword;
         this.allowedTables = new HashSet<>();
@@ -150,7 +150,7 @@ public class PipelineExecutionService {
                     outputs.put(id, result);
                     current = result;
                     schema = mapper.writeValueAsString(Arrays.asList(result.columns()));
-                    if (!Set.of("doris_write", "postgres_write").contains(type)) {
+                    if (!Set.of("postgres_write", "postgres_write").contains(type)) {
                         stepRecords = result.count();
                         processed = stepRecords;
                         // Bounded sample only: never collect the complete Spark dataset.
@@ -235,7 +235,7 @@ public class PipelineExecutionService {
 
     private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs, UUID runId, String idempotencyKey) {
         return switch (type) {
-            case "doris_read", "postgres_read" -> readDoris(step.path("table").asText(), tenantForRun(runId));
+            case "postgres_read", "postgres_read" -> readDoris(step.path("table").asText(), tenantForRun(runId));
             case "filter" -> filter(input, step);
             case "select" -> select(input, step);
             case "with_column" -> withColumn(input, step);
@@ -243,7 +243,7 @@ public class PipelineExecutionService {
             case "join" -> join(inputs, step);
             case "union" -> union(inputs, step);
             case "feature_store_write" -> { requireFeatureWrite(step.path("featureSet").asText(), runId); writeOnlineFeatures(requireInput(input), step, runId); yield input; }
-            case "doris_write", "postgres_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey, tenantForRun(runId)); yield input; }
+            case "postgres_write", "postgres_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey, tenantForRun(runId)); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
         };
     }
@@ -297,8 +297,8 @@ public class PipelineExecutionService {
         // loads the full table would expose every tenant's rows to executor memory.
         String tenantSql=tenantScopedDbtable(governedTable,tenantId);
         Dataset<Row> source = sparkProvider.getObject().read().format("jdbc")
-                .option("url", doris.jdbcUrl()).option("dbtable", tenantSql)
-                .option("user", doris.username()).option("password", doris.password())
+                .option("url", postgres.jdbcUrl()).option("dbtable", tenantSql)
+                .option("user", postgres.username()).option("password", postgres.password())
                 .option("driver", "org.postgresql.Driver").load();
         if (!Arrays.asList(source.columns()).contains("tenant_id")) {
             throw new org.springframework.security.access.AccessDeniedException(
@@ -439,7 +439,7 @@ public class PipelineExecutionService {
         Dataset<Row> stable = df.dropDuplicates(keyColumns);
         // The run-level Spark job group is set by executeClaimed, allowing
         // cancellation to interrupt this external write as well.
-        PostgresSparkWriter.append(stable, doris, governedTable, keyColumns);
+        PostgresSparkWriter.append(stable, postgres, governedTable, keyColumns);
     }
 
 
@@ -578,7 +578,7 @@ public class PipelineExecutionService {
         if(!Boolean.TRUE.equals(registered))
             throw new org.springframework.security.access.AccessDeniedException("PostgreSQL table has no active tenant isolation policy");
         Integer tenantColumns;
-        try(java.sql.Connection connection=doris.openConnection();
+        try(java.sql.Connection connection=postgres.openConnection();
             java.sql.PreparedStatement statement=connection.prepareStatement("""
                 SELECT COUNT(*) FROM information_schema.columns
                  WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND LOWER(COLUMN_NAME)='tenant_id'
@@ -596,7 +596,7 @@ public class PipelineExecutionService {
     }
 
     private String defaultDorisSchema() {
-        String url=doris.jdbcUrl();
+        String url=postgres.jdbcUrl();
         int start=url.indexOf("://");
         int slash=url.indexOf('/',start<0?0:start+3);
         if(slash<0)return "public";
