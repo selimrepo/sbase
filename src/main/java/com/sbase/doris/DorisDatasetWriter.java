@@ -18,7 +18,7 @@ public class DorisDatasetWriter {
         this.doris=doris;this.tablePolicy=tablePolicy;
     }
 
-    /** Tenant ownership is checked before any data is sent to Doris. */
+    /** Tenant ownership is checked before any data is sent to PostgreSQL. */
     public void append(Dataset<Row> dataset,String table,UUID tenantId) {
         if(dataset==null || tenantId==null) throw new IllegalArgumentException("Dataset and tenant ID are required");
         String governedTable=tablePolicy.requireTenantScoped(table);
@@ -36,12 +36,6 @@ public class DorisDatasetWriter {
         throw new IllegalStateException("Unscoped PostgreSQL writes are disabled; supply the authenticated tenant ID");
     }
 
-    private void write(Dataset<Row> dataset,String table) {
-        dataset.write().format("jdbc").option("url",doris.jdbcUrl()).option("dbtable",table)
-            .option("user",doris.username()).option("password",doris.password())
-            .option("driver","org.postgresql.Driver").option("batchsize","5000")
-            .mode("append").save();
-    }
     public void append(Dataset<Row> dataset, String table, UUID tenantId, String[] idempotencyColumns) {
         if (dataset == null || tenantId == null) throw new IllegalArgumentException("Dataset and tenant ID are required");
         String governedTable = tablePolicy.requireTenantScoped(table);
