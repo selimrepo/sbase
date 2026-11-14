@@ -189,6 +189,33 @@ Geliştirme ortamını başlatın:
 docker compose -f docker-compose.yml -f docker-compose.development.yml up --build -d
 ```
 
+
+#### Doris BE için Linux kaynak gereksinimleri
+
+Doris Backend (BE), Docker'ın kullandığı Linux kernel üzerinde yeterli bellek ve eşleme limiti ister. Stack'i başlatmadan önce Docker Engine'in Linux ortamında aşağıdakileri doğrulayın:
+
+```bash
+sysctl vm.max_map_count
+cat /proc/swaps
+```
+
+`vm.max_map_count` en az `2000000` olmalı ve swap kapalı olmalıdır. Kendi Linux sunucunuzda geçici olarak düzeltmek için:
+
+```bash
+sudo sysctl -w vm.max_map_count=2000000
+sudo swapoff -a
+```
+
+Kalıcı `vm.max_map_count` ayarı için `/etc/sysctl.d/99-doris.conf` içine `vm.max_map_count=2000000` yazıp `sudo sysctl --system` çalıştırın. Swap'ın kalıcı kapatılması işletim sisteminizin swap yapılandırmasından yapılmalıdır. Windows/Docker Desktop kullanıyorsanız bu değerler Windows PowerShell'de değil, Docker Engine'in kullandığı WSL2/Linux kernel ortamında doğrulanmalıdır; Docker Desktop bellek sınırının da Compose servislerinin toplam ihtiyacını karşılaması gerekir.
+
+Doris'in yalnızca TCP portunun açık olması backend'in sorgu çalıştırabildiğini kanıtlamaz. `doris-init` FE'ye BE kaydını, kullanılabilir disk kapasitesini ve gerçek tablet oluşturma/sorgu taramasını doğruladıktan sonra SBase başlatılır. Bu adım hata verirse volume'ları silmeyin. Teşhis için:
+
+```bash
+bash ops/diagnose-doris.sh
+```
+
+Komut FE/BE/init loglarını, backend kayıt durumunu ve geçici bir test tablosu üzerinde gerçek BE taramasını kontrol eder; test tablosunu sonunda siler. Kernel/WSL2 veya Docker bellek sınırını değiştirdikten sonra servisleri yeniden başlatın. `docker compose down -v` kullanmayın; Doris ve PostgreSQL verilerini siler.
+
 Arayüz ve sağlık kontrolü:
 
 - Uygulama: [http://localhost:8080](http://localhost:8080)
