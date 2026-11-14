@@ -150,7 +150,7 @@ public class PipelineExecutionService {
                     outputs.put(id, result);
                     current = result;
                     schema = mapper.writeValueAsString(Arrays.asList(result.columns()));
-                    if (!Set.of("postgres_write", "postgres_write").contains(type)) {
+                    if (!Set.of("doris_write", "postgres_write").contains(type)) {
                         stepRecords = result.count();
                         processed = stepRecords;
                         // Bounded sample only: never collect the complete Spark dataset.
