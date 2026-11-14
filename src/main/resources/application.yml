@@ -59,12 +59,13 @@ sbase:
     app-name: sbase-data-mining-hub
     shuffle-partitions: 8
   doris:
-    jdbc-url: ${DORIS_JDBC_URL:jdbc:mysql://localhost:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true}
-    username: ${DORIS_USERNAME:root}
-    password: ${DORIS_PASSWORD:}
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    database: ${DORIS_DATABASE:analytics}
-    allowed-tables: ${DORIS_ALLOWED_TABLES:}
+    # Compatibility property namespace while BI and pipeline APIs are migrated.
+    jdbc-url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/sbase}
+    username: ${SPRING_DATASOURCE_USERNAME:sbase}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+    database: ${SBASE_ANALYTICS_SCHEMA:public}
+    allowed-tables: ${SBASE_ANALYTICS_ALLOWED_TABLES:}
   jobs:
     max-concurrent: 2
     retention-hours: 168
