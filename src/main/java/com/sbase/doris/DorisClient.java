@@ -1,6 +1,6 @@
 package com.sbase.doris;
 
-import com.sbase.config.DorisProperties;
+import com.sbase.config.PostgresProperties;
 import com.sbase.resilience.CircuitBreaker;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -13,11 +13,11 @@ import java.time.Duration;
 /** Legacy service name; the underlying analytics connection is PostgreSQL. */
 @Component
 public class DorisClient {
-    private final DorisProperties properties;
+    private final PostgresProperties properties;
     private final DataSource dataSource;
     private final CircuitBreaker breaker = new CircuitBreaker(4, Duration.ofSeconds(20));
 
-    public DorisClient(DorisProperties properties, @Qualifier("dorisDataSource") DataSource dataSource) {
+    public DorisClient(PostgresProperties properties, @Qualifier("dorisDataSource") DataSource dataSource) {
         this.properties = properties;
         this.dataSource = dataSource;
     }
