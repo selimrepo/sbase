@@ -150,7 +150,7 @@ public class PipelineExecutionService {
                     outputs.put(id, result);
                     current = result;
                     schema = mapper.writeValueAsString(Arrays.asList(result.columns()));
-                    if (!"doris_write".equals(type)) {
+                    if (!Set.of("doris_write", "postgres_write").contains(type)) {
                         stepRecords = result.count();
                         processed = stepRecords;
                         // Bounded sample only: never collect the complete Spark dataset.
@@ -235,7 +235,7 @@ public class PipelineExecutionService {
 
     private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs, UUID runId, String idempotencyKey) {
         return switch (type) {
-            case "doris_read" -> readDoris(step.path("table").asText(), tenantForRun(runId));
+            case "doris_read", "postgres_read" -> readDoris(step.path("table").asText(), tenantForRun(runId));
             case "filter" -> filter(input, step);
             case "select" -> select(input, step);
             case "with_column" -> withColumn(input, step);
@@ -243,7 +243,7 @@ public class PipelineExecutionService {
             case "join" -> join(inputs, step);
             case "union" -> union(inputs, step);
             case "feature_store_write" -> { requireFeatureWrite(step.path("featureSet").asText(), runId); writeOnlineFeatures(requireInput(input), step, runId); yield input; }
-            case "doris_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey, tenantForRun(runId)); yield input; }
+            case "doris_write", "postgres_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey, tenantForRun(runId)); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
         };
     }
