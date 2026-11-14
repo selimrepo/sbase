@@ -8,35 +8,35 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 
-/**
- * Reads BI-facing OLAP statistics from Doris. PostgreSQL remains the source
- * for platform/control-plane metadata and is deliberately not used here.
- */
+/** BI catalog and workload statistics backed by the primary PostgreSQL database. */
 @Service
 public class DorisBiAnalyticsService {
-    private final JdbcTemplate doris;
-    private final String database;
+    private final JdbcTemplate postgres;
+    private final String schema;
 
-    public DorisBiAnalyticsService(
-            @Qualifier("dorisJdbcTemplate") JdbcTemplate doris,
-            @Value("${sbase.doris.database:analytics}") String database) {
-        this.doris = doris;
-        this.database = database;
+    public DorisBiAnalyticsService(@Qualifier("jdbcTemplate") JdbcTemplate postgres,
+            @Value("${sbase.doris.database:public}") String schema) {
+        this.postgres = postgres;
+        if (schema == null || !schema.matches("[A-Za-z_][A-Za-z0-9_]*"))
+            throw new IllegalArgumentException("Invalid PostgreSQL analytics schema");
+        this.schema = schema;
     }
 
     public Map<String, Object> summary() {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("database", database);
+        result.put("database", "PostgreSQL");
+        result.put("schema", schema);
         try {
-            List<Map<String, Object>> rawTables = doris.queryForList("""
-                    SELECT TABLE_NAME AS table_name,
-                           COALESCE(TABLE_ROWS, 0) AS estimated_rows,
-                           COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS storage_bytes,
-                           COALESCE(ENGINE, 'UNKNOWN') AS engine
-                    FROM information_schema.tables
-                    WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'
-                    ORDER BY TABLE_NAME
-                    """, database);
+            List<Map<String, Object>> rawTables = postgres.queryForList("""
+                SELECT t.table_name,
+                       COALESCE(s.n_live_tup, 0)::bigint AS estimated_rows,
+                       pg_total_relation_size(format('%I.%I', t.table_schema, t.table_name)::regclass) AS storage_bytes
+                  FROM information_schema.tables t
+                  LEFT JOIN pg_stat_user_tables s
+                    ON s.schemaname=t.table_schema AND s.relname=t.table_name
+                 WHERE t.table_schema=? AND t.table_type='BASE TABLE'
+                 ORDER BY t.table_name
+                """, schema);
 
             List<Map<String, Object>> tables = new ArrayList<>();
             long estimatedRows = 0;
@@ -50,10 +50,9 @@ public class DorisBiAnalyticsService {
                 table.put("name", Objects.toString(row.get("table_name"), ""));
                 table.put("estimatedRows", rows);
                 table.put("storageBytes", bytes);
-                table.put("engine", Objects.toString(row.get("engine"), "UNKNOWN"));
+                table.put("engine", "PostgreSQL");
                 tables.add(table);
             }
-
             result.put("connected", true);
             result.put("tableCount", tables.size());
             result.put("estimatedRows", estimatedRows);
@@ -67,38 +66,33 @@ public class DorisBiAnalyticsService {
             result.put("storageBytes", 0L);
             result.put("tables", List.of());
             result.put("queryActivity", unavailableQueryActivity());
-            result.put("message", "Doris analytics metadata could not be read");
+            result.put("message", "PostgreSQL analytics metadata could not be read");
         }
         return result;
     }
 
     private Map<String, Object> queryActivity() {
         try {
-            Map<String, Object> row = doris.queryForMap("""
-                    SELECT COUNT(*) AS query_count,
-                           COALESCE(AVG(query_time), 0) AS avg_query_time_ms,
-                           COALESCE(SUM(scan_bytes), 0) AS scanned_bytes,
-                           COALESCE(SUM(scan_rows), 0) AS scanned_rows
-                    FROM information_schema.query_audit_log
-                    WHERE time >= NOW() - INTERVAL 24 HOUR
-                      AND is_query = 1
-                    """);
-            return Map.of(
-                    "available", true,
-                    "windowHours", 24,
+            Map<String, Object> row = postgres.queryForMap("""
+                SELECT COALESCE(SUM(calls),0) AS query_count,
+                       COALESCE(SUM(total_exec_time) / NULLIF(SUM(calls),0),0) AS avg_query_time_ms,
+                       COALESCE(SUM(shared_blks_read) * current_setting('block_size')::bigint,0) AS read_bytes,
+                       COALESCE(SUM(rows),0) AS returned_rows
+                  FROM pg_stat_statements
+                """);
+            return Map.of("available", true, "windowHours", 0,
                     "queryCount", number(row.get("query_count")),
                     "avgQueryTimeMs", number(row.get("avg_query_time_ms")),
-                    "scannedBytes", number(row.get("scanned_bytes")),
-                    "scannedRows", number(row.get("scanned_rows")));
-        } catch (DataAccessException ex) {
-            // Query audit logging can be disabled or unavailable in a Doris
-            // deployment. Keep table-level OLAP statistics usable regardless.
+                    "scannedBytes", number(row.get("read_bytes")),
+                    "scannedRows", number(row.get("returned_rows")));
+        } catch (DataAccessException | IllegalStateException ex) {
+            // pg_stat_statements is optional; catalog and table statistics remain available.
             return unavailableQueryActivity();
         }
     }
 
     private static Map<String, Object> unavailableQueryActivity() {
-        return Map.of("available", false, "windowHours", 24,
+        return Map.of("available", false, "windowHours", 0,
                 "queryCount", 0L, "avgQueryTimeMs", 0L,
                 "scannedBytes", 0L, "scannedRows", 0L);
     }
