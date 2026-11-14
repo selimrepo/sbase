@@ -22,23 +22,23 @@ public class DorisDatasetWriter {
         if(dataset==null || tenantId==null) throw new IllegalArgumentException("Dataset and tenant ID are required");
         String governedTable=tablePolicy.requireTenantScoped(table);
         if(!Arrays.asList(dataset.columns()).contains("tenant_id"))
-            throw new org.springframework.security.access.AccessDeniedException("Doris write requires an explicit tenant_id column");
+            throw new org.springframework.security.access.AccessDeniedException("PostgreSQL write requires an explicit tenant_id column");
         if(dataset.filter(functions.col("tenant_id").isNull()
                 .or(functions.col("tenant_id").notEqual(functions.lit(tenantId.toString())))).limit(1).count()>0)
-            throw new org.springframework.security.access.AccessDeniedException("Doris write contains rows outside the authenticated tenant");
+            throw new org.springframework.security.access.AccessDeniedException("PostgreSQL write contains rows outside the authenticated tenant");
         write(dataset,governedTable);
     }
 
     /** There is deliberately no implicit-tenant compatibility write path. */
     @Deprecated
     public void append(Dataset<Row> dataset,String table) {
-        throw new IllegalStateException("Unscoped Doris writes are disabled; supply the authenticated tenant ID");
+        throw new IllegalStateException("Unscoped PostgreSQL writes are disabled; supply the authenticated tenant ID");
     }
 
     private void write(Dataset<Row> dataset,String table) {
         dataset.write().format("jdbc").option("url",doris.jdbcUrl()).option("dbtable",table)
             .option("user",doris.username()).option("password",doris.password())
-            .option("driver","com.mysql.cj.jdbc.Driver").option("batchsize","5000")
+            .option("driver","org.postgresql.Driver").option("batchsize","5000")
             .mode("append").save();
     }
 }
