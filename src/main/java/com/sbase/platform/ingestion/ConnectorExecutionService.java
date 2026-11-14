@@ -55,7 +55,8 @@ public class ConnectorExecutionService {
         String registered = db.query("SELECT connector_type FROM ingestion_connectors WHERE id=? AND tenant_id=? AND enabled=true",
                 rs -> rs.next() ? rs.getString(1) : null, connectorId, tenantId);
         if (registered == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Connector not found");
-        boolean legacyDorisAlias = "postgresql".equalsIgnoreCase(type) && "doris".equalsIgnoreCase(registered);
+        boolean legacyDorisAlias = ("postgresql".equalsIgnoreCase(type) && "doris".equalsIgnoreCase(registered))
+                || ("doris".equalsIgnoreCase(type) && "postgresql".equalsIgnoreCase(registered));
         if (!registered.equalsIgnoreCase(type) && !legacyDorisAlias)
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Connector type mismatch");
         // Preserve the persisted connector type in the durable request so the
@@ -196,6 +197,6 @@ public class ConnectorExecutionService {
         }
     }
 
-    public Set<String> types() { return connectors.keySet(); }
+    public Set<String> types() { return connectors.values().stream().map(c -> c.type().toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet()); }
     private record ClaimedRun(UUID id, UUID tenantId, UUID connectorId, String payload, long fencingToken, int attempt) { }
 }
