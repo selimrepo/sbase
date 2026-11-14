@@ -3,6 +3,7 @@ package com.sbase.pipeline;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sbase.doris.DorisClient;
+import com.sbase.postgres.PostgresSparkWriter;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.expressions.Window;
@@ -417,6 +418,7 @@ public class PipelineExecutionService {
         String table = step.path("table").asText();
         String governedTable=requireAllowed(table);
         String mode = step.path("mode").asText("append");
+        if (!"append".equalsIgnoreCase(mode)) throw new IllegalArgumentException("PostgreSQL pipeline writes support idempotent append only");
         JsonNode keys = step.path("idempotencyColumns");
         if (!keys.isArray() || keys.isEmpty())
             throw new IllegalArgumentException("PostgreSQL writes require idempotencyColumns matching a physical UNIQUE constraint or index");
@@ -437,10 +439,7 @@ public class PipelineExecutionService {
         Dataset<Row> stable = df.dropDuplicates(keyColumns);
         // The run-level Spark job group is set by executeClaimed, allowing
         // cancellation to interrupt this external write as well.
-        stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", governedTable)
-                .option("user", doris.username()).option("password", doris.password())
-                .option("driver", "org.postgresql.Driver").option("batchsize", "5000")
-                .mode("append").save();
+        PostgresSparkWriter.append(stable, doris, governedTable, keyColumns);
     }
 
 
