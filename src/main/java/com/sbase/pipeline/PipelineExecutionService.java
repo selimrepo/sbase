@@ -235,7 +235,7 @@ public class PipelineExecutionService {
 
     private Dataset<Row> apply(String type, JsonNode step, Dataset<Row> input, List<Dataset<Row>> inputs, UUID runId, String idempotencyKey) {
         return switch (type) {
-            case "postgres_read", "postgres_read" -> readDoris(step.path("table").asText(), tenantForRun(runId));
+            case "doris_read", "postgres_read" -> readPostgres(step.path("table").asText(), tenantForRun(runId));
             case "filter" -> filter(input, step);
             case "select" -> select(input, step);
             case "with_column" -> withColumn(input, step);
@@ -243,7 +243,7 @@ public class PipelineExecutionService {
             case "join" -> join(inputs, step);
             case "union" -> union(inputs, step);
             case "feature_store_write" -> { requireFeatureWrite(step.path("featureSet").asText(), runId); writeOnlineFeatures(requireInput(input), step, runId); yield input; }
-            case "postgres_write", "postgres_write" -> { writeDoris(requireInput(input), step, runId, idempotencyKey, tenantForRun(runId)); yield input; }
+            case "doris_write", "postgres_write" -> { writePostgres(requireInput(input), step, runId, idempotencyKey, tenantForRun(runId)); yield input; }
             default -> throw new IllegalArgumentException("Unsupported pipeline step: " + type);
         };
     }
@@ -291,7 +291,7 @@ public class PipelineExecutionService {
      * PostgreSQL is the shared analytical data plane. Every physical source read is
      * scoped by the immutable tenant captured in the durable run record.
      */
-    private Dataset<Row> readDoris(String table, UUID tenantId) {
+    private Dataset<Row> readPostgres(String table, UUID tenantId) {
         String governedTable=requireAllowed(table);
         // Push the tenant predicate into PostgreSQL itself. Filtering only after Spark
         // loads the full table would expose every tenant's rows to executor memory.
@@ -414,7 +414,7 @@ public class PipelineExecutionService {
         return df.groupBy(groups.toArray(Column[]::new)).agg(metrics.get(0), metrics.subList(1, metrics.size()).toArray(Column[]::new));
     }
 
-    private void writeDoris(Dataset<Row> df, JsonNode step, UUID runId, String idempotencyKey, UUID tenantId) {
+    private void writePostgres(Dataset<Row> df, JsonNode step, UUID runId, String idempotencyKey, UUID tenantId) {
         String table = step.path("table").asText();
         String governedTable=requireAllowed(table);
         String mode = step.path("mode").asText("append");
@@ -425,7 +425,7 @@ public class PipelineExecutionService {
         String[] keyColumns = new String[keys.size()];
         for (int i = 0; i < keys.size(); i++) { keyColumns[i] = keys.get(i).asText(); PipelineDefinitionValidator.identifier(keyColumns[i]); }
         requireTenantScopedIdempotencyKeys(keyColumns);
-        verifyDorisUniqueKey(governedTable, keyColumns);
+        verifyPostgresUniqueKey(governedTable, keyColumns);
         if (!Arrays.asList(df.columns()).contains("tenant_id")) {
             throw new org.springframework.security.access.AccessDeniedException(
                     "PostgreSQL target data must include tenant_id; cross-tenant writes are not permitted");
@@ -531,7 +531,7 @@ public class PipelineExecutionService {
         }
     }
 
-    private void verifyDorisUniqueKey(String table, String[] keyColumns) {
+    private void verifyPostgresUniqueKey(String table, String[] keyColumns) {
         String[] parts = table.split("\\.", 2);
         String schema = parts.length == 2 ? parts[0] : "public";
         String name = parts.length == 2 ? parts[1] : parts[0];
@@ -569,7 +569,7 @@ public class PipelineExecutionService {
             .filter(value -> value.equalsIgnoreCase(table) || value.endsWith("."+table.toLowerCase(Locale.ROOT)))
             .findFirst().orElseThrow(() -> new IllegalArgumentException("PostgreSQL table is not allow-listed: " + table));
         String[] parts=configured.split("\\.",2);
-        String schema=parts.length==2?parts[0]:defaultDorisSchema();
+        String schema=parts.length==2?parts[0]:defaultPostgresSchema();
         String name=parts.length==2?parts[1]:parts[0];
         Boolean registered=jdbc.query("""
             SELECT EXISTS(SELECT 1 FROM postgres_tenant_table_policies
@@ -595,7 +595,7 @@ public class PipelineExecutionService {
         return schema+"."+name;
     }
 
-    private String defaultDorisSchema() {
+    private String defaultPostgresSchema() {
         String url=postgres.jdbcUrl();
         int start=url.indexOf("://");
         int slash=url.indexOf('/',start<0?0:start+3);
