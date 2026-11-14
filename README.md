@@ -333,4 +333,4 @@ Please avoid including credentials, customer data or production connection detai
 
 ## License
 
-No license file is currently identified in this repository. Until a license is added, do not assume that the source is available for unrestricted reuse, redistribution or commercial modification. Repository visibility alone does not grant an open-source license.
+SBase is licensed under the **Apache License, Version 2.0**. You may use, modify, and distribute the software under the terms of the license. See the [`LICENSE`](LICENSE) file for the complete license text. The license includes an express patent grant and requires preservation of applicable notices and attribution.
