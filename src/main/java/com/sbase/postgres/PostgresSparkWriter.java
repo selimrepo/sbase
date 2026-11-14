@@ -1,6 +1,6 @@
 package com.sbase.postgres;
 
-import com.sbase.doris.DorisClient;
+import com.sbase.postgres.PostgresClient;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 
@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 public final class PostgresSparkWriter {
     private PostgresSparkWriter() { }
 
-    public static void append(Dataset<Row> dataset, DorisClient postgres, String governedTable, String[] requestedKeys) {
+    public static void append(Dataset<Row> dataset, PostgresClient postgres, String governedTable, String[] requestedKeys) {
         Objects.requireNonNull(dataset, "dataset");
         Objects.requireNonNull(postgres, "postgres");
         String[] parts = governedTable.split("\\.", 2);
@@ -77,7 +77,7 @@ public final class PostgresSparkWriter {
         }
     }
 
-    private static String[] primaryKey(DorisClient postgres, String schema, String table) {
+    private static String[] primaryKey(PostgresClient postgres, String schema, String table) {
         try (Connection connection = postgres.openConnection()) {
             DatabaseMetaData metadata = connection.getMetaData();
             Map<Short,String> columns = new TreeMap<>();
