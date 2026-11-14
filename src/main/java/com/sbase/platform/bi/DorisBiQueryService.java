@@ -7,19 +7,19 @@ import java.util.*;
 import java.util.regex.*;
 
 @Service
-public class DorisBiQueryService {
- private final JdbcTemplate doris;
- private final DorisTenantTablePolicy tablePolicy;
+public class PostgreSQLBiQueryService {
+ private final JdbcTemplate postgres;
+ private final PostgreSQLTenantTablePolicy tablePolicy;
  private static final Pattern SAFE=Pattern.compile("(?is)^\\s*select\\s+.+?\\s+from\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)\\b.*$");
  private static final Pattern LIMIT=Pattern.compile("(?is)\\blimit\\s+(\\d+)\\s*$");
  private static final Pattern UNSUPPORTED=Pattern.compile("(?is)\\b(union|join|with|into|outfile|load_file|sleep|benchmark|insert|update|delete|drop|alter|create|grant|revoke|set|use|call|offset)\\b");
  private static final Pattern CLAUSE=Pattern.compile("(?is)\\s+(group\\s+by|order\\s+by|limit)\\b");
- public DorisBiQueryService(@Qualifier("dorisJdbcTemplate") JdbcTemplate doris,DorisTenantTablePolicy tablePolicy){
-  this.doris=doris;this.tablePolicy=tablePolicy;
+ public PostgreSQLBiQueryService(@Qualifier("postgresJdbcTemplate") JdbcTemplate postgres,PostgreSQLTenantTablePolicy tablePolicy){
+  this.postgres=postgres;this.tablePolicy=tablePolicy;
  }
 
  public List<Map<String,Object>> query(UUID tenantId,String sql){
-  if(tenantId==null)throw new IllegalArgumentException("Tenant ID is required for Doris queries");
+  if(tenantId==null)throw new IllegalArgumentException("Tenant ID is required for PostgreSQL queries");
   if(sql==null||sql.isBlank()||sql.length()>12000||sql.contains(";")||sql.contains("--")||sql.contains("/*"))
    throw new IllegalArgumentException("Only one bounded SELECT statement is allowed");
   String normalized=sql.strip();
@@ -27,7 +27,7 @@ public class DorisBiQueryService {
       ||Pattern.compile("(?is)\\btenant_id\\b").matcher(normalized).find())
    throw new IllegalArgumentException("Only a single-table SELECT without joins, subqueries or tenant overrides is allowed");
   Matcher table=SAFE.matcher(normalized);
-  if(!table.matches())throw new IllegalArgumentException("Query must select from one allow-listed Doris table");
+  if(!table.matches())throw new IllegalArgumentException("Query must select from one allow-listed PostgreSQL table");
   String canonical=tablePolicy.requireTenantScoped(table.group(1));
   normalized=normalized.replaceFirst("(?i)(\\bfrom\\s+)"+Pattern.quote(table.group(1))+"\\b","$1"+canonical);
   Matcher limit=LIMIT.matcher(normalized);
@@ -44,10 +44,10 @@ public class DorisBiQueryService {
   Matcher where=Pattern.compile("(?is)\\bwhere\\b").matcher(normalized);
   if(where.find())normalized=normalized.substring(0,where.start())+"WHERE ("+normalized.substring(where.end()).strip()+") AND tenant_id = ?";
   else normalized += " WHERE tenant_id = ?";
-  return doris.queryForList(normalized+suffix,tenantId.toString());
+  return postgres.queryForList(normalized+suffix,tenantId.toString());
  }
  @Deprecated public List<Map<String,Object>> query(String sql){
-  throw new IllegalStateException("Unscoped Doris queries are disabled; supply the authenticated tenant ID");
+  throw new IllegalStateException("Unscoped PostgreSQL queries are disabled; supply the authenticated tenant ID");
  }
  private static int countSelects(String sql){Matcher m=Pattern.compile("(?i)\\bselect\\b").matcher(sql);int n=0;while(m.find())n++;return n;}
 }
