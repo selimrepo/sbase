@@ -1,6 +1,6 @@
-package com.sbase.postgres;
+package com.sbase.doris;
 
-import com.sbase.config.PostgreSQLProperties;
+import com.sbase.config.DorisProperties;
 import com.sbase.resilience.CircuitBreaker;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -10,14 +10,14 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 
-/** Pooled PostgreSQL connectivity with a fail-fast breaker around connection acquisition. */
+/** Legacy service name; the underlying analytics connection is PostgreSQL. */
 @Component
-public class PostgreSQLClient {
-    private final PostgreSQLProperties properties;
+public class DorisClient {
+    private final DorisProperties properties;
     private final DataSource dataSource;
     private final CircuitBreaker breaker = new CircuitBreaker(4, Duration.ofSeconds(20));
 
-    public PostgreSQLClient(PostgreSQLProperties properties, @Qualifier("postgresDataSource") DataSource dataSource) {
+    public DorisClient(DorisProperties properties, @Qualifier("dorisDataSource") DataSource dataSource) {
         this.properties = properties;
         this.dataSource = dataSource;
     }
