@@ -45,8 +45,9 @@ public final class PostgresSparkWriter {
                 connection.commit();
                 created = true;
             }
+            String sparkUrl = postgres.jdbcUrl() + (postgres.jdbcUrl().contains("?") ? "&" : "?") + "stringtype=unspecified";
             dataset.write().format("jdbc")
-                    .option("url", postgres.jdbcUrl())
+                    .option("url", sparkUrl)
                     .option("dbtable", stage)
                     .option("user", postgres.username())
                     .option("password", postgres.password())
