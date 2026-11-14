@@ -9,8 +9,6 @@ services:
       JAVA_TOOL_OPTIONS: -Xms1g -Xmx3g
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:?Set JWT_ISSUER_URI for production}
       JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:?Set JWT_JWK_SET_URI for production}
-      DORIS_USERNAME: ${DORIS_USERNAME:?Set DORIS_USERNAME for production}
-      DORIS_PASSWORD: ${DORIS_PASSWORD:?Set DORIS_PASSWORD for production}
     restart: unless-stopped
   postgres:
     restart: unless-stopped
@@ -18,10 +16,7 @@ services:
     restart: unless-stopped
   spark-worker:
     restart: unless-stopped
-  doris-fe:
-    restart: unless-stopped
-  doris-be:
-    restart: unless-stopped
+
   minio:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
