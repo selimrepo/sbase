@@ -572,7 +572,7 @@ public class PipelineExecutionService {
         String schema=parts.length==2?parts[0]:defaultDorisSchema();
         String name=parts.length==2?parts[1]:parts[0];
         Boolean registered=jdbc.query("""
-            SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
+            SELECT EXISTS(SELECT 1 FROM postgres_tenant_table_policies
              WHERE schema_name=? AND table_name=? AND enabled=true AND tenant_column='tenant_id' AND classification='TENANT_DATA' AND verification_status='VERIFIED' AND verified_at IS NOT NULL AND invalid_tenant_rows=0)
             """,rs->rs.next()&&rs.getBoolean(1),schema,name);
         if(!Boolean.TRUE.equals(registered))
