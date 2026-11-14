@@ -287,21 +287,21 @@ public class PipelineExecutionService {
     }
 
     /**
-     * Doris is a shared analytical data plane. Every physical source read is
+     * PostgreSQL is the shared analytical data plane. Every physical source read is
      * scoped by the immutable tenant captured in the durable run record.
      */
     private Dataset<Row> readDoris(String table, UUID tenantId) {
         String governedTable=requireAllowed(table);
-        // Push the tenant predicate into Doris itself. Filtering only after Spark
+        // Push the tenant predicate into PostgreSQL itself. Filtering only after Spark
         // loads the full table would expose every tenant's rows to executor memory.
         String tenantSql=tenantScopedDbtable(governedTable,tenantId);
         Dataset<Row> source = sparkProvider.getObject().read().format("jdbc")
                 .option("url", doris.jdbcUrl()).option("dbtable", tenantSql)
                 .option("user", doris.username()).option("password", doris.password())
-                .option("driver", "com.mysql.cj.jdbc.Driver").load();
+                .option("driver", "org.postgresql.Driver").load();
         if (!Arrays.asList(source.columns()).contains("tenant_id")) {
             throw new org.springframework.security.access.AccessDeniedException(
-                    "Doris source table must expose tenant_id for tenant-isolated pipeline reads");
+                    "PostgreSQL source table must expose tenant_id for tenant-isolated pipeline reads");
         }
         return source.filter(col("tenant_id").equalTo(lit(tenantId.toString())));
     }
@@ -310,7 +310,7 @@ public class PipelineExecutionService {
     static String tenantScopedDbtable(String governedTable, UUID tenantId) {
         if (tenantId == null || governedTable == null
                 || !governedTable.matches("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?")) {
-            throw new IllegalArgumentException("A governed Doris table and persisted tenant ID are required");
+            throw new IllegalArgumentException("A governed PostgreSQL table and persisted tenant ID are required");
         }
         // UUID is a typed, internally loaded value from pipeline_runs, not user SQL.
         return "(SELECT * FROM " + governedTable + " WHERE tenant_id = '" + tenantId + "') AS sbase_tenant_source";
@@ -419,27 +419,27 @@ public class PipelineExecutionService {
         String mode = step.path("mode").asText("append");
         JsonNode keys = step.path("idempotencyColumns");
         if (!keys.isArray() || keys.isEmpty())
-            throw new IllegalArgumentException("Doris writes require idempotencyColumns; configure the target as a Doris UNIQUE KEY table using these columns");
+            throw new IllegalArgumentException("PostgreSQL writes require idempotencyColumns matching a physical UNIQUE constraint or index");
         String[] keyColumns = new String[keys.size()];
         for (int i = 0; i < keys.size(); i++) { keyColumns[i] = keys.get(i).asText(); PipelineDefinitionValidator.identifier(keyColumns[i]); }
         requireTenantScopedIdempotencyKeys(keyColumns);
         verifyDorisUniqueKey(governedTable, keyColumns);
         if (!Arrays.asList(df.columns()).contains("tenant_id")) {
             throw new org.springframework.security.access.AccessDeniedException(
-                    "Doris target data must include tenant_id; cross-tenant writes are not permitted");
+                    "PostgreSQL target data must include tenant_id; cross-tenant writes are not permitted");
         }
         // Reject the whole batch if any row is missing or belongs to another tenant.
         if (df.filter(col("tenant_id").isNull()
                 .or(col("tenant_id").notEqual(lit(tenantId.toString())))).limit(1).count() > 0) {
             throw new org.springframework.security.access.AccessDeniedException(
-                    "Doris write contains rows outside the pipeline run tenant");
+                    "PostgreSQL write contains rows outside the pipeline run tenant");
         }
         Dataset<Row> stable = df.dropDuplicates(keyColumns);
         // The run-level Spark job group is set by executeClaimed, allowing
         // cancellation to interrupt this external write as well.
         stable.write().format("jdbc").option("url", doris.jdbcUrl()).option("dbtable", governedTable)
                 .option("user", doris.username()).option("password", doris.password())
-                .option("driver", "com.mysql.cj.jdbc.Driver").option("batchsize", "5000")
+                .option("driver", "org.postgresql.Driver").option("batchsize", "5000")
                 .mode("append").save();
     }
 
@@ -528,31 +528,33 @@ public class PipelineExecutionService {
     static void requireTenantScopedIdempotencyKeys(String[] keyColumns) {
         if (keyColumns == null || Arrays.stream(keyColumns).noneMatch("tenant_id"::equalsIgnoreCase)) {
             throw new org.springframework.security.access.AccessDeniedException(
-                "Doris idempotency keys must include tenant_id to prevent cross-tenant key collisions");
+                "PostgreSQL idempotency keys must include tenant_id to prevent cross-tenant key collisions");
         }
     }
 
     private void verifyDorisUniqueKey(String table, String[] keyColumns) {
-        try (java.sql.Connection connection = doris.openConnection();
-             java.sql.Statement statement = connection.createStatement();
-             java.sql.ResultSet result = statement.executeQuery("SHOW CREATE TABLE " + table)) {
-            if (!result.next()) throw new IllegalStateException("Doris target table does not exist: " + table);
-            String ddl = result.getString(2).toUpperCase(Locale.ROOT).replace("`", "");
-            int keyStart = ddl.indexOf("UNIQUE KEY");
-            if (keyStart < 0) throw new IllegalArgumentException(
-                "Idempotent append requires a Doris UNIQUE KEY target table: " + table);
-            int open = ddl.indexOf('(', keyStart);
-            int close = ddl.indexOf(')', open);
-            if (open < 0 || close < 0) throw new IllegalStateException("Cannot inspect Doris UNIQUE KEY definition");
-            Set<String> declaredKeys = Arrays.stream(ddl.substring(open + 1, close).split(","))
-                .map(String::trim).collect(java.util.stream.Collectors.toSet());
-            Set<String> requestedKeys = Arrays.stream(keyColumns)
-                .map(key -> key.toUpperCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
-            if (!declaredKeys.equals(requestedKeys))
-                throw new IllegalArgumentException("idempotencyColumns must exactly match the Doris UNIQUE KEY columns: " + declaredKeys);
-        } catch (java.sql.SQLException ex) {
-            throw new IllegalStateException("Cannot verify Doris idempotency constraints for " + table, ex);
-        }
+        String[] parts = table.split("\\.", 2);
+        String schema = parts.length == 2 ? parts[0] : "public";
+        String name = parts.length == 2 ? parts[1] : parts[0];
+        List<String> uniqueIndexes = jdbc.queryForList("""
+            SELECT string_agg(a.attname, ',' ORDER BY k.ordinality)
+              FROM pg_index i
+              JOIN pg_class t ON t.oid=i.indrelid
+              JOIN pg_namespace n ON n.oid=t.relnamespace
+              CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ordinality)
+              JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.attnum
+             WHERE i.indisunique AND i.indisvalid AND i.indpred IS NULL
+               AND k.ordinality <= i.indnkeyatts
+               AND n.nspname=? AND t.relname=?
+             GROUP BY i.indexrelid
+            """, String.class, schema, name);
+        Set<String> requested = Arrays.stream(keyColumns).map(String::toLowerCase)
+            .collect(java.util.stream.Collectors.toSet());
+        boolean matches = uniqueIndexes.stream().filter(Objects::nonNull).anyMatch(index ->
+            Arrays.stream(index.split(",")).map(String::toLowerCase)
+                .collect(java.util.stream.Collectors.toSet()).equals(requested));
+        if (!matches) throw new IllegalArgumentException(
+            "idempotencyColumns must exactly match a PostgreSQL UNIQUE constraint or index: " + table);
     }
 
     private Object literal(JsonNode value) {
@@ -566,7 +568,7 @@ public class PipelineExecutionService {
         PipelineDefinitionValidator.table(table);
         String configured=allowedTables.stream()
             .filter(value -> value.equalsIgnoreCase(table) || value.endsWith("."+table.toLowerCase(Locale.ROOT)))
-            .findFirst().orElseThrow(() -> new IllegalArgumentException("Doris table is not allow-listed: " + table));
+            .findFirst().orElseThrow(() -> new IllegalArgumentException("PostgreSQL table is not allow-listed: " + table));
         String[] parts=configured.split("\\.",2);
         String schema=parts.length==2?parts[0]:defaultDorisSchema();
         String name=parts.length==2?parts[1]:parts[0];
@@ -575,7 +577,7 @@ public class PipelineExecutionService {
              WHERE schema_name=? AND table_name=? AND enabled=true AND tenant_column='tenant_id' AND classification='TENANT_DATA' AND verification_status='VERIFIED' AND verified_at IS NOT NULL AND invalid_tenant_rows=0)
             """,rs->rs.next()&&rs.getBoolean(1),schema,name);
         if(!Boolean.TRUE.equals(registered))
-            throw new org.springframework.security.access.AccessDeniedException("Doris table has no active tenant isolation policy");
+            throw new org.springframework.security.access.AccessDeniedException("PostgreSQL table has no active tenant isolation policy");
         Integer tenantColumns;
         try(java.sql.Connection connection=doris.openConnection();
             java.sql.PreparedStatement statement=connection.prepareStatement("""
@@ -587,10 +589,10 @@ public class PipelineExecutionService {
                 tenantColumns=result.next()?result.getInt(1):0;
             }
         } catch(java.sql.SQLException failure) {
-            throw new IllegalStateException("Cannot verify Doris tenant column for "+schema+"."+name,failure);
+            throw new IllegalStateException("Cannot verify PostgreSQL tenant column for "+schema+"."+name,failure);
         }
         if(tenantColumns==null || tenantColumns!=1)
-            throw new org.springframework.security.access.AccessDeniedException("Doris table does not expose tenant_id");
+            throw new org.springframework.security.access.AccessDeniedException("PostgreSQL table does not expose tenant_id");
         return schema+"."+name;
     }
 
@@ -598,7 +600,7 @@ public class PipelineExecutionService {
         String url=doris.jdbcUrl();
         int start=url.indexOf("://");
         int slash=url.indexOf('/',start<0?0:start+3);
-        if(slash<0)return "analytics";
+        if(slash<0)return "public";
         String path=url.substring(slash+1).split("[?;]",2)[0];
         return path.isBlank()?"analytics":path.split("/",2)[0];
     }
