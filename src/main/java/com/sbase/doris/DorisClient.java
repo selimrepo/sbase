@@ -1,6 +1,6 @@
-package com.sbase.doris;
+package com.sbase.postgres;
 
-import com.sbase.config.DorisProperties;
+import com.sbase.config.PostgreSQLProperties;
 import com.sbase.resilience.CircuitBreaker;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -10,14 +10,14 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 
-/** Pooled Doris connectivity with a fail-fast breaker around connection acquisition. */
+/** Pooled PostgreSQL connectivity with a fail-fast breaker around connection acquisition. */
 @Component
-public class DorisClient {
-    private final DorisProperties properties;
+public class PostgreSQLClient {
+    private final PostgreSQLProperties properties;
     private final DataSource dataSource;
     private final CircuitBreaker breaker = new CircuitBreaker(4, Duration.ofSeconds(20));
 
-    public DorisClient(DorisProperties properties, @Qualifier("dorisDataSource") DataSource dataSource) {
+    public PostgreSQLClient(PostgreSQLProperties properties, @Qualifier("postgresDataSource") DataSource dataSource) {
         this.properties = properties;
         this.dataSource = dataSource;
     }
@@ -29,17 +29,17 @@ public class DorisClient {
                     Connection connection = dataSource.getConnection();
                     try (var statement = connection.createStatement();
                          var result = statement.executeQuery("SELECT 1")) {
-                        if (!result.next()) throw new SQLException("Doris validation query returned no rows");
+                        if (!result.next()) throw new SQLException("PostgreSQL validation query returned no rows");
                     } catch (SQLException failure) {
                         try { connection.close(); } catch (SQLException closeFailure) { failure.addSuppressed(closeFailure); }
-                        throw new DorisConnectionFailure(failure);
+                        throw new PostgreSQLConnectionFailure(failure);
                     }
                     return connection;
                 } catch (SQLException failure) {
-                    throw new DorisConnectionFailure(failure);
+                    throw new PostgreSQLConnectionFailure(failure);
                 }
             });
-        } catch (DorisConnectionFailure failure) {
+        } catch (PostgreSQLConnectionFailure failure) {
             throw failure.sqlException;
         }
     }
@@ -53,8 +53,8 @@ public class DorisClient {
     public String username() { return properties.username(); }
     public String password() { return properties.password(); }
 
-    private static final class DorisConnectionFailure extends RuntimeException {
+    private static final class PostgreSQLConnectionFailure extends RuntimeException {
         private final SQLException sqlException;
-        private DorisConnectionFailure(SQLException cause) { super(cause); this.sqlException = cause; }
+        private PostgreSQLConnectionFailure(SQLException cause) { super(cause); this.sqlException = cause; }
     }
 }
