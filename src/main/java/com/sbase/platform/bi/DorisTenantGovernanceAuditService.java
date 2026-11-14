@@ -77,7 +77,7 @@ public class DorisTenantGovernanceAuditService {
                 """, Integer.class, schemaName, table);
             boolean hasTenantColumn = columns != null && columns == 1;
             Boolean registered = postgres.query("""
-                SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
+                SELECT EXISTS(SELECT 1 FROM postgres_tenant_table_policies
                  WHERE schema_name=? AND table_name=? AND enabled=true
                    AND tenant_column='tenant_id' AND classification='TENANT_DATA'
                    AND verification_status='VERIFIED' AND verified_at IS NOT NULL
@@ -95,7 +95,7 @@ public class DorisTenantGovernanceAuditService {
             Boolean rowCountMatches = false;
             if (hasTenantColumn && Boolean.TRUE.equals(registered)) {
                 rowCountMatches = postgres.query("""
-                    SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
+                    SELECT EXISTS(SELECT 1 FROM postgres_tenant_table_policies
                      WHERE schema_name=? AND table_name=? AND verified_row_count=? AND invalid_tenant_rows=0)
                     """, rs -> rs.next() && rs.getBoolean(1), schemaName, table, rowCount);
             }
@@ -109,12 +109,12 @@ public class DorisTenantGovernanceAuditService {
             if (!"VERIFIED_SHAPE".equals(status) && Boolean.TRUE.equals(registered)) {
                 String rejected = "INVALID_TENANT_ROWS".equals(status) || "MISSING_TENANT_COLUMN".equals(status) ? "REJECTED" : "PENDING";
                 if (invalidRows >= 0) postgres.update("""
-                    UPDATE doris_tenant_table_policies SET enabled=FALSE,verification_status=?,
+                    UPDATE postgres_tenant_table_policies SET enabled=FALSE,verification_status=?,
                            invalid_tenant_rows=?,verified_at=NULL,updated_at=now()
                      WHERE schema_name=? AND table_name=?
                     """, rejected, invalidRows, schemaName, table);
                 else postgres.update("""
-                    UPDATE doris_tenant_table_policies SET enabled=FALSE,verification_status=?,
+                    UPDATE postgres_tenant_table_policies SET enabled=FALSE,verification_status=?,
                            verified_at=NULL,updated_at=now()
                      WHERE schema_name=? AND table_name=?
                     """, rejected, schemaName, table);
@@ -126,7 +126,7 @@ public class DorisTenantGovernanceAuditService {
             row.put("invalidTenantRows",invalidRows); row.put("registered",Boolean.TRUE.equals(registered));
             results.add(row);
             postgres.update("""
-                INSERT INTO doris_tenant_policy_audit(schema_name,table_name,subject,action,outcome,details)
+                INSERT INTO postgres_tenant_policy_audit(schema_name,table_name,subject,action,outcome,details)
                 VALUES(?,?,?,'INVENTORY_SCAN',?,?::jsonb)
                 """, schemaName, table, subject, status,
                 "{\"rowCount\":"+rowCount+",\"invalidTenantRows\":"+invalidRows+
