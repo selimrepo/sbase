@@ -16,8 +16,8 @@ public class DorisTenantTablePolicy {
     private final String defaultSchema;
 
     public DorisTenantTablePolicy(JdbcTemplate postgres,
-            @Value("${sbase.doris.allowed-tables:}") String allowedTables,
-            @Value("${sbase.doris.database:public}") String defaultSchema) {
+            @Value("${sbase.postgres.allowed-tables:}") String allowedTables,
+            @Value("${sbase.postgres.database:public}") String defaultSchema) {
         this.postgres = postgres;
         if (defaultSchema == null || !defaultSchema.matches("[A-Za-z_][A-Za-z0-9_]*"))
             throw new IllegalArgumentException("Invalid PostgreSQL schema identifier");
