@@ -11,8 +11,8 @@ import static org.mockito.Mockito.*;
 
 class PostgresTenantGovernanceAuditServiceTest {
     private final JdbcTemplate postgres = mock(JdbcTemplate.class);
-    private final DorisTenantGovernanceAuditService audit =
-        new DorisTenantGovernanceAuditService(postgres, "analytics");
+    private final PostgresTenantGovernanceAuditService audit =
+        new PostgresTenantGovernanceAuditService(postgres, "analytics");
 
     @Test void verifiesTenantColumnAndRegistryAgainstPhysicalPostgreSqlTable() {
         when(postgres.queryForList(contains("information_schema.tables"), eq("analytics"))).thenReturn(List.of(
@@ -48,7 +48,7 @@ class PostgresTenantGovernanceAuditServiceTest {
     }
 
     @Test void rejectsUnsafeSchemaAndMissingAuditSubject() {
-        assertThrows(IllegalArgumentException.class, () -> new DorisTenantGovernanceAuditService(postgres, "analytics;DROP"));
+        assertThrows(IllegalArgumentException.class, () -> new PostgresTenantGovernanceAuditService(postgres, "analytics;DROP"));
         assertThrows(IllegalArgumentException.class, () -> audit.auditDatabase(" "));
         verifyNoInteractions(postgres);
     }
