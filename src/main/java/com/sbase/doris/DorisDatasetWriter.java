@@ -4,6 +4,7 @@ import com.sbase.platform.bi.DorisTenantTablePolicy;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.functions;
+import com.sbase.postgres.PostgresSparkWriter;
 import org.springframework.stereotype.Service;
 import java.util.Arrays;
 import java.util.UUID;
@@ -26,7 +27,7 @@ public class DorisDatasetWriter {
         if(dataset.filter(functions.col("tenant_id").isNull()
                 .or(functions.col("tenant_id").notEqual(functions.lit(tenantId.toString())))).limit(1).count()>0)
             throw new org.springframework.security.access.AccessDeniedException("PostgreSQL write contains rows outside the authenticated tenant");
-        write(dataset,governedTable);
+        PostgresSparkWriter.append(dataset, doris, governedTable, null);
     }
 
     /** There is deliberately no implicit-tenant compatibility write path. */
@@ -40,5 +41,15 @@ public class DorisDatasetWriter {
             .option("user",doris.username()).option("password",doris.password())
             .option("driver","org.postgresql.Driver").option("batchsize","5000")
             .mode("append").save();
+    }
+    public void append(Dataset<Row> dataset, String table, UUID tenantId, String[] idempotencyColumns) {
+        if (dataset == null || tenantId == null) throw new IllegalArgumentException("Dataset and tenant ID are required");
+        String governedTable = tablePolicy.requireTenantScoped(table);
+        if (!Arrays.asList(dataset.columns()).contains("tenant_id"))
+            throw new org.springframework.security.access.AccessDeniedException("PostgreSQL write requires an explicit tenant_id column");
+        if (dataset.filter(functions.col("tenant_id").isNull()
+                .or(functions.col("tenant_id").notEqual(functions.lit(tenantId.toString())))).limit(1).count() > 0)
+            throw new org.springframework.security.access.AccessDeniedException("PostgreSQL write contains rows outside the authenticated tenant");
+        PostgresSparkWriter.append(dataset, doris, governedTable, idempotencyColumns);
     }
 }
