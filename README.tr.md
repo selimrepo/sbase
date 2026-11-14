@@ -209,7 +209,6 @@ Kalıcı Compose volume'larını da silmek için `down -v` kullanılabilir. Bu k
 Gerekli temel değişkenler:
 
 - `POSTGRES_PASSWORD`: güçlü ve benzersiz PostgreSQL parolası.
-- `(removed)`, `(removed)`: üretim için ayrılmış PostgreSQL uygulama hesabı.
 - `JWT_ISSUER_URI`, `JWT_JWK_SET_URI`: üretim kimlik sağlayıcısının issuer ve JWK adresleri.
 - `SBASE_IMAGE`: sabitlenmiş üretim uygulama imajı.
 - `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`: MinIO erişim bilgileri.
@@ -221,9 +220,9 @@ docker compose -f docker-compose.yml -f docker-compose.production.yml config
 docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
 ```
 
-Üretim overlay'i uygulamayı varsayılan olarak loopback adresine bağlar; veritabanı, PostgreSQL FE/BE ve Spark portlarını host üzerinde yayımlamaz. Uygulamanın önüne TLS kullanan güvenilir bir reverse proxy yerleştirin. Ayrıntılı yedekleme, geri yükleme ve güvenlik notları için [docs/production-readiness.md](docs/production-readiness.md) dosyasına bakın.
+Üretim overlay'i uygulamayı varsayılan olarak loopback adresine bağlar; veritabanı, PostgreSQL ve Spark portlarını host üzerinde yayımlamaz. Uygulamanın önüne TLS kullanan güvenilir bir reverse proxy yerleştirin. Ayrıntılı yedekleme, geri yükleme ve güvenlik notları için [docs/production-readiness.md](docs/production-readiness.md) dosyasına bakın.
 
-> Üretim overlay'i tek başına yüksek erişilebilirlik sağlamaz. Tek FE/BE PostgreSQL topolojisi yüksek erişilebilir değildir. Çok düğümlü PostgreSQL/Kafka mimarisi, uzak yedekleme, felaket kurtarma tatbikatı ve tenant izolasyonu ayrıca tasarlanmalı ve test edilmelidir.
+> Üretim overlay'i tek başına yüksek erişilebilirlik sağlamaz. Tek düğümlü PostgreSQL kurulumu yüksek erişilebilir değildir. Çok düğümlü PostgreSQL/Kafka mimarisi, uzak yedekleme, felaket kurtarma tatbikatı ve tenant izolasyonu ayrıca tasarlanmalı ve test edilmelidir.
 
 ## Frontend geliştirme
 
