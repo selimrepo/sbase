@@ -1,7 +1,7 @@
 package com.sbase.pipeline;
 
 import com.sbase.config.PostgresProperties;
-import com.sbase.doris.DorisClient;
+import com.sbase.postgres.PostgresClient;
 import com.sbase.postgres.PostgresSparkWriter;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
@@ -37,7 +37,7 @@ class SparkPostgresResilienceTest {
         dataSource.setURL(url);
         dataSource.setUser(user);
         dataSource.setPassword(password);
-        DorisClient client = new DorisClient(new PostgresProperties(url, user, password, "org.postgresql.Driver", "public", ""), dataSource);
+        PostgresClient client = new PostgresClient(new PostgresProperties(url, user, password, "org.postgresql.Driver", "public", ""), dataSource);
 
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE public.\"" + table + "\" (tenant_id UUID NOT NULL, id BIGINT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id,id))");
