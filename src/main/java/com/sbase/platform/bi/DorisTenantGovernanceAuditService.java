@@ -8,24 +8,24 @@ import org.springframework.stereotype.Service;
 import java.util.*;
 
 /**
- * Full physical inventory audit for Doris. This deliberately does not approve
+ * Full physical inventory audit for PostgreSQL. This deliberately does not approve
  * tables: a scan can establish discriminator shape, not business ownership.
  */
 @Service
-public class DorisTenantGovernanceAuditService {
+public class PostgreSQLTenantGovernanceAuditService {
     private static final String UUID_PATTERN =
         "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
     private final JdbcTemplate postgres;
-    private final JdbcTemplate doris;
+    private final JdbcTemplate postgres;
     private final String database;
 
-    public DorisTenantGovernanceAuditService(@Qualifier("jdbcTemplate") JdbcTemplate postgres,
-            @Qualifier("dorisJdbcTemplate") JdbcTemplate doris,
-            @Value("${sbase.doris.database:analytics}") String database) {
+    public PostgreSQLTenantGovernanceAuditService(@Qualifier("jdbcTemplate") JdbcTemplate postgres,
+            @Qualifier("postgresJdbcTemplate") JdbcTemplate postgres,
+            @Value("${sbase.postgres.database:analytics}") String database) {
         this.postgres=postgres;
-        this.doris=doris;
+        this.postgres=postgres;
         if(database==null || !database.matches("[A-Za-z_][A-Za-z0-9_]*"))
-            throw new IllegalArgumentException("Invalid Doris database identifier");
+            throw new IllegalArgumentException("Invalid PostgreSQL database identifier");
         this.database=database;
     }
 
@@ -33,13 +33,13 @@ public class DorisTenantGovernanceAuditService {
         return auditSchema(subject,database);
     }
 
-    /** Inventory every non-system Doris schema visible to the configured service account. */
+    /** Inventory every non-system PostgreSQL schema visible to the configured service account. */
     public Map<String,Object> auditAllDatabases(String subject) {
         if(subject==null || subject.isBlank()) throw new IllegalArgumentException("Audit subject is required");
-        List<Map<String,Object>> schemas=doris.queryForList("""
+        List<Map<String,Object>> schemas=postgres.queryForList("""
             SELECT SCHEMA_NAME AS schema_name
               FROM information_schema.schemata
-             WHERE SCHEMA_NAME NOT IN ('information_schema','mysql','sys','__internal_schema')
+             WHERE SCHEMA_NAME NOT IN ('information_schema','pg_catalog','pg_toast')
              ORDER BY SCHEMA_NAME
             """);
         List<Map<String,Object>> inventories=new ArrayList<>();
@@ -49,7 +49,7 @@ public class DorisTenantGovernanceAuditService {
         for(Map<String,Object> item:schemas) {
             String schema=Objects.toString(item.get("schema_name"),Objects.toString(item.get("SCHEMA_NAME"),""));
             if(!schema.matches("[A-Za-z_][A-Za-z0-9_]*"))
-                throw new IllegalStateException("Doris returned an unsafe schema identifier");
+                throw new IllegalStateException("PostgreSQL returned an unsafe schema identifier");
             Map<String,Object> inventory=auditSchema(subject,schema);
             inventories.add(inventory);
             total+=number(inventory.get("tableCount"));
@@ -71,7 +71,7 @@ public class DorisTenantGovernanceAuditService {
 
     private Map<String,Object> auditSchema(String subject,String schema) {
         if(subject==null || subject.isBlank()) throw new IllegalArgumentException("Audit subject is required");
-        List<Map<String,Object>> physical=doris.queryForList("""
+        List<Map<String,Object>> physical=postgres.queryForList("""
             SELECT TABLE_NAME AS table_name, TABLE_TYPE AS table_type
               FROM information_schema.tables
              WHERE TABLE_SCHEMA=?
@@ -82,14 +82,14 @@ public class DorisTenantGovernanceAuditService {
         for(Map<String,Object> item:physical) {
             String table=Objects.toString(item.get("table_name"),"");
             if(!table.matches("[A-Za-z_][A-Za-z0-9_]*"))
-                throw new IllegalStateException("Doris returned an unsafe table identifier");
-            Integer columns=doris.queryForObject("""
+                throw new IllegalStateException("PostgreSQL returned an unsafe table identifier");
+            Integer columns=postgres.queryForObject("""
                 SELECT COUNT(*) FROM information_schema.columns
                  WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND LOWER(COLUMN_NAME)='tenant_id'
                 """,Integer.class,schema,table);
             boolean hasTenantColumn=columns!=null && columns==1;
             Boolean registered=postgres.query("""
-                SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
+                SELECT EXISTS(SELECT 1 FROM postgres_tenant_table_policies
                  WHERE schema_name=? AND table_name=? AND enabled=true
                    AND tenant_column='tenant_id' AND classification='TENANT_DATA'
                    AND verification_status='VERIFIED' AND verified_at IS NOT NULL
@@ -97,18 +97,18 @@ public class DorisTenantGovernanceAuditService {
                 """,rs->rs.next() && rs.getBoolean(1),schema,table);
             long rowCount=0,invalidRows=-1;
             if(hasTenantColumn) {
-                Map<String,Object> counts=doris.queryForMap(
+                Map<String,Object> counts=postgres.queryForMap(
                     "SELECT COUNT(*) AS row_count, " +
                     "COALESCE(SUM(CASE WHEN tenant_id IS NULL OR " +
-                    "NOT CAST(tenant_id AS STRING) REGEXP ? THEN 1 ELSE 0 END),0) AS invalid_rows " +
-                    "FROM `"+schema+"`.`"+table+"`",UUID_PATTERN);
+                    "tenant_id::text !~ ? THEN 1 ELSE 0 END),0) AS invalid_rows " +
+                    "FROM \""+schema+"\".\""+table+"\"",UUID_PATTERN);
                 rowCount=number(counts.get("row_count"));
                 invalidRows=number(counts.get("invalid_rows"));
             }
             Boolean rowCountMatches=false;
             if(hasTenantColumn && Boolean.TRUE.equals(registered)) {
                 rowCountMatches=postgres.query("""
-                    SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
+                    SELECT EXISTS(SELECT 1 FROM postgres_tenant_table_policies
                      WHERE schema_name=? AND table_name=? AND verified_row_count=? AND invalid_tenant_rows=0)
                     """,rs->rs.next() && rs.getBoolean(1),schema,table,rowCount);
             }
@@ -123,14 +123,14 @@ public class DorisTenantGovernanceAuditService {
                     ? "REJECTED" : "PENDING";
                 if(invalidRows>=0) {
                     postgres.update("""
-                        UPDATE doris_tenant_table_policies
+                        UPDATE postgres_tenant_table_policies
                            SET enabled=FALSE, verification_status=?, invalid_tenant_rows=?,
                                verified_at=NULL, updated_at=now()
                          WHERE schema_name=? AND table_name=?
                         """,rejectedStatus,invalidRows,schema,table);
                 } else {
                     postgres.update("""
-                        UPDATE doris_tenant_table_policies
+                        UPDATE postgres_tenant_table_policies
                            SET enabled=FALSE, verification_status=?, verified_at=NULL, updated_at=now()
                          WHERE schema_name=? AND table_name=?
                         """,rejectedStatus,schema,table);
@@ -141,7 +141,7 @@ public class DorisTenantGovernanceAuditService {
             result.put("rowCount",rowCount); result.put("invalidTenantRows",invalidRows);
             result.put("registered",Boolean.TRUE.equals(registered)); results.add(result);
             postgres.update("""
-                INSERT INTO doris_tenant_policy_audit(schema_name,table_name,subject,action,outcome,details)
+                INSERT INTO postgres_tenant_policy_audit(schema_name,table_name,subject,action,outcome,details)
                 VALUES(?,?,?,'INVENTORY_SCAN',?,?::jsonb)
                 """,schema,table,subject,status,
                 jsonDetails(rowCount,invalidRows,hasTenantColumn,Boolean.TRUE.equals(registered)));
