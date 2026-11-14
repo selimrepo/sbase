@@ -2,7 +2,7 @@ package com.sbase.pipeline;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sbase.doris.DorisClient;
+import com.sbase.postgres.DorisClient;
 import com.sbase.postgres.PostgresSparkWriter;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataTypes;
@@ -48,7 +48,7 @@ public class PipelineExecutionService {
     public PipelineExecutionService(@Qualifier("jdbcTemplate") JdbcTemplate jdbc, PipelineRepository pipelines, PipelineRunRepository runs,
             PipelineDefinitionValidator validator, ObjectMapper mapper, ObjectProvider<SparkSession> sparkProvider,
             DorisClient doris, @Qualifier("miningExecutor") Executor executor,
-            @Value("${sbase.doris.allowed-tables:}") String allowedTables,
+            @Value("${sbase.postgres.allowed-tables:}") String allowedTables,
             @Value("${sbase.pipeline.retry.max-attempts:4}") int configuredMaxAttempts,
             @Value("${spring.datasource.url}") String postgresUrl,
             @Value("${spring.datasource.username}") String postgresUser,
