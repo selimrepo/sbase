@@ -42,7 +42,7 @@ Pipeline definitions are versioned JSON DAGs. The current execution engine suppo
 | `aggregate` | Group and aggregate data |
 | `join` | Join two upstream datasets |
 | `union` | Combine two upstream datasets |
-| `postgres_write` | Append results to a PostgreSQL UNIQUE constraint or index table |
+| `postgres_write` | Append results to a PostgreSQL table with a matching UNIQUE constraint or index |
 | `feature_store_write` | Materialize features into the online feature store |
 
 Joins accept exactly two dependencies and support inner, left, right and full join types. Union accepts two dependencies and supports schema-aware union-all or union-distinct; chain additional inputs through successive merge steps.
@@ -64,7 +64,7 @@ These mechanisms improve recoverability but do not promise exactly-once executio
 
 #### Safe PostgreSQL writes
 
-PostgreSQL writes are append-only. A `postgres_write` step must declare `idempotencyColumns`, and the destination must be a PostgreSQL UNIQUE constraint or index table containing those columns. SBase verifies the target key definition and de-duplicates each Spark batch before JDBC append. Destructive `overwrite` writes are rejected.
+PostgreSQL writes are append-only. A `postgres_write` step must declare `idempotencyColumns`, and the destination must be a PostgreSQL UNIQUE constraint or index table containing those columns. SBase loads a run-scoped PostgreSQL staging table and merges with `ON CONFLICT DO NOTHING` so retries remain idempotent. Destructive `overwrite` writes are rejected.
 
 Choose stable business keys carefully. Key-based de-duplication does not replace PostgreSQL replication, transaction or storage guarantees. Source and target tables must be included in `SBASE_ANALYTICS_ALLOWED_TABLES`.
 
