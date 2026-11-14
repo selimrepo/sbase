@@ -132,7 +132,7 @@ services:
       JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase-node-2
-      SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
+      SPARK_EXTRA_JARS: /opt/spark-jars/postgresql.jar
       SBASE_ML_ALLOWED_TABLES: ${SBASE_ML_ALLOWED_TABLES:-}
       SBASE_ML_ARTIFACT_ROOT: /var/lib/sbase/ml-artifacts
       SBASE_BI_ARTIFACT_ROOT: /var/lib/sbase/bi-reports
