@@ -146,7 +146,23 @@ services:
         condition: service_healthy
       spark-master:
         condition: service_started
-    
+    volumes:
+      - sbase-ml-artifacts:/var/lib/sbase/ml-artifacts
+      - sbase-bi-reports:/var/lib/sbase/bi-reports
+    networks: [sbase-net]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    mem_limit: 4g
+    cpus: 4.0
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/actuator/health/readiness >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 120s
+
   kafka-1:
     profiles: ["kafka"]
     image: apache/kafka:3.8.1
