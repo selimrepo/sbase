@@ -42,8 +42,8 @@ class PostgresTenantIsolationIntegrationTest {
             VALUES('public','events','tenant_id',true,'TENANT_DATA','VERIFIED',now(),0)
             """);
 
-        DorisTenantTablePolicy policy = new DorisTenantTablePolicy(jdbc, "public.events", "public");
-        DorisBiQueryService queries = new DorisBiQueryService(jdbc, policy);
+        PostgresTenantTablePolicy policy = new PostgresTenantTablePolicy(jdbc, "public.events", "public");
+        PostgresBiQueryService queries = new PostgresBiQueryService(jdbc, policy);
 
         var rowsA = queries.query(tenantA, "SELECT id,payload FROM events");
         var rowsB = queries.query(tenantB, "SELECT id,payload FROM events");
