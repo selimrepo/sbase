@@ -7,7 +7,7 @@ import java.util.*;
 import java.util.regex.*;
 
 @Service
-public class PostgresBiQueryService {
+public class DorisBiQueryService {
  private final JdbcTemplate doris;
  private final DorisTenantTablePolicy tablePolicy;
  private static final Pattern SAFE=Pattern.compile("(?is)^\\s*select\\s+.+?\\s+from\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)\\b.*$");
