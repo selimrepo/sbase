@@ -8,7 +8,7 @@ import java.sql.SQLException;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
-/** Legacy connector id retained for stored configurations; writes target PostgreSQL. */
+/** PostgreSQL JDBC ingestion connector. */
 @Component
 public class PostgresIngestionConnector extends JdbcIngestionConnector implements IngestionConnector {
     private final PostgresTenantTablePolicy tablePolicy;
