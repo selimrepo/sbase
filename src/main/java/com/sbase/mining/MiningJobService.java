@@ -50,7 +50,7 @@ public class MiningJobService {
         try {
             markRunning(id);
             Dataset<Row> source=spark.read().format("jdbc").option("url",doris.jdbcUrl()).option("dbtable",request.sourceTable())
-                .option("user",doris.username()).option("password",doris.password()).option("driver","com.mysql.cj.jdbc.Driver").load();
+                .option("user",doris.username()).option("password",doris.password()).option("driver","org.postgresql.Driver").load();
             String summary=switch(request.operation()) {
                 case "describe" -> source.describe().toJSON().collectAsList().toString();
                 case "profile" -> source.summary().toJSON().collectAsList().toString();
