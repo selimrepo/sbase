@@ -197,6 +197,8 @@ sudo swapoff -a
 
 For a persistent mapping limit, put `vm.max_map_count=2000000` in `/etc/sysctl.d/99-doris.conf` and run `sudo sysctl --system`. Disable swap persistently using the host OS swap configuration. On Windows/Docker Desktop, verify these values in the WSL2/Linux kernel environment used by Docker Engine, not in Windows PowerShell; also ensure Docker Desktop's memory limit can accommodate the Compose services.
 
+The default local topology uses one FE and one BE. Leave `DORIS_FE_SERVERS` unset in `.env` for this topology; Compose supplies the single-FE default. A three-FE value is valid only when the `app-ha` and `doris-fe-ha` profiles are started together.
+
 An open BE TCP port does not prove that Doris can schedule tablets or execute scans. The `doris-init` service registers the BE and checks usable disk capacity plus real tablet creation before SBase starts. If initialization fails, do not delete volumes. Run:
 
 ```bash
