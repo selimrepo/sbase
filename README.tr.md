@@ -208,6 +208,8 @@ sudo swapoff -a
 
 Kalıcı `vm.max_map_count` ayarı için `/etc/sysctl.d/99-doris.conf` içine `vm.max_map_count=2000000` yazıp `sudo sysctl --system` çalıştırın. Swap'ın kalıcı kapatılması işletim sisteminizin swap yapılandırmasından yapılmalıdır. Windows/Docker Desktop kullanıyorsanız bu değerler Windows PowerShell'de değil, Docker Engine'in kullandığı WSL2/Linux kernel ortamında doğrulanmalıdır; Docker Desktop bellek sınırının da Compose servislerinin toplam ihtiyacını karşılaması gerekir.
 
+Varsayılan yerel kurulum tek FE ve tek BE kullanır; bu kurulumda `.env` içinde `DORIS_FE_SERVERS` tanımlamayın (Compose tek FE varsayılanını kullanır). Üç FE adresli bir değer yalnızca `app-ha` ve `doris-fe-ha` profilleri birlikte başlatıldığında kullanılmalıdır.
+
 Doris'in yalnızca TCP portunun açık olması backend'in sorgu çalıştırabildiğini kanıtlamaz. `doris-init` FE'ye BE kaydını, kullanılabilir disk kapasitesini ve gerçek tablet oluşturma/sorgu taramasını doğruladıktan sonra SBase başlatılır. Bu adım hata verirse volume'ları silmeyin. Teşhis için:
 
 ```bash
