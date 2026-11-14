@@ -11,8 +11,8 @@ import static org.mockito.Mockito.*;
 
 class PostgresBiQueryServiceTest {
     private final JdbcTemplate jdbc=mock(JdbcTemplate.class);
-    private final DorisTenantTablePolicy policy=mock(DorisTenantTablePolicy.class);
-    private final DorisBiQueryService service=new DorisBiQueryService(jdbc,policy);
+    private final PostgresTenantTablePolicy policy=mock(PostgresTenantTablePolicy.class);
+    private final PostgresBiQueryService service=new PostgresBiQueryService(jdbc,policy);
     private final UUID tenantA=UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 
     @BeforeEach void register(){when(policy.requireTenantScoped("analytics.orders")).thenReturn("analytics.orders");}
