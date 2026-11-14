@@ -44,11 +44,7 @@ services:
       JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase
-      SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
-      DORIS_JDBC_URL: ${DORIS_JDBC_URL:-jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true}
-      DORIS_USERNAME: ${DORIS_USERNAME:-root}
-      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
-      DORIS_ALLOWED_TABLES: ${DORIS_ALLOWED_TABLES:-}
+      SPARK_EXTRA_JARS: /opt/spark-jars/postgresql.jar
       SBASE_ML_ALLOWED_TABLES: ${SBASE_ML_ALLOWED_TABLES:-}
       SBASE_ML_ARTIFACT_ROOT: /var/lib/sbase/ml-artifacts
       SBASE_BI_ARTIFACT_ROOT: /var/lib/sbase/bi-reports
@@ -67,12 +63,6 @@ services:
         condition: service_healthy
       spark-master:
         condition: service_started
-      doris-fe:
-        condition: service_healthy
-      doris-be:
-        condition: service_healthy
-      doris-init:
-        condition: service_completed_successfully
     volumes:
       - sbase-ml-artifacts:/var/lib/sbase/ml-artifacts
       - sbase-bi-reports:/var/lib/sbase/bi-reports
@@ -120,180 +110,6 @@ services:
     networks: [sbase-net]
     restart: unless-stopped
 
-  doris-fe:
-    image: apache/doris:doris-fe-2.1.7
-    security_opt: ["no-new-privileges:true"]
-    mem_limit: 4g
-
-
-    container_name: sbase-doris-fe
-    hostname: doris-fe
-    environment:
-      FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010}
-      FE_ID: 1
-    ports:
-      - "127.0.0.1:8030:8030"
-      - "127.0.0.1:9030:9030"
-    volumes:
-      - doris-fe-meta:/opt/apache-doris/fe/doris-meta
-      - doris-fe-log:/opt/apache-doris/fe/log
-    networks:
-      sbase-net:
-        ipv4_address: 172.30.0.10
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
-      interval: 15s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
-    restart: unless-stopped
-
-  doris-init:
-    image: mysql:8.4
-    container_name: sbase-doris-init
-    depends_on:
-      doris-fe:
-        condition: service_healthy
-      doris-be:
-        condition: service_healthy
-    environment:
-      DORIS_USERNAME: ${DORIS_USERNAME:-sbase_app}
-      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        until mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SELECT 1" >/dev/null 2>&1; do
-          echo "Waiting for Doris SQL endpoint..."
-          sleep 5
-        done
-
-        # Register the BE once. Alive=true alone does not prove that the FE
-        # has received storage-path information or can schedule tablets.
-        if ! mysql --protocol=TCP -h doris-fe -P 9030 -uroot -N -e "SHOW BACKENDS" | grep -Fq "172.30.0.11"; then
-          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "ALTER SYSTEM ADD BACKEND '172.30.0.11:9050'"
-        fi
-
-        attempt=0
-        healthy=0
-        while [ "$$healthy" -lt 3 ]; do
-          if mysql --protocol=TCP -h doris-fe -P 9030 -uroot -B -e "SHOW BACKENDS" 2>/dev/null | awk -F '\t' '
-            NR == 1 {
-              for (i = 1; i <= NF; i++) {
-                name = tolower($$i)
-                if (name == "host") host_col = i
-                if (name == "alive") alive_col = i
-                if (name == "systemdecommissioned") decommissioned_col = i
-                if (name == "availcapacity") available_col = i
-                if (name == "totalcapacity") total_col = i
-              }
-              next
-            }
-            {
-              available = $$(available_col)
-              total = $$(total_col)
-              sub(/[[:space:]].*$$/, "", available)
-              sub(/[[:space:]].*$$/, "", total)
-              if ($$(host_col) == "172.30.0.11" &&
-                  tolower($$(alive_col)) == "true" &&
-                  tolower($$(decommissioned_col)) == "false" &&
-                  (available + 0) > 0 && (total + 0) > 0) {
-                found = 1
-              }
-            }
-            END {
-              if (!host_col || !alive_col || !decommissioned_col || !available_col || !total_col) exit 2
-              exit !found
-            }
-          '; then
-            healthy=$$((healthy + 1))
-            echo "Doris BE has registered storage capacity ($$healthy/3 consecutive checks)."
-          else
-            healthy=0
-            echo "Waiting for Doris BE storage-path registration and capacity..."
-          fi
-          attempt=$$((attempt + 1))
-          if [ "$$attempt" -ge 60 ]; then
-            echo "Doris BE did not register usable storage capacity within 5 minutes."
-            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS" || true
-            exit 1
-          fi
-          if [ "$$healthy" -lt 3 ]; then sleep 5; fi
-        done
-
-        mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE DATABASE IF NOT EXISTS analytics"
-        if [ -n "$$DORIS_PASSWORD" ]; then
-          case "$$DORIS_USERNAME" in
-            ''|*[!a-zA-Z0-9_]*)
-              echo "DORIS_USERNAME may contain only letters, digits and underscores."
-              exit 1
-              ;;
-          esac
-          case "$$DORIS_PASSWORD" in
-            *"'"*|*"\\"*)
-              echo "DORIS_PASSWORD must not contain a single quote or backslash for bootstrap SQL."
-              exit 1
-              ;;
-          esac
-          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "CREATE USER IF NOT EXISTS '$$DORIS_USERNAME' IDENTIFIED BY '$$DORIS_PASSWORD'"
-          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "GRANT ALL PRIVILEGES ON analytics.* TO '$$DORIS_USERNAME'"
-        fi
-
-        # SHOW BACKENDS can report an alive BE before FE's RPC blacklist clears.
-        # A real OLAP table creation is the authoritative tablet-placement check.
-        probe_attempt=0
-        while :; do
-          mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e \
-            "DROP TABLE IF EXISTS analytics.sbase_backend_readiness_probe" >/dev/null 2>&1 || true
-          if mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e \
-            'CREATE TABLE analytics.sbase_backend_readiness_probe (id BIGINT NOT NULL) UNIQUE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES ("replication_num"="1", "storage_medium"="HDD")' \
-            2>/tmp/doris-backend-probe.err; then
-            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e \
-              "DROP TABLE analytics.sbase_backend_readiness_probe"
-            echo "Doris successfully placed a tablet on the registered backend."
-            break
-          fi
-
-          probe_attempt=$$((probe_attempt + 1))
-          if [ "$$probe_attempt" -ge 60 ]; then
-            echo "Doris could not place a tablet after 5 minutes; backend is not schedulable."
-            cat /tmp/doris-backend-probe.err
-            mysql --protocol=TCP -h doris-fe -P 9030 -uroot -e "SHOW BACKENDS" || true
-            exit 1
-          fi
-          echo "Waiting for Doris tablet placement readiness ($$probe_attempt/60)..."
-          sleep 5
-        done
-    networks: [sbase-net]
-    restart: "no"
-  doris-be:
-    image: apache/doris:doris-be-2.1.7
-    security_opt: ["no-new-privileges:true"]
-    mem_limit: 8g
-    cpus: 4.0
-
-
-    container_name: sbase-doris-be
-    hostname: doris-be
-    environment:
-      FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010}
-      BE_ADDR: 172.30.0.11:9050
-    depends_on:
-      doris-fe:
-        condition: service_healthy
-    volumes:
-      - doris-be-storage:/opt/apache-doris/be/storage
-      - doris-be-log:/opt/apache-doris/be/log
-    networks:
-      sbase-net:
-        ipv4_address: 172.30.0.11
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9050'"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 90s
-    restart: unless-stopped
 
   sbase-node-2:
     profiles: ["app-ha"]
@@ -317,10 +133,6 @@ services:
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase-node-2
       SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
-      DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000&loadBalanceHostRemovalGracePeriod=15000
-      DORIS_USERNAME: ${DORIS_USERNAME:-root}
-      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
-      DORIS_ALLOWED_TABLES: ${DORIS_ALLOWED_TABLES:-}
       SBASE_ML_ALLOWED_TABLES: ${SBASE_ML_ALLOWED_TABLES:-}
       SBASE_ML_ARTIFACT_ROOT: /var/lib/sbase/ml-artifacts
       SBASE_BI_ARTIFACT_ROOT: /var/lib/sbase/bi-reports
@@ -334,95 +146,7 @@ services:
         condition: service_healthy
       spark-master:
         condition: service_started
-      doris-fe:
-        condition: service_healthy
-      doris-be:
-        condition: service_healthy
-      doris-init:
-        condition: service_completed_successfully
-      doris-fe-2:
-        condition: service_healthy
-      doris-fe-3:
-        condition: service_healthy
-    volumes:
-      - sbase-ml-artifacts:/var/lib/sbase/ml-artifacts
-      - sbase-bi-reports:/var/lib/sbase/bi-reports
-    networks: [sbase-net]
-    restart: unless-stopped
-
-  doris-fe-2:
-    profiles: ["app-ha", "doris-fe-ha", "doris-ha"]
-    image: apache/doris:doris-fe-2.1.7
-    hostname: doris-fe-2
-    environment:
-      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
-      FE_ID: 2
-    ports:
-      - "127.0.0.1:9031:9030"
-    volumes:
-      - doris-fe2-meta:/opt/apache-doris/fe/doris-meta
-      - doris-fe2-log:/opt/apache-doris/fe/log
-    networks:
-      sbase-net:
-        ipv4_address: 172.30.0.12
-    depends_on:
-      doris-fe:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
-      interval: 15s
-      timeout: 5s
-      retries: 30
-      start_period: 90s
-    restart: unless-stopped
-
-  doris-fe-3:
-    profiles: ["app-ha", "doris-fe-ha", "doris-ha"]
-    image: apache/doris:doris-fe-2.1.7
-    hostname: doris-fe-3
-    environment:
-      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
-      FE_ID: 3
-    ports:
-      - "127.0.0.1:9032:9030"
-    volumes:
-      - doris-fe3-meta:/opt/apache-doris/fe/doris-meta
-      - doris-fe3-log:/opt/apache-doris/fe/log
-    networks:
-      sbase-net:
-        ipv4_address: 172.30.0.13
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
-      interval: 15s
-      timeout: 5s
-      retries: 30
-      start_period: 90s
-    restart: unless-stopped
-  doris-be-2:
-    profiles: ["doris-ha"]
-    image: apache/doris:doris-be-2.1.7
-    hostname: doris-be-2
-    environment:
-      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
-      BE_ADDR: 172.30.0.14:9050
-    volumes: [doris-be2-storage:/opt/apache-doris/be/storage,doris-be2-log:/opt/apache-doris/be/log]
-    networks:
-      sbase-net:
-        ipv4_address: 172.30.0.14
-    restart: unless-stopped
-
-  doris-be-3:
-    profiles: ["doris-ha"]
-    image: apache/doris:doris-be-2.1.7
-    hostname: doris-be-3
-    environment:
-      FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
-      BE_ADDR: 172.30.0.15:9050
-    volumes: [doris-be3-storage:/opt/apache-doris/be/storage,doris-be3-log:/opt/apache-doris/be/log]
-    networks:
-      sbase-net:
-        ipv4_address: 172.30.0.15
-    restart: unless-stopped
+    
   kafka-1:
     profiles: ["kafka"]
     image: apache/kafka:3.8.1
@@ -513,10 +237,6 @@ services:
         mc version enable local/sbase-artifacts
         mc ilm rule add --expire-days 365 local/sbase-artifacts
         mc ilm rule add --noncurrent-expire-days 90 local/sbase-artifacts
-        mc mb --ignore-existing local/doris-backups
-        mc version enable local/doris-backups
-        mc ilm rule add --expire-days 365 local/doris-backups
-        mc ilm rule add --noncurrent-expire-days 90 local/doris-backups
     networks: [sbase-net]
     restart: "no"
   prometheus:
@@ -540,24 +260,6 @@ services:
     security_opt: ["no-new-privileges:true"]
     mem_limit: 1g
 
-  doris-ha-init:
-    image: mysql:8.4
-    container_name: sbase-doris-ha-init
-    depends_on:
-      doris-fe:
-        condition: service_healthy
-      doris-be:
-        condition: service_healthy
-    environment:
-      DORIS_USER: ${DORIS_USERNAME:-root}
-      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
-    profiles: ["doris-ha"]
-    volumes:
-      - ./ops/register-doris-ha-backends.sh:/ops/register-doris-ha-backends.sh:ro
-    entrypoint: ["/bin/bash", "/ops/register-doris-ha-backends.sh"]
-    command: []
-    networks: [sbase-net]
-    restart: "no"
 
 networks:
   sbase-net:
@@ -570,18 +272,6 @@ volumes:
   postgres-data:
   sbase-ml-artifacts:
   sbase-bi-reports:
-  doris-fe-meta:
-  doris-fe-log:
-  doris-be-storage:
-  doris-be-log:
-  doris-fe2-meta:
-  doris-fe2-log:
-  doris-fe3-meta:
-  doris-fe3-log:
-  doris-be2-storage:
-  doris-be2-log:
-  doris-be3-storage:
-  doris-be3-log:
   kafka-1-data:
   kafka-2-data:
   kafka-3-data:
