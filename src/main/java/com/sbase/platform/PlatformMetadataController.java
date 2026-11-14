@@ -159,7 +159,7 @@ public class PlatformMetadataController {
     }
 
     @PostMapping("/bi/tenant-governance/audit")
-    public Map<String,Object> auditDorisTenantGovernance(Authentication auth) {
+    public Map<String,Object> auditPostgresTenantGovernance(Authentication auth) {
         require(auth,"platform:admin",false);
         return postgresGovernanceAudit.auditAllDatabases(auth.getName());
     }
