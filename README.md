@@ -178,6 +178,35 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
+
+#### Linux kernel requirements for Doris BE
+
+Doris Backend (BE) needs sufficient memory and kernel mapping capacity in the Linux environment used by Docker Engine. Before starting the stack, verify that environment:
+
+```bash
+sysctl vm.max_map_count
+cat /proc/swaps
+```
+
+Set `vm.max_map_count` to at least `2000000` and disable swap. On a Linux host, apply the immediate settings with:
+
+```bash
+sudo sysctl -w vm.max_map_count=2000000
+sudo swapoff -a
+```
+
+For a persistent mapping limit, put `vm.max_map_count=2000000` in `/etc/sysctl.d/99-doris.conf` and run `sudo sysctl --system`. Disable swap persistently using the host OS swap configuration. On Windows/Docker Desktop, verify these values in the WSL2/Linux kernel environment used by Docker Engine, not in Windows PowerShell; also ensure Docker Desktop's memory limit can accommodate the Compose services.
+
+The default local topology uses one FE and one BE. Leave `DORIS_FE_SERVERS` unset in `.env` for this topology; Compose supplies the single-FE default. A three-FE value is valid only when the `app-ha` and `doris-fe-ha` profiles are started together.
+
+An open BE TCP port does not prove that Doris can schedule tablets or execute scans. The `doris-init` service registers the BE and checks usable disk capacity plus real tablet creation before SBase starts. If initialization fails, do not delete volumes. Run:
+
+```bash
+bash ops/diagnose-doris.sh
+```
+
+The diagnostic collects FE/BE/init logs, checks backend registration, and performs a real scan against a temporary test table that it drops afterward. Restart the services after changing kernel/WSL2 or Docker memory settings. Do not use `docker compose down -v`; it deletes Doris and PostgreSQL data.
+
 Open the workspace:
 
 - Application: [http://localhost:8080](http://localhost:8080)
