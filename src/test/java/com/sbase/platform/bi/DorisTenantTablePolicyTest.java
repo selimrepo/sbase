@@ -21,7 +21,7 @@ class DorisTenantTablePolicyTest {
         new DorisTenantTablePolicy(postgres, "analytics.orders,analytics.events", "analytics");
 
     @Test void permitsOnlyRegisteredAllowListedPhysicalTenantTables() {
-        when(postgres.query(eq(REGISTRY), any(ResultSetExtractor.class), eq("analytics"), eq("orders"))).thenReturn(true);
+        when(postgres.query(contains("postgres_tenant_table_policies"), any(ResultSetExtractor.class), eq("analytics"), eq("orders"))).thenReturn(true);
         when(postgres.queryForObject(anyString(), eq(Integer.class), eq("analytics"), eq("orders"))).thenReturn(1);
         assertEquals("analytics.orders", policy.requireTenantScoped("analytics.orders"));
         verify(postgres).query(eq(REGISTRY), any(ResultSetExtractor.class), eq("analytics"), eq("orders"));
