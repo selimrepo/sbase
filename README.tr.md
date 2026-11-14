@@ -16,18 +16,18 @@ SBase şu anda **self-hosted (kurum içinde barındırılan)** bir platformdur. 
 
 Kurumlarda ERP, CRM, operasyonel veritabanları, dosya sistemleri ve analitik depolar çoğu zaman birbirinden bağımsız çalışır. SBase, bu kaynakları ortak bir çalışma alanı ve yürütme katmanı üzerinden birbirine bağlamayı amaçlar.
 
-- **Veriyi bağlayın:** JDBC, Doris, PostgreSQL, S3 uyumlu depolama, Parquet ve CSV gibi kaynaklarla çalışın.
+- **Veriyi bağlayın:** JDBC, PostgreSQL, PostgreSQL, S3 uyumlu depolama, Parquet ve CSV gibi kaynaklarla çalışın.
 - **İş akışları oluşturun:** Doğrulanan ve sürümlenen DAG tabanlı işlem hatları tanımlayın.
 - **Veri madenciliği yapın:** Asenkron analiz işleri gönderin ve sonuçlarını takip edin.
 - **Özellikleri sunun:** Üretilen özellik vektörlerini PostgreSQL tabanlı çevrimiçi özellik deposuna aktarın.
-- **Analitiği izleyin:** Doris fiziksel tablo istatistiklerini ve sorgu etkinliğini inceleyin.
+- **Analitiği izleyin:** PostgreSQL fiziksel tablo istatistiklerini ve sorgu etkinliğini inceleyin.
 - **Tek noktadan yönetin:** Veri kümelerini, işleri, zamanlamaları, deneyleri, modelleri ve platform sağlığını React arayüzünden takip edin.
 
 ## Platform yetenekleri
 
 ### Veri entegrasyonu ve katalog
 
-Veri kümesi kataloğu, veri varlıklarını ve kaynak metaverilerini kaydeder. Alım API'leri JDBC, Doris, Kafka, Debezium CDC, REST ve dosya bağlayıcı türlerini sunar.
+Veri kümesi kataloğu, veri varlıklarını ve kaynak metaverilerini kaydeder. Alım API'leri JDBC, PostgreSQL, Kafka, Debezium CDC, REST ve dosya bağlayıcı türlerini sunar.
 
 Kafka ve Debezium olayları, Kafka offset'leri onaylanmadan önce PostgreSQL JSONB tabanlı kalıcı bir alım alanına yazılır. REST JSON ile CSV/JSONL/NDJSON dosyaları da aynı kalıcı kayıt ve idempotency altyapısını kullanır. Bağlayıcı çalıştırmaları sınırlı sayıda yeniden denenir; başarısız kayıtlar kalıcı dead-letter tablosunda tutulur.
 
@@ -39,14 +39,14 @@ Pipeline tanımları sürümlenmiş JSON DAG yapısındadır. Mevcut yürütme m
 
 | Adım | Açıklama |
 |---|---|
-| `doris_read` | İzin verilen Doris tablosundan veri okur |
+| `postgres_read` | İzin verilen PostgreSQL tablosundan veri okur |
 | `filter` | Desteklenen ifadelerle satırları filtreler |
 | `select` | Seçilen sütunları projekte eder |
 | `with_column` | Desteklenen işlemlerle yeni sütun üretir |
 | `aggregate` | Gruplama ve toplulaştırma yapar |
 | `join` | İki üst akış veri kümesini birleştirir |
 | `union` | İki üst akış veri kümesini bir araya getirir |
-| `doris_write` | Sonuçları Doris UNIQUE KEY tablosuna ekler |
+| `postgres_write` | Sonuçları PostgreSQL UNIQUE constraint or index tablosuna ekler |
 | `feature_store_write` | Özellikleri çevrimiçi özellik deposuna aktarır |
 
 Join işlemi tam olarak iki bağımlılık kabul eder; inner, left, right ve full join türleri desteklenir. Union iki girdiyi kabul eder ve şema uyumlu union-all veya union-distinct işlemi yapar. Daha fazla girdiyi birleştirmek için ardışık birleştirme adımları kullanılabilir.
@@ -66,18 +66,18 @@ Pipeline çalıştırmaları, değişmez bir tanım anlık görüntüsü (snapsh
 
 Bu mekanizmalar hata sonrası toparlanmayı güçlendirir; ancak keyfî harici sistemler arasında tam olarak bir kez (exactly-once) yürütme garantisi vermez.
 
-#### Güvenli Doris yazma işlemleri
+#### Güvenli PostgreSQL yazma işlemleri
 
-Doris yazımları ekleme (append) odaklıdır. `doris_write` adımı `idempotencyColumns` tanımlamalıdır. Hedef tablo, bu sütunları içeren bir Doris UNIQUE KEY tablosu olmalıdır. SBase hedef anahtar tanımını doğrular ve JDBC ile ekleme yapmadan önce her Spark batch'inde yinelenen kayıtları ayıklar. Yıkıcı `overwrite` yazımları reddedilir.
+PostgreSQL yazımları ekleme (append) odaklıdır. `postgres_write` adımı `idempotencyColumns` tanımlamalıdır. Hedef tablo, bu sütunları içeren bir PostgreSQL UNIQUE constraint or index tablosu olmalıdır. SBase hedef anahtar tanımını doğrular ve JDBC ile ekleme yapmadan önce her Spark batch'inde yinelenen kayıtları ayıklar. Yıkıcı `overwrite` yazımları reddedilir.
 
-İş anahtarları dikkatle seçilmelidir. Anahtar bazlı yinelenen kayıt ayıklama, Doris'in replikasyon, transaction veya depolama garantilerinin yerine geçmez. Kaynak ve hedef tablolar `DORIS_ALLOWED_TABLES` listesinde bulunmalıdır.
+İş anahtarları dikkatle seçilmelidir. Anahtar bazlı yinelenen kayıt ayıklama, PostgreSQL'in replikasyon, transaction veya depolama garantilerinin yerine geçmez. Kaynak ve hedef tablolar `SBASE_ANALYTICS_ALLOWED_TABLES` listesinde bulunmalıdır.
 
 Örnek:
 
 ```json
 {
   "id": "publish_customers",
-  "type": "doris_write",
+  "type": "postgres_write",
   "dependsOn": ["customer_rollup"],
   "table": "analytics.customer_rollup",
   "mode": "append",
@@ -99,7 +99,7 @@ Otomatik profil şu analizleri içerebilir:
 - Veri kalitesi ve modelleme önerileri.
 - Kaynakta en az iki sayısal sütun ve on satır varsa deterministik seed kullanan K-means kümeleme.
 
-Kümeleme uygulanabildiğinde tahminler yapılandırılmış Doris çıktı tablosuna eklenir. Bu özellik denetimsiz keşif analizidir; otomatik hedef keşfi veya doğrulanmış bir tahmin modeli değildir. Kümeler ve öneriler operasyonel kullanıma alınmadan önce alan uzmanları tarafından değerlendirilmelidir.
+Kümeleme uygulanabildiğinde tahminler yapılandırılmış PostgreSQL çıktı tablosuna eklenir. Bu özellik denetimsiz keşif analizidir; otomatik hedef keşfi veya doğrulanmış bir tahmin modeli değildir. Kümeler ve öneriler operasyonel kullanıma alınmadan önce alan uzmanları tarafından değerlendirilmelidir.
 
 Mahout adaptörleri cosine similarity ve Euclidean distance işlemlerini sunar.
 
@@ -119,24 +119,24 @@ Mevcut REST işlemleri:
 
 ### İş zekâsı ve analitik gözlemlenebilirlik
 
-SBase, PostgreSQL kontrol düzlemi metaverilerini Doris analitik depo istatistiklerinden ayrı değerlendirir.
+SBase, PostgreSQL kontrol düzlemi metaverilerini PostgreSQL analitik depo istatistiklerinden ayrı değerlendirir.
 
 `GET /api/platform/bi/summary` BI özeti şu bilgileri raporlar:
 
 - PostgreSQL metaveri envanteri.
-- Doris fiziksel tablo sayısı.
+- PostgreSQL fiziksel tablo sayısı.
 - Tahmini satır sayıları ile veri ve indeks depolama boyutları.
-- Doris sorgu denetim kayıtları erişilebiliyorsa son 24 saatin sorgu sayısı ve ortalama sorgu süresi.
+- PostgreSQL sorgu denetim kayıtları erişilebiliyorsa son 24 saatin sorgu sayısı ve ortalama sorgu süresi.
 - Denetim metrikleri mevcutsa taranan byte ve satır sayıları.
 - React genel bakış ve sistem tanılama ekranları için tablo bazında istatistikler.
 
-Sorgu denetim kayıtları kapalı veya erişilemez olsa bile Doris tablo istatistikleri sunulabilir. Bu durumda sorgu metrikleri sıfırmış gibi gösterilmez; kullanılamıyor olarak raporlanır. BI özeti üzerinden keyfî SQL yürütme API'si sunulmaz.
+Sorgu denetim kayıtları kapalı veya erişilemez olsa bile PostgreSQL tablo istatistikleri sunulabilir. Bu durumda sorgu metrikleri sıfırmış gibi gösterilmez; kullanılamıyor olarak raporlanır. BI özeti üzerinden keyfî SQL yürütme API'si sunulmaz.
 
 ### Çalışma alanı ve operasyon
 
 React + TypeScript arayüzü şu özellikleri sağlar:
 
-- Platform metaverileri, Doris analitiği, API sağlığı ve hızlı işlemler için genel bakış ekranı.
+- Platform metaverileri, PostgreSQL analitiği, API sağlığı ve hızlı işlemler için genel bakış ekranı.
 - Veri kümesi kataloğu ve kaynak metaverisi kaydı.
 - JSON workflow tanımları için pipeline stüdyosu.
 - Veri madenciliği işi gönderimi ve tarayıcı oturumunda iş takibi.
@@ -156,14 +156,14 @@ Arayüz, veri madenciliği işlerini iş kimliği üzerinden izler. Backend şu 
 |---|---|
 | Uygulama API'si | Java, Spring Boot |
 | Kalıcılık ve kontrol düzlemi | PostgreSQL, Spring Data JPA |
-| Analitik depolama | Apache Doris |
+| Analitik depolama | Apache PostgreSQL |
 | Dağıtık işleme | Apache Spark |
 | Benzerlik algoritmaları | Apache Mahout |
 | Web arayüzü | React, TypeScript |
 | Nesne/artifact depolama | MinIO dahil S3 uyumlu depolama |
 | Dağıtım | Docker ve Docker Compose |
 
-PostgreSQL; platform metaverilerini, workflow durumlarını, zamanlamaları ve çevrimiçi özellik değerlerini saklar. Doris analitik veri deposu olarak kullanılır. Spark, dağıtık çevrimdışı işleme ve desteklenen pipeline dönüşümlerini sağlar. Üretim container'ında React arayüzü Spring Boot uygulaması tarafından sunulur.
+PostgreSQL; platform metaverilerini, workflow durumlarını, zamanlamaları ve çevrimiçi özellik değerlerini saklar. PostgreSQL analitik veri deposu olarak kullanılır. Spark, dağıtık çevrimdışı işleme ve desteklenen pipeline dönüşümlerini sağlar. Üretim container'ında React arayüzü Spring Boot uygulaması tarafından sunulur.
 
 ## Hızlı başlangıç
 
@@ -209,7 +209,7 @@ Kalıcı Compose volume'larını da silmek için `down -v` kullanılabilir. Bu k
 Gerekli temel değişkenler:
 
 - `POSTGRES_PASSWORD`: güçlü ve benzersiz PostgreSQL parolası.
-- `DORIS_USERNAME`, `DORIS_PASSWORD`: üretim için ayrılmış Doris uygulama hesabı.
+- `(removed)`, `(removed)`: üretim için ayrılmış PostgreSQL uygulama hesabı.
 - `JWT_ISSUER_URI`, `JWT_JWK_SET_URI`: üretim kimlik sağlayıcısının issuer ve JWK adresleri.
 - `SBASE_IMAGE`: sabitlenmiş üretim uygulama imajı.
 - `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`: MinIO erişim bilgileri.
@@ -221,9 +221,9 @@ docker compose -f docker-compose.yml -f docker-compose.production.yml config
 docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
 ```
 
-Üretim overlay'i uygulamayı varsayılan olarak loopback adresine bağlar; veritabanı, Doris FE/BE ve Spark portlarını host üzerinde yayımlamaz. Uygulamanın önüne TLS kullanan güvenilir bir reverse proxy yerleştirin. Ayrıntılı yedekleme, geri yükleme ve güvenlik notları için [docs/production-readiness.md](docs/production-readiness.md) dosyasına bakın.
+Üretim overlay'i uygulamayı varsayılan olarak loopback adresine bağlar; veritabanı, PostgreSQL FE/BE ve Spark portlarını host üzerinde yayımlamaz. Uygulamanın önüne TLS kullanan güvenilir bir reverse proxy yerleştirin. Ayrıntılı yedekleme, geri yükleme ve güvenlik notları için [docs/production-readiness.md](docs/production-readiness.md) dosyasına bakın.
 
-> Üretim overlay'i tek başına yüksek erişilebilirlik sağlamaz. Tek FE/BE Doris topolojisi yüksek erişilebilir değildir. Çok düğümlü Doris/Kafka mimarisi, uzak yedekleme, felaket kurtarma tatbikatı ve tenant izolasyonu ayrıca tasarlanmalı ve test edilmelidir.
+> Üretim overlay'i tek başına yüksek erişilebilirlik sağlamaz. Tek FE/BE PostgreSQL topolojisi yüksek erişilebilir değildir. Çok düğümlü PostgreSQL/Kafka mimarisi, uzak yedekleme, felaket kurtarma tatbikatı ve tenant izolasyonu ayrıca tasarlanmalı ve test edilmelidir.
 
 ## Frontend geliştirme
 
@@ -247,7 +247,7 @@ Vite geliştirme sunucusu `/api` ve `/actuator` isteklerini 8080 portundaki Spri
 | Veri kümeleri | `/api/datasets` | Veri kümesi kataloğu |
 | Pipeline | `/api/pipelines` | Pipeline tanımları |
 | Veri alımı | `/api/platform/ingestion/connectors` | Bağlayıcı türlerini listeler |
-| Veri alımı | `/api/platform/ingestion/{jdbc\|doris\|kafka}/runs` | Desteklenen alım işlerini başlatır |
+| Veri alımı | `/api/platform/ingestion/{jdbc\|postgres\|kafka}/runs` | Desteklenen alım işlerini başlatır |
 | Mahout | `GET /api/algorithms/mahout` | Mahout adaptörlerini listeler |
 | Mahout | `POST /api/algorithms/mahout/score` | Cosine / Euclidean skorlaması yapar |
 | Deneyler | `/api/platform/experiments` | Deney metaverileri |
@@ -256,7 +256,7 @@ Vite geliştirme sunucusu `/api` ve `/actuator` isteklerini 8080 portundaki Spri
 | Özellikler | `/api/platform/features` | Özellik kümesi tanımları |
 | Zamanlamalar | `/api/platform/schedules` | Kalıcı zamanlama tanımları |
 | Dashboard | `/api/platform/dashboards?owner=...` | Kullanıcıya ait dashboard metaverileri |
-| BI | `GET /api/platform/bi/summary` | PostgreSQL metaverileri ve Doris analitik özeti |
+| BI | `GET /api/platform/bi/summary` | PostgreSQL metaverileri ve PostgreSQL analitik özeti |
 | Çevrimiçi özellikler | `/api/online-features/{featureSet}/...` | Çevrimiçi özellik okuma/yazma/sayma |
 
 İstek ve yanıt şemaları için uygulamanın API dokümantasyonunu veya kaynak kodundaki controller tanımlarını inceleyin.
@@ -271,8 +271,8 @@ Uygulama yapılandırması Spring ayarları ve ortam değişkenleri üzerinden s
 | `SPRING_DATASOURCE_PASSWORD` | Spring datasource parolası |
 | `JWT_ISSUER_URI` | Resource server için JWT issuer adresi |
 | `JWT_JWK_SET_URI` | JWT imza anahtarlarının (JWK) adresi |
-| `DORIS_ALLOWED_TABLES` | Doris kaynak ve hedef tabloları için izin listesi |
-| `DORIS_DATABASE` | BI özeti için Doris veritabanı (varsayılan: `analytics`) |
+| `SBASE_ANALYTICS_ALLOWED_TABLES` | PostgreSQL kaynak ve hedef tabloları için izin listesi |
+| `SBASE_ANALYTICS_SCHEMA` | BI özeti için PostgreSQL veritabanı (varsayılan: `analytics`) |
 | `sbase.pipeline.retry.max-attempts` | Pipeline yeniden deneme üst sınırı (varsayılan: 4) |
 | `sbase.pipeline.retry.poll-ms` | Pipeline retry kontrol aralığı |
 | S3/MinIO endpoint, bucket, region ve credentials | S3 uyumlu artifact depolama yapılandırması |
@@ -284,16 +284,16 @@ Uygulama yapılandırması Spring ayarları ve ortam değişkenleri üzerinden s
 - API koruması için `JWT_ISSUER_URI` üzerinden JWT issuer doğrulamasını yapılandırın.
 - JWT rol ve yetki claim'leri Spring Security authority'lerine eşlenir. Veritabanında rol/yetki metaverisi bulunması, tüm veri kümeleri için tamamlanmış satır veya kaynak düzeyinde yetkilendirme bulunduğu anlamına gelmez.
 - Dashboard metaverileri doğrulanmış JWT subject bilgisine göre kapsamlandırılır.
-- Doris erişimi yapılandırılmış tablo izin listesiyle sınırlandırılır.
+- PostgreSQL erişimi yapılandırılmış tablo izin listesiyle sınırlandırılır.
 - Pipeline tanımları doğrulanır; keyfî SQL, shell komutları veya kullanıcı kodu çalıştırılmaz.
-- PostgreSQL, Doris, nesne depolama ve yönetim portlarını yalnızca güvenilir ağlara açın.
+- PostgreSQL, PostgreSQL, nesne depolama ve yönetim portlarını yalnızca güvenilir ağlara açın.
 - Her dağıtım için yedekleme, saklama politikası, TLS, secret yönetimi, kaynak limitleri ve izleme yapılandırın.
-- Spark executor'larını, PostgreSQL connection pool'unu ve Doris kaynaklarını beklenen iş yüküne göre boyutlandırın.
-- Doris replikasyon, compaction ve depolama politikalarını erişilebilirlik gereksinimlerine göre belirleyin.
+- Spark executor'larını, PostgreSQL connection pool'unu ve PostgreSQL kaynaklarını beklenen iş yüküne göre boyutlandırın.
+- PostgreSQL replikasyon, compaction ve depolama politikalarını erişilebilirlik gereksinimlerine göre belirleyin.
 
 ### Mevcut sınırlar
 
-SBase kalıcı retry durumu, idempotency anahtarıyla Doris append davranışı ve çevrimiçi özellik sunumu sağlar. Bunlar keyfî harici sistemler arasında exactly-once işlem garantisi vermez.
+SBase kalıcı retry durumu, idempotency anahtarıyla PostgreSQL append davranışı ve çevrimiçi özellik sunumu sağlar. Bunlar keyfî harici sistemler arasında exactly-once işlem garantisi vermez.
 
 Connector SPI yeni bağlayıcılar için genişletme noktasıdır; her olası kaynak için tamamlanmış, üretime hazır bir adaptör ve kalıcı yürütme yolu bulunduğu anlamına gelmez. Kafka ve Debezium tüketicileri her batch'i kaynak offset'lerini commit etmeden önce transaction içinde kalıcı alana yazar. Bu yaklaşım idempotent landing ile at-least-once teslimat sağlar; dağıtık exactly-once garantisi sağlamaz.
 
@@ -328,7 +328,7 @@ GET /api/mining/jobs/{id}
 
 ## CI ve testler
 
-Depo GitHub Actions ile React arayüzünü derler, Gradle testlerini çalıştırır ve Docker Compose entegrasyon ortamını sınar. Entegrasyon kapsamı Spark-Doris veri aktarımı, Doris UNIQUE KEY yazımlarında yinelenen anahtar davranışı ve Doris backend kurtarma senaryolarını içerir.
+Depo GitHub Actions ile React arayüzünü derler, Gradle testlerini çalıştırır ve Docker Compose entegrasyon ortamını sınar. Entegrasyon kapsamı Spark-PostgreSQL veri aktarımı, PostgreSQL UNIQUE constraint or index yazımlarında yinelenen anahtar davranışı ve PostgreSQL backend kurtarma senaryolarını içerir.
 
 Gradle testlerini yerel ortamda çalıştırın:
 
