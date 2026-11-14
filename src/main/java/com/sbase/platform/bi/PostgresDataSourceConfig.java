@@ -36,7 +36,7 @@ public class PostgresDataSourceConfig {
         return pool;
     }
 
-    @Bean(name = {"dataSource", "postgresDataSource", "postgresDataSource"})
+    @Bean(name = {"dataSource", "postgresDataSource"})
     @Primary
     DataSource dataSource(@Qualifier("postgresPool") DataSource pool,
             @Value("${sbase.resilience.postgres.failure-threshold:5}") int threshold,
@@ -47,7 +47,7 @@ public class PostgresDataSourceConfig {
                 threshold, java.time.Duration.ofSeconds(openSeconds), retries, backoff);
     }
 
-    @Bean(name = {"jdbcTemplate", "postgresJdbcTemplate", "postgresJdbcTemplate"})
+    @Bean(name = {"jdbcTemplate", "postgresJdbcTemplate"})
     @Primary
     JdbcTemplate jdbcTemplate(@Qualifier("dataSource") DataSource dataSource) {
         return new JdbcTemplate(dataSource);
