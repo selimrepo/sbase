@@ -10,7 +10,7 @@ import java.util.*;
 
 @Component
 public class PipelineDefinitionValidator {
-    private static final Set<String> TYPES = Set.of("doris_read", "filter", "select", "with_column", "aggregate", "doris_write", "join", "union", "feature_store_write");
+    private static final Set<String> TYPES = Set.of("postgres_read", "filter", "select", "with_column", "aggregate", "postgres_write", "join", "union", "feature_store_write");
     private static final Set<String> OPERATORS = Set.of("eq", "ne", "gt", "gte", "lt", "lte", "contains", "is_null", "not_null", "in");
     private static final Set<String> COLUMN_OPS = Set.of("cast_double", "lower", "upper", "trim", "abs", "log1p");
     private static final String IDENTIFIER = "[A-Za-z_][A-Za-z0-9_]*";
@@ -98,7 +98,7 @@ public class PipelineDefinitionValidator {
             case "doris_write" -> {
                 table(text(step, "table"));
                 String mode = step.path("mode").asText("append");
-                if (!"append".equals(mode)) throw invalid("Idempotent Doris writes support append into UNIQUE KEY tables only");
+                if (!"append".equals(mode)) throw invalid("Idempotent PostgreSQL writes support append into UNIQUE KEY tables only");
                 JsonNode keys = step.path("idempotencyColumns");
                 if (!keys.isArray() || keys.isEmpty()) throw invalid("Doris write requires non-empty idempotencyColumns");
                 keys.forEach(key -> identifier(key.asText()));
