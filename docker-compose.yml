@@ -44,11 +44,7 @@ services:
       JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase
-      SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
-      DORIS_JDBC_URL: ${DORIS_JDBC_URL:-jdbc:mysql://doris-fe:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true}
-      DORIS_USERNAME: ${DORIS_USERNAME:-root}
-      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
-      DORIS_ALLOWED_TABLES: ${DORIS_ALLOWED_TABLES:-}
+      SPARK_EXTRA_JARS: /opt/spark-jars/postgresql.jar
       SBASE_ML_ALLOWED_TABLES: ${SBASE_ML_ALLOWED_TABLES:-}
       SBASE_ML_ARTIFACT_ROOT: /var/lib/sbase/ml-artifacts
       SBASE_BI_ARTIFACT_ROOT: /var/lib/sbase/bi-reports
@@ -67,11 +63,8 @@ services:
         condition: service_healthy
       spark-master:
         condition: service_started
-      doris-fe:
         condition: service_healthy
-      doris-be:
         condition: service_healthy
-      doris-init:
         condition: service_completed_successfully
     volumes:
       - sbase-ml-artifacts:/var/lib/sbase/ml-artifacts
@@ -121,6 +114,7 @@ services:
     restart: unless-stopped
 
   doris-fe:
+    profiles: ["legacy-doris"]
     image: apache/doris:doris-fe-2.1.7
     security_opt: ["no-new-privileges:true"]
     mem_limit: 4g
@@ -149,16 +143,13 @@ services:
     restart: unless-stopped
 
   doris-init:
+    profiles: ["legacy-doris"]
     image: mysql:8.4
     container_name: sbase-doris-init
     depends_on:
-      doris-fe:
         condition: service_healthy
-      doris-be:
         condition: service_healthy
     environment:
-      DORIS_USERNAME: ${DORIS_USERNAME:-sbase_app}
-      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -267,6 +258,7 @@ services:
     networks: [sbase-net]
     restart: "no"
   doris-be:
+    profiles: ["legacy-doris"]
     image: apache/doris:doris-be-2.1.7
     security_opt: ["no-new-privileges:true"]
     mem_limit: 8g
@@ -279,7 +271,6 @@ services:
       FE_SERVERS: ${DORIS_FE_SERVERS:-fe1:172.30.0.10:9010}
       BE_ADDR: 172.30.0.11:9050
     depends_on:
-      doris-fe:
         condition: service_healthy
     volumes:
       - doris-be-storage:/opt/apache-doris/be/storage
@@ -316,11 +307,7 @@ services:
       JWT_JWK_SET_URI: ${JWT_JWK_SET_URI:-http://localhost:8081/realms/sbase/protocol/openid-connect/certs}
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_HOST: sbase-node-2
-      SPARK_EXTRA_JARS: /opt/spark-jars/mysql-connector.jar,/opt/spark-jars/postgresql.jar
-      DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000&loadBalanceHostRemovalGracePeriod=15000
-      DORIS_USERNAME: ${DORIS_USERNAME:-root}
-      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
-      DORIS_ALLOWED_TABLES: ${DORIS_ALLOWED_TABLES:-}
+      SPARK_EXTRA_JARS: /opt/spark-jars/postgresql.jar
       SBASE_ML_ALLOWED_TABLES: ${SBASE_ML_ALLOWED_TABLES:-}
       SBASE_ML_ARTIFACT_ROOT: /var/lib/sbase/ml-artifacts
       SBASE_BI_ARTIFACT_ROOT: /var/lib/sbase/bi-reports
@@ -334,15 +321,10 @@ services:
         condition: service_healthy
       spark-master:
         condition: service_started
-      doris-fe:
         condition: service_healthy
-      doris-be:
         condition: service_healthy
-      doris-init:
         condition: service_completed_successfully
-      doris-fe-2:
         condition: service_healthy
-      doris-fe-3:
         condition: service_healthy
     volumes:
       - sbase-ml-artifacts:/var/lib/sbase/ml-artifacts
@@ -351,7 +333,7 @@ services:
     restart: unless-stopped
 
   doris-fe-2:
-    profiles: ["app-ha", "doris-fe-ha", "doris-ha"]
+    profiles: ["legacy-doris"]
     image: apache/doris:doris-fe-2.1.7
     hostname: doris-fe-2
     environment:
@@ -366,7 +348,6 @@ services:
       sbase-net:
         ipv4_address: 172.30.0.12
     depends_on:
-      doris-fe:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9030'"]
@@ -377,7 +358,7 @@ services:
     restart: unless-stopped
 
   doris-fe-3:
-    profiles: ["app-ha", "doris-fe-ha", "doris-ha"]
+    profiles: ["legacy-doris"]
     image: apache/doris:doris-fe-2.1.7
     hostname: doris-fe-3
     environment:
@@ -399,7 +380,7 @@ services:
       start_period: 90s
     restart: unless-stopped
   doris-be-2:
-    profiles: ["doris-ha"]
+    profiles: ["legacy-doris"]
     image: apache/doris:doris-be-2.1.7
     hostname: doris-be-2
     environment:
@@ -412,7 +393,7 @@ services:
     restart: unless-stopped
 
   doris-be-3:
-    profiles: ["doris-ha"]
+    profiles: ["legacy-doris"]
     image: apache/doris:doris-be-2.1.7
     hostname: doris-be-3
     environment:
@@ -541,17 +522,13 @@ services:
     mem_limit: 1g
 
   doris-ha-init:
+    profiles: ["legacy-doris"]
     image: mysql:8.4
     container_name: sbase-doris-ha-init
     depends_on:
-      doris-fe:
         condition: service_healthy
-      doris-be:
         condition: service_healthy
     environment:
-      DORIS_USER: ${DORIS_USERNAME:-root}
-      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
-    profiles: ["doris-ha"]
     volumes:
       - ./ops/register-doris-ha-backends.sh:/ops/register-doris-ha-backends.sh:ro
     entrypoint: ["/bin/bash", "/ops/register-doris-ha-backends.sh"]
@@ -571,17 +548,29 @@ volumes:
   sbase-ml-artifacts:
   sbase-bi-reports:
   doris-fe-meta:
+    profiles: ["legacy-doris"]
   doris-fe-log:
+    profiles: ["legacy-doris"]
   doris-be-storage:
+    profiles: ["legacy-doris"]
   doris-be-log:
+    profiles: ["legacy-doris"]
   doris-fe2-meta:
+    profiles: ["legacy-doris"]
   doris-fe2-log:
+    profiles: ["legacy-doris"]
   doris-fe3-meta:
+    profiles: ["legacy-doris"]
   doris-fe3-log:
+    profiles: ["legacy-doris"]
   doris-be2-storage:
+    profiles: ["legacy-doris"]
   doris-be2-log:
+    profiles: ["legacy-doris"]
   doris-be3-storage:
+    profiles: ["legacy-doris"]
   doris-be3-log:
+    profiles: ["legacy-doris"]
   kafka-1-data:
   kafka-2-data:
   kafka-3-data:
