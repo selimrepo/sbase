@@ -9,41 +9,44 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class DorisTenantTablePolicyTest {
-    private static final String REGISTRY="""
-        SELECT EXISTS(SELECT 1 FROM doris_tenant_table_policies
-         WHERE schema_name=? AND table_name=? AND enabled=true AND tenant_column='tenant_id' AND classification='TENANT_DATA' AND verification_status='VERIFIED' AND verified_at IS NOT NULL AND invalid_tenant_rows=0)
+    private static final String REGISTRY = """
+        SELECT EXISTS(SELECT 1 FROM postgres_tenant_table_policies
+         WHERE schema_name=? AND table_name=? AND enabled=true
+           AND tenant_column='tenant_id' AND classification='TENANT_DATA'
+           AND verification_status='VERIFIED' AND verified_at IS NOT NULL
+           AND invalid_tenant_rows=0)
         """;
-    private final JdbcTemplate postgres=mock(JdbcTemplate.class);
-    private final JdbcTemplate doris=mock(JdbcTemplate.class);
-    private final DorisTenantTablePolicy policy=new DorisTenantTablePolicy(postgres,doris,"analytics.orders,analytics.events","analytics");
+    private final JdbcTemplate postgres = mock(JdbcTemplate.class);
+    private final DorisTenantTablePolicy policy =
+        new DorisTenantTablePolicy(postgres, "analytics.orders,analytics.events", "analytics");
 
     @Test void permitsOnlyRegisteredAllowListedPhysicalTenantTables() {
-        when(postgres.query(eq(REGISTRY),any(ResultSetExtractor.class),eq("analytics"),eq("orders"))).thenReturn(true);
-        when(doris.queryForObject(anyString(),eq(Integer.class),eq("analytics"),eq("orders"))).thenReturn(1);
-        assertEquals("analytics.orders",policy.requireTenantScoped("analytics.orders"));
-        verify(postgres).query(eq(REGISTRY),any(ResultSetExtractor.class),eq("analytics"),eq("orders"));
-        verify(doris).queryForObject(anyString(),eq(Integer.class),eq("analytics"),eq("orders"));
+        when(postgres.query(eq(REGISTRY), any(ResultSetExtractor.class), eq("analytics"), eq("orders"))).thenReturn(true);
+        when(postgres.queryForObject(anyString(), eq(Integer.class), eq("analytics"), eq("orders"))).thenReturn(1);
+        assertEquals("analytics.orders", policy.requireTenantScoped("analytics.orders"));
+        verify(postgres).query(eq(REGISTRY), any(ResultSetExtractor.class), eq("analytics"), eq("orders"));
+        verify(postgres).queryForObject(anyString(), eq(Integer.class), eq("analytics"), eq("orders"));
     }
 
     @Test void failsClosedWhenTableIsNotRegistered() {
-        when(postgres.query(eq(REGISTRY),any(ResultSetExtractor.class),eq("analytics"),eq("orders"))).thenReturn(false);
-        assertThrows(AccessDeniedException.class,()->policy.requireTenantScoped("analytics.orders"));
-        verifyNoInteractions(doris);
+        when(postgres.query(eq(REGISTRY), any(ResultSetExtractor.class), eq("analytics"), eq("orders"))).thenReturn(false);
+        assertThrows(AccessDeniedException.class, () -> policy.requireTenantScoped("analytics.orders"));
+        verify(postgres, never()).queryForObject(anyString(), eq(Integer.class), any(), any());
     }
 
     @Test void rejectsPhysicalTableWithoutTenantDiscriminator() {
-        when(postgres.query(eq(REGISTRY),any(ResultSetExtractor.class),eq("analytics"),eq("orders"))).thenReturn(true);
-        when(doris.queryForObject(anyString(),eq(Integer.class),eq("analytics"),eq("orders"))).thenReturn(0);
-        assertThrows(AccessDeniedException.class,()->policy.requireTenantScoped("analytics.orders"));
+        when(postgres.query(eq(REGISTRY), any(ResultSetExtractor.class), eq("analytics"), eq("orders"))).thenReturn(true);
+        when(postgres.queryForObject(anyString(), eq(Integer.class), eq("analytics"), eq("orders"))).thenReturn(0);
+        assertThrows(AccessDeniedException.class, () -> policy.requireTenantScoped("analytics.orders"));
     }
 
     @Test void rejectsTablesOutsideExplicitAllowListBeforeDatabaseAccess() {
-        assertThrows(AccessDeniedException.class,()->policy.requireTenantScoped("analytics.payroll"));
-        verifyNoInteractions(postgres,doris);
+        assertThrows(AccessDeniedException.class, () -> policy.requireTenantScoped("analytics.payroll"));
+        verifyNoInteractions(postgres);
     }
 
     @Test void rejectsUnsafeIdentifiers() {
-        assertThrows(IllegalArgumentException.class,()->policy.requireTenantScoped("analytics.orders; DROP TABLE users"));
-        verifyNoInteractions(postgres,doris);
+        assertThrows(IllegalArgumentException.class, () -> policy.requireTenantScoped("analytics.orders; DROP TABLE users"));
+        verifyNoInteractions(postgres);
     }
 }
