@@ -10,7 +10,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 
-/** Legacy service name; the underlying analytics connection is PostgreSQL. */
+/** Pooled PostgreSQL connectivity with a fail-fast breaker around connection acquisition. */
 @Component
 public class PostgresClient {
     private final PostgresProperties properties;
