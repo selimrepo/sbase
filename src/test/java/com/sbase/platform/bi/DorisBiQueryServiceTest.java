@@ -9,10 +9,10 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-class DorisBiQueryServiceTest {
+class PostgreSQLBiQueryServiceTest {
     private final JdbcTemplate jdbc=mock(JdbcTemplate.class);
-    private final DorisTenantTablePolicy policy=mock(DorisTenantTablePolicy.class);
-    private final DorisBiQueryService service=new DorisBiQueryService(jdbc,policy);
+    private final PostgreSQLTenantTablePolicy policy=mock(PostgreSQLTenantTablePolicy.class);
+    private final PostgreSQLBiQueryService service=new PostgreSQLBiQueryService(jdbc,policy);
     private final UUID tenantA=UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 
     @BeforeEach void register(){when(policy.requireTenantScoped("analytics.orders")).thenReturn("analytics.orders");}
