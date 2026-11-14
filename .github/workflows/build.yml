@@ -96,7 +96,7 @@ jobs:
         run: |
           gradle --no-daemon test \
             --tests '*SparkPostgresResilienceTest' \
-            --tests '*TenantDataIsolationIntegrationTest' \
+            --tests '*PostgresTenantIsolationIntegrationTest' \
             --tests '*PipelineLeaseCoordinatorIntegrationTest'
       - name: Verify PostgreSQL outage and recovery
         run: |
