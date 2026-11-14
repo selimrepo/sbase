@@ -52,6 +52,7 @@ jobs:
         run: |
           docker version
           docker compose version
+          bash -n ops/diagnose-doris.sh
           docker compose config --quiet
           docker compose --profile app-ha --profile doris-fe-ha config --quiet
       - name: Validate unified Compose profiles
