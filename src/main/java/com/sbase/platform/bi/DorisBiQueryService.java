@@ -7,14 +7,14 @@ import java.util.*;
 import java.util.regex.*;
 
 @Service
-public class PostgreSQLBiQueryService {
+public class DorisBiQueryService {
  private final JdbcTemplate postgres;
- private final PostgreSQLTenantTablePolicy tablePolicy;
+ private final DorisTenantTablePolicy tablePolicy;
  private static final Pattern SAFE=Pattern.compile("(?is)^\\s*select\\s+.+?\\s+from\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)\\b.*$");
  private static final Pattern LIMIT=Pattern.compile("(?is)\\blimit\\s+(\\d+)\\s*$");
  private static final Pattern UNSUPPORTED=Pattern.compile("(?is)\\b(union|join|with|into|outfile|load_file|sleep|benchmark|insert|update|delete|drop|alter|create|grant|revoke|set|use|call|offset)\\b");
  private static final Pattern CLAUSE=Pattern.compile("(?is)\\s+(group\\s+by|order\\s+by|limit)\\b");
- public PostgreSQLBiQueryService(@Qualifier("postgresJdbcTemplate") JdbcTemplate postgres,PostgreSQLTenantTablePolicy tablePolicy){
+ public PostgreSQLBiQueryService(@Qualifier("dorisJdbcTemplate") JdbcTemplate postgres,PostgreSQLTenantTablePolicy tablePolicy){
   this.postgres=postgres;this.tablePolicy=tablePolicy;
  }
 
