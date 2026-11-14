@@ -8,16 +8,16 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/doris")
+@RequestMapping("/api/postgres")
 public class DorisHealthController {
-    private final DorisClient doris;
+    private final DorisClient postgres;
 
-    public DorisHealthController(DorisClient doris) { this.doris = doris; }
+    public DorisHealthController(DorisClient postgres) { this.postgres = postgres; }
 
     @GetMapping("/health")
     public Map<String, Object> health() {
-        boolean connected = doris.isHealthy();
-        if (!connected) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Doris is unavailable");
-        return Map.of("connected", true, "database", "Apache Doris");
+        boolean connected = postgres.isHealthy();
+        if (!connected) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "PostgreSQL is unavailable");
+        return Map.of("connected", true, "database", "PostgreSQL");
     }
 }
