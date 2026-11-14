@@ -58,8 +58,7 @@ sbase:
     master: ${SPARK_MASTER:local[*]}
     app-name: sbase-data-mining-hub
     shuffle-partitions: 8
-  doris:
-    # Compatibility property namespace while BI and pipeline APIs are migrated.
+  postgres:
     jdbc-url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/sbase}
     username: ${SPRING_DATASOURCE_USERNAME:sbase}
     password: ${SPRING_DATASOURCE_PASSWORD:}
