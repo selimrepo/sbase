@@ -18,7 +18,7 @@ public class GovernedBiQueryService {
  private final Semaphore permits;private final long cacheMillis;private final int maxRows;private final double maxCost;private final ConcurrentHashMap<String,CacheEntry> cache=new ConcurrentHashMap<>();
  public GovernedBiQueryService(DorisBiQueryService doris,DorisTenantTablePolicy tablePolicy,@Qualifier("jdbcTemplate") JdbcTemplate control,
   @Qualifier("dorisJdbcTemplate") JdbcTemplate analytics,ObjectMapper mapper,
-  @Value("${sbase.doris.database:public}") String database,@Value("${sbase.doris.allowed-tables:}") String allowed,
+  @Value("${sbase.postgres.database:public}") String database,@Value("${sbase.postgres.allowed-tables:}") String allowed,
   @Value("${sbase.bi.max-concurrent-queries:4}") int concurrency,@Value("${sbase.bi.cache-ttl-ms:30000}") long cacheMillis,
   @Value("${sbase.bi.max-rows:5000}") int maxRows,@Value("${sbase.bi.max-estimated-cost:100000}") double maxCost){
   this.doris=doris;this.tablePolicy=tablePolicy;this.control=control;this.analytics=analytics;this.mapper=mapper;this.database=database;
