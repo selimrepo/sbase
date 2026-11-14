@@ -18,7 +18,7 @@ access it. Runtime access is fail-closed: the table must be allow-listed, approv
 SELECT COUNT(*) AS verified_row_count,
        SUM(CASE
              WHEN tenant_id IS NULL
-               OR tenant_id NOT REGEXP '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+               OR tenant_id::text !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
              THEN 1 ELSE 0
            END) AS invalid_tenant_rows
 FROM analytics.orders;
@@ -27,7 +27,7 @@ FROM analytics.orders;
 The scan must report zero invalid rows. Re-run it after every backfill or ingestion
 schema change. UUID syntax validation does not prove business ownership: reconcile
 tenant IDs with the authoritative tenant inventory and source-system ownership rules.
-4. Add the table to `sbase.postgres.allowed-tables`.
+4. Add the table to `SBASE_ANALYTICS_ALLOWED_TABLES`.
 5. Register it only after review. Replace the sample row count with the measured value:
 
 ```sql
@@ -82,7 +82,7 @@ Kafka ACLs, external JDBC permissions and object-store IAM must be verified sepa
 
 ## Full physical inventory audit
 
-A platform administrator can run the read-only inventory audit through:
+A platform administrator can run the inventory audit (it records audit events and disables stale registrations) through:
 
 ```http
 POST /api/platform/postgres/tenant-governance/audit
@@ -106,14 +106,11 @@ A `VERIFIED_SHAPE` result is not proof that the source system assigned the
 correct tenant to each row. Reconcile the actual tenant values against source
 ownership and trusted tenant mapping before updating the policy registry. This
 scan covers the configured PostgreSQL database visible to the service account; repeat
-it for every external catalog/database and separately review routine-load,
-materialized-view refresh, broker load, Spark, direct SQL, and administrative
+it for every external catalog/database and separately review materialized-view refresh, Spark, direct SQL, and administrative
 credentials. The scanner does not prove the absence of out-of-band writers.
 
-The CI Docker Compose integration profile also runs a real PostgreSQL tenant-boundary
-integration test after PostgreSQL is healthy. It creates an isolated
-temporary PostgreSQL database, inserts two tenants' rows, verifies the governed BI
-query returns only the authenticated tenant's row, injects a malformed tenant
-value, runs the inventory audit, and verifies the table is disabled at the
-policy layer. This complements unit tests; production source-to-tenant mapping
+The CI Docker Compose integration profile also runs real PostgreSQL tenant-boundary
+coverage after PostgreSQL is healthy. It creates an isolated Testcontainers database,
+inserts two tenants' rows, verifies the governed BI query returns only the authenticated
+tenant's row, and verifies that disabling the table policy blocks subsequent queries. This complements unit tests; production source-to-tenant mapping
 and external broker/object-store ACLs still require deployment-specific review.
