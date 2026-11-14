@@ -11,7 +11,7 @@ import static org.mockito.Mockito.*;
 
 class PostgresBiAnalyticsServiceTest {
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    private final DorisBiAnalyticsService service = new DorisBiAnalyticsService(jdbc, "public");
+    private final PostgresBiAnalyticsService service = new PostgresBiAnalyticsService(jdbc, "public");
 
     @Test
     void summarizesPostgreSqlTablesAndOptionalQueryStatistics() {
