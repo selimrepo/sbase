@@ -111,7 +111,7 @@ materialized-view refresh, broker load, Spark, direct SQL, and administrative
 credentials. The scanner does not prove the absence of out-of-band writers.
 
 The CI Docker Compose integration profile also runs a real PostgreSQL tenant-boundary
-integration test after the FE/BE cluster is healthy. It creates an isolated
+integration test after PostgreSQL is healthy. It creates an isolated
 temporary PostgreSQL database, inserts two tenants' rows, verifies the governed BI
 query returns only the authenticated tenant's row, injects a malformed tenant
 value, runs the inventory audit, and verifies the table is disabled at the
