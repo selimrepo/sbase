@@ -1,70 +1,80 @@
-# Tenant, HA and operational controls
+# Tenant isolation, PostgreSQL HA and recovery operations
 
-## Tenant identity, membership and ownership
+SBase uses one PostgreSQL database for application metadata, tenant data, BI/OLAP,
+pipeline staging, ingestion checkpoints and Spark input/output. Apache Doris is
+not part of the runtime or Compose topology.
 
-Tenant-scoped APIs require a UUID `tenant_id` (or `tenant`) claim in the verified JWT and an ACTIVE `tenant_memberships` row. Tenant IDs are never accepted from request bodies or query parameters. Creating a tenant automatically adds its creator as OWNER. Platform administrators can add members; tenant owners/admins can grant resource access. Membership roles are OWNER, ADMIN, MEMBER and READ_ONLY; READ_ONLY members cannot perform write operations.
+## Tenant isolation
 
-Migration V13 backfills existing datasets, pipelines and pipeline runs into the reserved `legacy-default` tenant. Migration V14 adds tenant ownership to mining jobs, ingestion connectors/runs/records/checkpoints/DLQ, experiments, models/artifacts, feature sets/materializations/lineage, schedules, dashboards, BI reports and child records. Parent-child triggers propagate tenant IDs to worker-created records. V15 adds explicit membership/invitation state.
+- Resolve tenant identity from the authenticated principal and durable job/run row.
+- Require every analytical source and destination to be explicitly allow-listed.
+- Require a verified `tenant_id` column on every tenant-owned table.
+- Push tenant predicates into PostgreSQL SQL before Spark loads data.
+- Require idempotency keys to include `tenant_id` and match a physical UNIQUE
+  constraint or index.
+- Spark writes use run-scoped UNLOGGED staging tables followed by
+  `INSERT .. ON CONFLICT DO NOTHING` in PostgreSQL.
+- Keep the PostgreSQL row-level security policy as an additional boundary for
+  tables that have RLS enabled; application filters are not a substitute for
+  database grants and RLS.
 
-Datasets and pipelines carry `tenant_id` and `owner_subject`; their CRUD and list paths are tenant scoped. Dataset/pipeline ACL grants support READ, WRITE and ADMIN. Grant management is available at `/api/access-grants` and requires tenant OWNER/ADMIN membership.
+See [tenant-boundary-enforcement.md](tenant-boundary-enforcement.md) and
+[postgres-tenant-governance.md](postgres-tenant-governance.md).
 
-Example grant:
+## Local development topology
 
-```http
-POST /api/access-grants
-Authorization: Bearer <tenant-scoped-token>
-Content-Type: application/json
-
-{"resourceType":"DATASET","resourceId":"<uuid>","subject":"analyst@example.com","permission":"READ"}
-```
-
-Mining job records, ingestion execution/idempotency, DLQ list/replay, feature-set access, online feature reads/writes and pipeline runs now carry or validate tenant scope. S3 artifact helper methods support tenant-prefixed keys under `tenants/<tenant-uuid>/`.
-
-Pipeline Spark reads require a physical `tenant_id` column and apply the tenant from the immutable pipeline-run row before transformations. Pipeline writes reject missing or foreign tenant IDs. ML training source SQL is generated with the tenant captured by the experiment/run; model, version, deployment, prediction, batch and lineage reads are tenant-scoped. Model artifact loading validates the normalized and real filesystem path under the tenant-owned artifact directory, and the model cache key includes tenant identity. S3 artifact operations expose only tenant-prefixed public methods. Governed BI aggregate and drill-through queries predicate on `tenant_id`; BI cache keys include tenant identity. Reports, dashboards, widgets, grants and the legacy dashboard layout mutation path enforce tenant ownership. PostgreSQL integration tests cover cross-tenant feature keys, ML records and artifact path escape, BI reports/dashboard/widget data, plus ML training source filtering. Remaining work includes legacy raw Doris/query endpoints, ingestion connector and artifact lifecycle, and every distributed schedule/worker transition. Do not expose shared multi-tenant SaaS until those remaining paths have negative cross-tenant tests.
-
-## Audit and API throttling
-
-Audit events currently capture API request outcome, subject, tenant claim, request ID and peer metadata. This is request-level operational evidence; high-value data mutations and worker lifecycle transitions should also emit domain audit events before regulated production use.
-
-Every `/api/**` request is recorded in `platform_audit_events` with subject, tenant claim, route, method, outcome, status, request ID, peer IP and user agent. The API `GET /api/platform/audit-events` exposes tenant-scoped, paginated events to subjects with `audit:read`. Audit records are retained for 180 days by default (configurable with `sbase.audit.retention-days`).
-
-A PostgreSQL-backed atomic token bucket runs after bearer authentication. Authenticated keys use subject and normalized route; unauthenticated requests use the socket peer IP. The reverse-proxy forwarded IP headers are not trusted. For high-throughput multi-replica deployments, move rate-limit state to Redis and partition/retain audit events according to compliance requirements.
-
-## Doris high availability
-
-Use the additional topology overlay:
+The default Compose stack runs one PostgreSQL instance and Spark master/worker.
+The `app-ha` profile adds a second SBase application node only; it does not make
+the PostgreSQL database highly available.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.doris-ha.yml config
-docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.doris-ha.yml up -d
+docker compose config --quiet
+docker compose --profile app-ha config --quiet
+docker compose up --build -d
 ```
 
-It defines three FE nodes and three BE nodes with persistent volumes, registers the three backends and configures default replication factor 3. SBase uses a MySQL Connector/J load-balanced URL across the three FEs. Place FE/BE nodes on separate hosts/AZs for actual host-failure tolerance. Verify `SHOW FRONTENDS`, `SHOW BACKENDS`, tablet replica health and replication factor after bootstrap. Migrate existing tables deliberately. The base one-FE/one-BE profile remains for CI and local development. Validate this topology against the exact Doris image startup scripts and test FE/BE failover before production.
+Do not delete the existing PostgreSQL volume when upgrading. PostgreSQL is the
+only persistent database in the new topology.
 
-## Doris snapshot / restore
+## Production PostgreSQL availability
 
-Scripts `ops/backup-doris.sh` and `ops/restore-doris.sh` use Doris S3 repositories. Provide a dedicated least-privilege S3 identity and endpoint. The scripts accept an explicit comma-separated table list and stable snapshot label. A successful SQL submission is not proof of a completed backup: check `SHOW BACKUP FROM analytics`, record its exact backup timestamp, copy repository objects off the failure domain and perform restore drills. Restore is destructive and requires `CONFIRM_DORIS_RESTORE=YES` plus `DORIS_BACKUP_TIMESTAMP` copied from `SHOW BACKUP`.
+For production, run PostgreSQL on durable storage with a tested HA design:
+streaming replication or a managed PostgreSQL service, automatic failover,
+connection routing, WAL archiving and point-in-time recovery. The Compose
+profile is a development/single-node deployment and must not be treated as a
+database HA design.
 
-## S3 / MinIO object lifecycle
+Recommended controls:
 
-Start the optional MinIO overlay:
+1. Use a dedicated least-privilege application role; keep owner/migration
+   credentials separate from runtime credentials.
+2. Enable TLS for database connections across hosts.
+3. Configure WAL archiving and continuous backups (for example pgBackRest or
+   an equivalent managed-service facility).
+4. Test point-in-time recovery into an isolated environment at least quarterly.
+5. Monitor replication lag, connection saturation, deadlocks, vacuum age,
+   bloat, disk headroom and long-running transactions.
+6. Use connection pool limits that account for every SBase application node,
+   Spark executor and operational client.
+7. Exercise failover and connection re-establishment without dropping the
+   PostgreSQL data volume.
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.object-storage.yml up -d
-```
+## Backup and restore
 
-It creates `sbase-artifacts` and `doris-backups`, enables versioning and expires current objects after 365 days and non-current versions after 90 days. Set `SBASE_S3_ENDPOINT=http://minio:9000`, `SBASE_S3_ACCESS_KEY`, `SBASE_S3_SECRET_KEY` and `SBASE_S3_BUCKET=sbase-artifacts` for the application. S3 helper APIs can scope object keys by tenant. A single MinIO instance is not HA; use distributed MinIO or external S3 with replication, encryption, object lock where required and off-site backup. Align lifecycle expiry with legal retention and artifact references.
+Use `ops/backup-postgres.sh` and `ops/restore-postgres.sh` for the repository's
+supported logical backup/restore workflow. A logical backup is not a
+point-in-time recovery strategy; production deployments should also archive WAL
+and periodically prove a full restore.
 
-## Kafka HA and schema evolution
+## Migrating from an older Doris deployment
 
-Start the Kafka KRaft overlay:
+The new Compose files no longer start Doris. Existing Docker volumes are not
+deleted by this change; preserve them until any required export has been
+completed. Do not run `docker compose down --volumes` during the transition.
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.kafka-ha.yml up -d
-```
-
-Three broker/controller nodes use replication factor 3 and min ISR 2 for internal topics. Schema Registry uses BACKWARD compatibility by default. Kafka ingestion can parse the Confluent wire header, retain schema IDs/raw bytes and optionally resolve the schema document through `schemaRegistryUrl`. Register schemas and enforce compatibility in producer/consumer release pipelines. This example uses PLAINTEXT on a private Compose network; use TLS/SASL, ACLs and separate failure domains before cross-host production exposure.
-
-## Load, stress and soak tests
-
-The `perf/k6` directory contains smoke, stress and 24-hour soak scenarios; see [perf/README.md](../perf/README.md) for commands and acceptance gates. The included k6 workload is an API baseline, not a replacement for dedicated Kafka ingestion, Spark pipeline, Doris analytical-query and S3 throughput benchmarks. Run all profiles in staging, capture Prometheus metrics and test broker/FE/BE loss, checkpoint recovery, DLQ replay and database restore during sustained traffic. Never run destructive tests against customer production data.
+The migration does not silently import external analytical data. Export each
+required table from the old Doris deployment, convert Doris-specific types and
+DDL to PostgreSQL types/constraints, load it into a staging schema, verify
+row counts and tenant ownership, create UNIQUE constraints, and only then
+register the PostgreSQL table in the tenant governance registry. Retain the
+original backup until the PostgreSQL copy has passed reconciliation.

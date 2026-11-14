@@ -1,6 +1,6 @@
 # Ingestion connector execution
 
-The ingestion API accepts `jdbc`, `doris`, `kafka`, `debezium`, `rest` and `file` connector types. Connector IDs must reference a row in `ingestion_connectors`; the execution service injects that ID into connector options. Configure source credentials in a secret manager in production, not in request bodies.
+The ingestion API accepts `jdbc`, `postgresql`, `kafka` (the legacy `doris` connector ID remains accepted for existing records), `debezium`, `rest` and `file` connector types. Connector IDs must reference a row in `ingestion_connectors`; the execution service injects that ID into connector options. Configure source credentials in a secret manager in production, not in request bodies.
 
 ## Durable landing and delivery semantics
 

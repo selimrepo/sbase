@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
-class PipelineDorisTenantPushdownTest {
+class PipelinePostgresTenantPushdownTest {
     private static final UUID TENANT=UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 
     @Test void pushesPersistedTenantPredicateIntoDorisJdbcSourceQuery() {

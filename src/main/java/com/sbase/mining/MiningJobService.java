@@ -1,7 +1,8 @@
 package com.sbase.mining;
 
-import com.sbase.doris.DorisClient;
-import com.sbase.doris.DorisDatasetWriter;
+import com.sbase.postgres.PostgresClient;
+import com.sbase.postgres.PostgresDatasetWriter;
+import com.sbase.platform.bi.PostgresTenantTablePolicy;
 import org.apache.spark.ml.clustering.KMeans;
 import org.apache.spark.ml.clustering.KMeansModel;
 import org.apache.spark.ml.feature.VectorAssembler;
@@ -22,13 +23,14 @@ import java.util.concurrent.Executor;
 public class MiningJobService {
     private final MiningJobRepository repository;
     private final SparkSession spark;
-    private final DorisClient doris;
-    private final DorisDatasetWriter dorisWriter;
+    private final PostgresClient postgres;
+    private final PostgresDatasetWriter postgresWriter;
+    private final PostgresTenantTablePolicy tablePolicy;
     private final Executor executor;
     private final AutomaticMiningService automaticMining;
-    public MiningJobService(MiningJobRepository repository,@Lazy SparkSession spark,DorisClient doris,
-            DorisDatasetWriter dorisWriter,AutomaticMiningService automaticMining,@Qualifier("miningExecutor") Executor executor) {
-        this.repository=repository; this.spark=spark; this.doris=doris; this.dorisWriter=dorisWriter;
+    public MiningJobService(MiningJobRepository repository,@Lazy SparkSession spark,PostgresClient postgres,
+            PostgresDatasetWriter postgresWriter,PostgresTenantTablePolicy tablePolicy,AutomaticMiningService automaticMining,@Qualifier("miningExecutor") Executor executor) {
+        this.repository=repository; this.spark=spark; this.postgres=postgres; this.postgresWriter=postgresWriter; this.tablePolicy=tablePolicy;
         this.automaticMining=automaticMining; this.executor=executor;
     }
     @Transactional public MiningJob submit(MiningJobRequest request,UUID tenantId,String subject) {
@@ -49,19 +51,23 @@ public class MiningJobService {
     private void execute(UUID id,MiningJobRequest request) {
         try {
             markRunning(id);
-            Dataset<Row> source=spark.read().format("jdbc").option("url",doris.jdbcUrl()).option("dbtable",request.sourceTable())
-                .option("user",doris.username()).option("password",doris.password()).option("driver","com.mysql.cj.jdbc.Driver").load();
+            UUID tenantId=repository.findById(id).map(MiningJobEntity::getTenantId)
+                .orElseThrow(() -> new IllegalStateException("Mining job disappeared before execution"));
+            String sourceTable=tablePolicy.requireTenantScoped(request.sourceTable());
+            String scopedSource="(SELECT * FROM "+sourceTable+" WHERE tenant_id = '"+tenantId+"') AS sbase_tenant_source";
+            Dataset<Row> source=spark.read().format("jdbc").option("url",postgres.jdbcUrl()).option("dbtable",scopedSource)
+                .option("user",postgres.username()).option("password",postgres.password()).option("driver","org.postgresql.Driver").load();
             String summary=switch(request.operation()) {
                 case "describe" -> source.describe().toJSON().collectAsList().toString();
                 case "profile" -> source.summary().toJSON().collectAsList().toString();
                 case "auto" -> automaticMining.analyze(source,request.outputTable());
-                case "kmeans" -> runKMeans(source,request);
+                case "kmeans" -> runKMeans(source,request,tenantId);
                 default -> throw new IllegalArgumentException("Unsupported operation: "+request.operation());
             };
             markSucceeded(id,summary);
         } catch(Exception ex) { markFailed(id,ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage()); }
     }
-    private String runKMeans(Dataset<Row> source,MiningJobRequest request) {
+    private String runKMeans(Dataset<Row> source,MiningJobRequest request,UUID tenantId) {
         String[] features=Arrays.stream(source.schema().fieldNames()).filter(name -> {
             String type=source.schema().apply(name).dataType().typeName();
             return type.equals("double")||type.equals("float")||type.equals("integer")||type.equals("long");
@@ -70,7 +76,9 @@ public class MiningJobService {
         Dataset<Row> vectors=new VectorAssembler().setInputCols(features).setOutputCol("features").setHandleInvalid("skip").transform(source);
         KMeansModel model=new KMeans().setK(request.k()==null?3:request.k()).setMaxIter(request.maxIterations()==null?20:request.maxIterations()).setSeed(42L).fit(vectors);
         Dataset<Row> predictions=model.transform(vectors).drop("features");
-        dorisWriter.append(predictions,request.outputTable());
+        if (!Arrays.asList(predictions.columns()).contains("tenant_id"))
+            throw new org.springframework.security.access.AccessDeniedException("Mining source must retain tenant_id through model output");
+        postgresWriter.append(predictions,request.outputTable(),tenantId);
         return "rows="+predictions.count()+", features="+Arrays.toString(features)+", trainingCost="+model.summary().trainingCost()
             +", clusterCenters="+Arrays.toString(model.clusterCenters());
     }

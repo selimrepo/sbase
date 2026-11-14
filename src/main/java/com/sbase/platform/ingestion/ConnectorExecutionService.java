@@ -36,9 +36,13 @@ public class ConnectorExecutionService {
         this.batchSize = Math.max(1, Math.min(32, batchSize));
         this.workerExecutor = workerExecutor;
         Map<String, IngestionConnector> map = new HashMap<>();
-        for (IngestionConnector connector : list)
-            if (map.put(connector.type().toLowerCase(Locale.ROOT), connector) != null)
+        for (IngestionConnector connector : list) {
+            String connectorType = connector.type().toLowerCase(Locale.ROOT);
+            if (map.put(connectorType, connector) != null)
                 throw new IllegalStateException("Duplicate connector type: " + connector.type());
+            // Existing tenant connector records may still be labelled "doris".
+            if ("postgresql".equals(connectorType)) map.putIfAbsent("doris", connector);
+        }
         connectors = Map.copyOf(map);
     }
 
@@ -51,7 +55,13 @@ public class ConnectorExecutionService {
         String registered = db.query("SELECT connector_type FROM ingestion_connectors WHERE id=? AND tenant_id=? AND enabled=true",
                 rs -> rs.next() ? rs.getString(1) : null, connectorId, tenantId);
         if (registered == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Connector not found");
-        if (!registered.equalsIgnoreCase(type)) throw new ResponseStatusException(HttpStatus.CONFLICT, "Connector type mismatch");
+        boolean legacyDorisAlias = ("postgresql".equalsIgnoreCase(type) && "doris".equalsIgnoreCase(registered))
+                || ("doris".equalsIgnoreCase(type) && "postgresql".equalsIgnoreCase(registered));
+        if (!registered.equalsIgnoreCase(type) && !legacyDorisAlias)
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Connector type mismatch");
+        // Preserve the persisted connector type in the durable request so the
+        // ownership re-check remains valid for existing Doris-labelled records.
+        normalized = registered.toLowerCase(Locale.ROOT);
         if (datasetId != null && !Boolean.TRUE.equals(db.query(
                 "SELECT EXISTS(SELECT 1 FROM datasets WHERE id=? AND tenant_id=?)",
                 rs -> rs.next() && rs.getBoolean(1), datasetId, tenantId)))
@@ -187,6 +197,6 @@ public class ConnectorExecutionService {
         }
     }
 
-    public Set<String> types() { return connectors.keySet(); }
+    public Set<String> types() { return connectors.values().stream().map(c -> c.type().toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet()); }
     private record ClaimedRun(UUID id, UUID tenantId, UUID connectorId, String payload, long fencingToken, int attempt) { }
 }

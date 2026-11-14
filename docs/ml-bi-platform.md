@@ -1,6 +1,6 @@
 # ML lifecycle, Feature Store and BI workspaces
 
-This change adds a tenant-scoped ML lifecycle and self-service BI layer to the existing SBase Spring Boot / Spark / PostgreSQL / Doris application. It stays in the existing application and uses PostgreSQL for control-plane metadata, Spark MLlib for training/inference, and Doris for OLAP reads.
+This change adds a tenant-scoped ML lifecycle and self-service BI layer to the existing SBase Spring Boot / Spark / PostgreSQL / PostgreSQL application. It stays in the existing application and uses PostgreSQL for control-plane metadata, Spark MLlib for training/inference, and PostgreSQL for OLAP reads.
 
 ## Machine learning
 
@@ -46,11 +46,11 @@ Spark MLlib artifacts are written below `SBASE_ML_ARTIFACT_ROOT` using tenant/ru
 
 ### Visual query design
 
-- `GET /api/bi/catalog/tables` returns configured Doris allow-listed tables and their columns.
+- `GET /api/bi/catalog/tables` returns configured PostgreSQL allow-listed tables and their columns.
 - `POST /api/bi/query` accepts a structured definition: table, dimensions, aggregate metrics, filters, sort expressions and result limit.
 - Supported aggregates: COUNT, SUM, AVG, MIN, MAX and COUNT_DISTINCT.
 - Supported filters: EQ/NE/GT/GTE/LT/LTE, CONTAINS/STARTS_WITH/ENDS_WITH, IN, BETWEEN, IS_NULL and NOT_NULL.
-- The server validates table and column identifiers against Doris metadata, escapes values, generates a single-table SELECT, and injects a mandatory `tenant_id` predicate. BI sources without a tenant_id column are rejected.
+- The server validates table and column identifiers against PostgreSQL metadata, escapes values, generates a single-table SELECT, and injects a mandatory `tenant_id` predicate. BI sources without a tenant_id column are rejected.
 - Query limits are bounded; estimated complexity is checked before execution. A per-instance semaphore limits concurrent queries. Results are cached in a bounded in-memory TTL cache keyed by tenant and query definition. Every execution/cache hit is audited in PostgreSQL.
 
 ### Drill actions
@@ -79,7 +79,7 @@ Spark MLlib artifacts are written below `SBASE_ML_ARTIFACT_ROOT` using tenant/ru
 |---|---|---|
 | `SBASE_ML_ALLOWED_TABLES` | Comma-separated PostgreSQL training source tables | empty (training disabled until configured) |
 | `SBASE_ML_ARTIFACT_ROOT` | Persistent/shared Spark model artifact root | `./data/ml-artifacts` |
-| `DORIS_ALLOWED_TABLES` | Comma-separated Doris BI table allowlist | empty (BI catalog empty until configured) |
+| `SBASE_ANALYTICS_ALLOWED_TABLES` | Comma-separated PostgreSQL BI table allowlist | empty (BI catalog empty until configured) |
 | `SBASE_BI_MAX_CONCURRENT` | Concurrent BI queries per application instance | 4 |
 | `SBASE_BI_CACHE_TTL_MS` | BI in-memory cache TTL | 30000 |
 | `SBASE_BI_MAX_ROWS` | Maximum query rows | 5000 |

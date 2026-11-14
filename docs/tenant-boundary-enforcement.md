@@ -1,8 +1,8 @@
 # Tenant boundary enforcement and connector contracts
 
-## Doris
-All tenant-data tables are fail-closed. A table must be in `SBASE_DORIS_ALLOWED_TABLES`,
-registered and approved in `doris_tenant_table_policies`, and physically expose a
+## PostgreSQL
+All tenant-data tables are fail-closed. A table must be in `SBASE_ANALYTICS_ALLOWED_TABLES`,
+registered and approved in `postgres_tenant_table_policies`, and physically expose a
 `tenant_id` column. Legacy SQL and governed BI both call the same policy service;
 the authenticated tenant is injected by the query boundary, not accepted from SQL.
 The shared Spark writer rejects foreign/null tenant rows. Pipeline reads filter by the
@@ -11,8 +11,8 @@ policy and physical tenant column.
 
 Do not register platform metadata, information-schema, audit, or public reference tables
 as tenant data. Existing tables are intentionally not auto-approved by migration.
-Follow `docs/doris-tenant-governance.md` to inspect, backfill and approve each table.
-Use a restricted Doris account with only required SELECT/INSERT grants; the policy
+Follow `docs/postgres-tenant-governance.md` to inspect, backfill and approve each table.
+Use a restricted PostgreSQL account with only required SELECT/INSERT grants; the policy
 registry is not a substitute for database credentials and grants.
 
 ## Connector data contracts
@@ -31,8 +31,8 @@ another tenant.
 - **JDBC:** the source query must return `tenant_id`; each row is checked against the
   persisted run tenant before it is written. Target tables must accept the tenant column.
   External database grants and row-level policies remain the operator's responsibility.
-- **Doris connector:** in addition to JDBC row checks, the destination table must pass
-  the Doris tenant table registry and physical schema checks.
+- **PostgreSQL connector:** in addition to JDBC row checks, the destination table must pass
+  the PostgreSQL tenant table registry and physical schema checks.
 - **Kafka and Debezium:** every message must carry the trusted `sbase-tenant-id` header
   (or the configured `tenantHeader`) matching the connector tenant. JSON payloads are
   recursively checked for conflicting `tenant_id` values. Binary/Avro payloads rely on
@@ -50,17 +50,17 @@ child records to the same tenant as their parent. It also makes online feature k
 tenant-local by including `tenant_id` in the primary key and upsert conflict target.
 
 ## Operations and assurance
-1. Backfill and review every Doris table before enabling it in the registry.
+1. Backfill and review every PostgreSQL table before enabling it in the registry.
 2. Provision tenant-specific file directories and do not allow untrusted users to write
    symlinks into the ingestion root.
 3. Configure Kafka ACLs for trusted producers and topic-level tenant routing.
 4. Use separate least-privilege credentials for each external JDBC source/target where
    supported; avoid shared superuser accounts.
 5. Run the cross-tenant negative integration suite after every connector or schema change.
-6. Treat any missing tenant discriminator, ownership mismatch, unregistered Doris table,
+6. Treat any missing tenant discriminator, ownership mismatch, unregistered PostgreSQL table,
    or failed policy lookup as a hard denial.
 
 These controls harden the application paths and PostgreSQL relationships. They do not
 prove isolation inside arbitrary external JDBC systems, Kafka brokers, object-store
-administrative APIs, or Doris users with unrestricted direct SQL access. Those boundaries
+administrative APIs, or PostgreSQL users with unrestricted direct SQL access. Those boundaries
 must be secured with provider-side IAM/ACLs and verified in the deployment environment.

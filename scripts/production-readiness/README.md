@@ -23,7 +23,7 @@ docker compose up -d --build
 
 ## Development and production Compose files
 
-The shared `docker-compose.yml` retains the complete service graph and optional profiles (HA, Doris HA, Kafka, object storage and observability). Use one environment overlay; do not start both overlays together.
+The shared `docker-compose.yml` retains the complete service graph and optional profiles (HA, PostgreSQL HA, Kafka, object storage and observability). Use one environment overlay; do not start both overlays together.
 
 Development:
 
@@ -104,7 +104,7 @@ Initial thresholds: failed requests below 1%, p95 below 500 ms, p99 below 1.5 s.
 
 ## Data integrity and resilience scenarios
 
-Existing CI already exercises Spark-to-Doris load, duplicate-key idempotency, Doris outage/recovery, app liveness/restart. Add staging drills for:
+Existing CI already exercises Spark-to-PostgreSQL load, duplicate-key idempotency, PostgreSQL outage/recovery, app liveness/restart. Add staging drills for:
 - Concurrent duplicate submissions with one idempotency key; one durable logical result.
 - Worker termination between external write and status update; no duplicate business rows on retry.
 - Lease expiry, retry exhaustion, dead-letter visibility and manual replay.

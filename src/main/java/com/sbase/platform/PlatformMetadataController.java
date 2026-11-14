@@ -17,17 +17,17 @@ import java.util.*;
 @RequestMapping("/api/platform")
 public class PlatformMetadataController {
     private final JdbcTemplate db;
-    private final com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics;
+    private final com.sbase.platform.bi.PostgresBiAnalyticsService postgresAnalytics;
     private final com.sbase.platform.security.PermissionService permissions;
     private final com.sbase.platform.tenant.TenantContext tenants;
     @org.springframework.beans.factory.annotation.Autowired
-    private com.sbase.platform.bi.DorisTenantGovernanceAuditService dorisGovernanceAudit;
+    private com.sbase.platform.bi.PostgresTenantGovernanceAuditService postgresGovernanceAudit;
 
     public PlatformMetadataController(@Qualifier("jdbcTemplate") JdbcTemplate db,
-            com.sbase.platform.bi.DorisBiAnalyticsService dorisAnalytics,
+            com.sbase.platform.bi.PostgresBiAnalyticsService postgresAnalytics,
             com.sbase.platform.security.PermissionService permissions,
             com.sbase.platform.tenant.TenantContext tenants) {
-        this.db=db; this.dorisAnalytics=dorisAnalytics; this.permissions=permissions; this.tenants=tenants;
+        this.db=db; this.postgresAnalytics=postgresAnalytics; this.permissions=permissions; this.tenants=tenants;
     }
 
     public record Experiment(@NotBlank @Size(max=160) String name,String description,UUID datasetId,
@@ -159,9 +159,9 @@ public class PlatformMetadataController {
     }
 
     @PostMapping("/bi/tenant-governance/audit")
-    public Map<String,Object> auditDorisTenantGovernance(Authentication auth) {
+    public Map<String,Object> auditPostgresTenantGovernance(Authentication auth) {
         require(auth,"platform:admin",false);
-        return dorisGovernanceAudit.auditAllDatabases(auth.getName());
+        return postgresGovernanceAudit.auditAllDatabases(auth.getName());
     }
 
     @GetMapping("/bi/summary")
@@ -173,9 +173,9 @@ public class PlatformMetadataController {
             metadata.put(table,db.queryForObject("SELECT COUNT(*) FROM "+table+" WHERE tenant_id=?",Long.class,tenant));
         Map<String,Object> result=new LinkedHashMap<>();
         result.put("metadata",metadata);
-        // Doris table inventory and audit activity are cluster-wide operational data;
+        // PostgreSQL table inventory and audit activity are cluster-wide operational data;
         // only tenant platform administrators may inspect this legacy endpoint.
-        result.put("analytics",dorisAnalytics.summary());
+        result.put("analytics",postgresAnalytics.summary());
         return result;
     }
 }

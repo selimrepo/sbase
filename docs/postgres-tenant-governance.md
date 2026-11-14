@@ -1,24 +1,24 @@
-# Doris tenant table governance
+# PostgreSQL tenant table governance
 
-Doris is a shared analytical engine. Every table containing tenant data must be
-registered in PostgreSQL `doris_tenant_table_policies` before governed BI, pipeline
-reads/writes, the Doris ingestion connector, or the shared Spark dataset writer can
+PostgreSQL is a shared analytical engine. Every table containing tenant data must be
+registered in PostgreSQL `postgres_tenant_table_policies` before governed BI, pipeline
+reads/writes, the PostgreSQL ingestion connector, or the shared Spark dataset writer can
 access it. Runtime access is fail-closed: the table must be allow-listed, approved as
 `TENANT_DATA`, marked `VERIFIED`, and physically expose `tenant_id`.
 
 ## Approving a table
 
-1. Inspect the full Doris table definition. Confirm `tenant_id` is populated from a
+1. Inspect the full PostgreSQL table definition. Confirm `tenant_id` is populated from a
    trusted source and is not user-editable. Backfill legacy rows before approval.
 2. Confirm ingestion, CDC, backfill, compaction and repair jobs preserve ownership.
    A nullable or default-to-one-tenant discriminator is not acceptable.
-3. Run a complete Doris data-quality scan and record the returned values:
+3. Run a complete PostgreSQL data-quality scan and record the returned values:
 
 ```sql
 SELECT COUNT(*) AS verified_row_count,
        SUM(CASE
              WHEN tenant_id IS NULL
-               OR tenant_id NOT REGEXP '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+               OR tenant_id::text !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
              THEN 1 ELSE 0
            END) AS invalid_tenant_rows
 FROM analytics.orders;
@@ -27,11 +27,11 @@ FROM analytics.orders;
 The scan must report zero invalid rows. Re-run it after every backfill or ingestion
 schema change. UUID syntax validation does not prove business ownership: reconcile
 tenant IDs with the authoritative tenant inventory and source-system ownership rules.
-4. Add the table to `sbase.doris.allowed-tables`.
+4. Add the table to `SBASE_ANALYTICS_ALLOWED_TABLES`.
 5. Register it only after review. Replace the sample row count with the measured value:
 
 ```sql
-INSERT INTO doris_tenant_table_policies
+INSERT INTO postgres_tenant_table_policies
     (schema_name, table_name, tenant_column, enabled, classification,
      approved_by, approved_at, verification_status, verified_row_count,
      invalid_tenant_rows, verified_at)
@@ -54,23 +54,23 @@ SET tenant_column=EXCLUDED.tenant_column,
 Disable immediately if ownership is uncertain:
 
 ```sql
-UPDATE doris_tenant_table_policies
+UPDATE postgres_tenant_table_policies
    SET enabled=FALSE, verification_status='REJECTED', updated_at=now()
  WHERE schema_name='analytics' AND table_name='orders';
 ```
 
-Policy changes are written to `doris_tenant_policy_audit`. Re-approval requires a new
+Policy changes are written to `postgres_tenant_policy_audit`. Re-approval requires a new
 data-quality scan and a new verification timestamp. Existing tables are intentionally
 not auto-approved by Flyway.
 
-## Doris privileges
+## PostgreSQL privileges
 
-The registry is a runtime application guard, not a replacement for Doris account
-permissions. Production deployments must use a restricted Doris service account:
+The registry is a runtime application guard, not a replacement for PostgreSQL account
+permissions. Production deployments must use a restricted PostgreSQL service account:
 no DDL, no user-controlled SQL, no direct BI access to raw schemas, and only the
 specific SELECT/INSERT privileges required by SBase. Review grants, views, materialized
 views, routine-load jobs and external catalogs separately. Spark JDBC writers and
-the Doris ingestion connector use the configured service credentials.
+the PostgreSQL ingestion connector use the configured service credentials.
 
 Platform-internal metadata and query-audit tables must never be registered as
 `TENANT_DATA`. Their endpoints remain platform-admin-only and expose only cluster
@@ -82,18 +82,18 @@ Kafka ACLs, external JDBC permissions and object-store IAM must be verified sepa
 
 ## Full physical inventory audit
 
-A platform administrator can run the read-only inventory audit through:
+A platform administrator can run the inventory audit (it records audit events and disables stale registrations) through:
 
 ```http
-POST /api/platform/doris/tenant-governance/audit
+POST /api/platform/postgres/tenant-governance/audit
 Authorization: Bearer <platform-admin JWT>
 ```
 
-The configured-database audit enumerates every object reported by Doris `information_schema.tables`
+The configured-database audit enumerates every object reported by PostgreSQL `information_schema.tables`
 (not only allow-listed tables), checks the physical
 `tenant_id` column, scans all visible rows for null or malformed UUID values,
 and compares the live row count with the last approved row-count attestation.
-Every result is persisted to `doris_tenant_policy_audit`.
+Every result is persisted to `postgres_tenant_policy_audit`.
 
 Possible outcomes include `MISSING_TENANT_COLUMN`,
 `UNREGISTERED_OR_UNVERIFIED`, `INVALID_TENANT_ROWS`,
@@ -105,15 +105,12 @@ or auto-approves a table.
 A `VERIFIED_SHAPE` result is not proof that the source system assigned the
 correct tenant to each row. Reconcile the actual tenant values against source
 ownership and trusted tenant mapping before updating the policy registry. This
-scan covers the configured Doris database visible to the service account; repeat
-it for every external catalog/database and separately review routine-load,
-materialized-view refresh, broker load, Spark, direct SQL, and administrative
+scan covers the configured PostgreSQL database visible to the service account; repeat
+it for every external catalog/database and separately review materialized-view refresh, Spark, direct SQL, and administrative
 credentials. The scanner does not prove the absence of out-of-band writers.
 
-The CI Docker Compose integration profile also runs a real Doris tenant-boundary
-integration test after the FE/BE cluster is healthy. It creates an isolated
-temporary Doris database, inserts two tenants' rows, verifies the governed BI
-query returns only the authenticated tenant's row, injects a malformed tenant
-value, runs the inventory audit, and verifies the table is disabled at the
-policy layer. This complements unit tests; production source-to-tenant mapping
+The CI Docker Compose integration profile also runs real PostgreSQL tenant-boundary
+coverage after PostgreSQL is healthy. It creates an isolated Testcontainers database,
+inserts two tenants' rows, verifies the governed BI query returns only the authenticated
+tenant's row, and verifies that disabling the table policy blocks subsequent queries. This complements unit tests; production source-to-tenant mapping
 and external broker/object-store ACLs still require deployment-specific review.

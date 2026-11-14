@@ -7,14 +7,14 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
-/** Platform-admin-only inventory and verification endpoint for the physical Doris catalog. */
+/** Platform-admin-only inventory and verification endpoint for the physical PostgreSQL catalog. */
 @RestController
-@RequestMapping("/api/platform/doris/tenant-governance")
-public class DorisTenantGovernanceController {
-    private final DorisTenantGovernanceAuditService audit;
+@RequestMapping("/api/platform/postgres/tenant-governance")
+public class PostgresTenantGovernanceController {
+    private final PostgresTenantGovernanceAuditService audit;
     private final PermissionService permissions;
 
-    public DorisTenantGovernanceController(DorisTenantGovernanceAuditService audit, PermissionService permissions) {
+    public PostgresTenantGovernanceController(PostgresTenantGovernanceAuditService audit, PermissionService permissions) {
         this.audit=audit;
         this.permissions=permissions;
     }

@@ -13,15 +13,15 @@ import java.util.concurrent.*;
 
 @Service
 public class GovernedBiQueryService {
- private final DorisBiQueryService doris;private final DorisTenantTablePolicy tablePolicy;private final JdbcTemplate control;private final JdbcTemplate analytics;
+ private final PostgresBiQueryService postgres;private final PostgresTenantTablePolicy tablePolicy;private final JdbcTemplate control;private final JdbcTemplate analytics;
  private final ObjectMapper mapper;private final String database;private final Set<String> tables;
  private final Semaphore permits;private final long cacheMillis;private final int maxRows;private final double maxCost;private final ConcurrentHashMap<String,CacheEntry> cache=new ConcurrentHashMap<>();
- public GovernedBiQueryService(DorisBiQueryService doris,DorisTenantTablePolicy tablePolicy,@Qualifier("jdbcTemplate") JdbcTemplate control,
-  @Qualifier("dorisJdbcTemplate") JdbcTemplate analytics,ObjectMapper mapper,
-  @Value("${sbase.doris.database:analytics}") String database,@Value("${sbase.doris.allowed-tables:}") String allowed,
+ public GovernedBiQueryService(PostgresBiQueryService postgres,PostgresTenantTablePolicy tablePolicy,@Qualifier("jdbcTemplate") JdbcTemplate control,
+  @Qualifier("postgresJdbcTemplate") JdbcTemplate analytics,ObjectMapper mapper,
+  @Value("${sbase.postgres.database:public}") String database,@Value("${sbase.postgres.allowed-tables:}") String allowed,
   @Value("${sbase.bi.max-concurrent-queries:4}") int concurrency,@Value("${sbase.bi.cache-ttl-ms:30000}") long cacheMillis,
   @Value("${sbase.bi.max-rows:5000}") int maxRows,@Value("${sbase.bi.max-estimated-cost:100000}") double maxCost){
-  this.doris=doris;this.tablePolicy=tablePolicy;this.control=control;this.analytics=analytics;this.mapper=mapper;this.database=database;
+  this.postgres=postgres;this.tablePolicy=tablePolicy;this.control=control;this.analytics=analytics;this.mapper=mapper;this.database=database;
   this.tables=new HashSet<>();for(String t:allowed.split(","))if(!t.isBlank())tables.add(t.trim().toLowerCase(Locale.ROOT));
   this.permits=new Semaphore(Math.max(1,concurrency));this.cacheMillis=Math.max(0,cacheMillis);this.maxRows=Math.min(10000,Math.max(1,maxRows));this.maxCost=Math.max(1000,maxCost);
  }
@@ -32,7 +32,7 @@ public class GovernedBiQueryService {
   if(!permits.tryAcquire())throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,"BI query concurrency limit reached");
   String sql;try{sql=compile(d,tenant);double planned=(double)(d.limit()==null?1000:d.limit())*(1+(d.dimensions()==null?0:d.dimensions().size())+(d.filters()==null?0:d.filters().size()));if(planned>maxCost)throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,"Estimated BI query cost exceeds configured budget");}catch(RuntimeException e){permits.release();throw e;}
   try{
-   List<Map<String,Object>> rows=doris.query(tenant,sql);long elapsed=(System.nanoTime()-started)/1_000_000;
+   List<Map<String,Object>> rows=postgres.query(tenant,sql);long elapsed=(System.nanoTime()-started)/1_000_000;
    double cost=estimate(d,rows.size(),elapsed);audit(tenant,subject,hash,elapsed,rows.size(),cost,false,"SUCCEEDED");
    if(cacheMillis>0){cache.entrySet().removeIf(e->e.getValue().expiresAt()<System.currentTimeMillis());if(cache.size()>=2000){String oldest=cache.keySet().stream().findFirst().orElse(null);if(oldest!=null)cache.remove(oldest);}cache.put(key,new CacheEntry(List.copyOf(rows),System.currentTimeMillis()+cacheMillis));}
    return Map.of("rows",rows,"rowCount",rows.size(),"cacheHit",false,"queryHash",hash,"elapsedMs",elapsed,"estimatedCost",cost);
@@ -78,7 +78,7 @@ public class GovernedBiQueryService {
   String sql="SELECT "+String.join(",",columns)+" FROM "+governedTable
       +(where.isEmpty()?"":" WHERE "+String.join(" AND ",where))+" LIMIT "+limit;
   String hash=hash(sql);if(!permits.tryAcquire())throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,"BI query concurrency limit reached");
-  long started=System.nanoTime();try{List<Map<String,Object>> rows=doris.query(tenant,sql);long elapsed=(System.nanoTime()-started)/1_000_000;audit(tenant,subject,hash,elapsed,rows.size(),rows.size()+elapsed/1000.0,false,"SUCCEEDED");return Map.of("rows",rows,"rowCount",rows.size(),"queryHash",hash,"elapsedMs",elapsed,"drillThrough",true);}
+  long started=System.nanoTime();try{List<Map<String,Object>> rows=postgres.query(tenant,sql);long elapsed=(System.nanoTime()-started)/1_000_000;audit(tenant,subject,hash,elapsed,rows.size(),rows.size()+elapsed/1000.0,false,"SUCCEEDED");return Map.of("rows",rows,"rowCount",rows.size(),"queryHash",hash,"elapsedMs",elapsed,"drillThrough",true);}
   catch(RuntimeException ex){long elapsed=(System.nanoTime()-started)/1_000_000;audit(tenant,subject,hash,elapsed,0,0,false,"FAILED");throw ex;}
   finally{permits.release();}
  }

@@ -10,7 +10,7 @@ import java.util.*;
 
 @Component
 public class PipelineDefinitionValidator {
-    private static final Set<String> TYPES = Set.of("doris_read", "filter", "select", "with_column", "aggregate", "doris_write", "join", "union", "feature_store_write");
+    private static final Set<String> TYPES = Set.of("postgres_read", "postgres_write", "doris_read", "doris_write", "filter", "select", "with_column", "aggregate", "join", "union", "feature_store_write");
     private static final Set<String> OPERATORS = Set.of("eq", "ne", "gt", "gte", "lt", "lte", "contains", "is_null", "not_null", "in");
     private static final Set<String> COLUMN_OPS = Set.of("cast_double", "lower", "upper", "trim", "abs", "log1p");
     private static final String IDENTIFIER = "[A-Za-z_][A-Za-z0-9_]*";
@@ -45,7 +45,7 @@ public class PipelineDefinitionValidator {
 
     private void validateStep(JsonNode step, String type) {
         switch (type) {
-            case "doris_read" -> table(text(step, "table"));
+            case "doris_read", "postgres_read" -> table(text(step, "table"));
             case "filter" -> {
                 identifier(text(step, "column"));
                 String op = text(step, "operator");
@@ -95,12 +95,12 @@ public class PipelineDefinitionValidator {
                         throw invalid("Unsupported aggregate function");
                 }
             }
-            case "doris_write" -> {
+            case "doris_write", "postgres_write" -> {
                 table(text(step, "table"));
                 String mode = step.path("mode").asText("append");
-                if (!"append".equals(mode)) throw invalid("Idempotent Doris writes support append into UNIQUE KEY tables only");
+                if (!"append".equals(mode)) throw invalid("Idempotent PostgreSQL writes support append into tables with matching UNIQUE constraints");
                 JsonNode keys = step.path("idempotencyColumns");
-                if (!keys.isArray() || keys.isEmpty()) throw invalid("Doris write requires non-empty idempotencyColumns");
+                if (!keys.isArray() || keys.isEmpty()) throw invalid("PostgreSQL write requires non-empty idempotencyColumns");
                 keys.forEach(key -> identifier(key.asText()));
             }
             default -> throw invalid("Unsupported step type: " + type);

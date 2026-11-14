@@ -3,6 +3,7 @@ name: build
 concurrency:
   group: sbase-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
 on:
   push:
     branches: [main]
@@ -39,74 +40,51 @@ jobs:
         run: gradle --no-daemon clean test bootJar
 
   docker-compose:
-    name: Docker Compose integration
+    name: PostgreSQL and Spark integration
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     env:
       POSTGRES_PASSWORD: ci-sbase-password
-      DORIS_FE_SERVERS: fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010
-      DORIS_JDBC_URL: jdbc:mysql:loadbalance://doris-fe:9030,doris-fe-2:9030,doris-fe-3:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000&loadBalanceHostRemovalGracePeriod=15000
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Docker Compose
+      - name: Verify Docker Compose profiles
+        env:
+          JWT_ISSUER_URI: https://identity.example.test/realms/sbase
+          JWT_JWK_SET_URI: https://identity.example.test/realms/sbase/protocol/openid-connect/certs
+          SBASE_IMAGE: ghcr.io/selimrepo/sbase:ci-test
+          MINIO_ROOT_USER: ci-minio
+          MINIO_ROOT_PASSWORD: ci-minio-password
         run: |
           docker version
           docker compose version
           docker compose config --quiet
-          docker compose --profile app-ha --profile doris-fe-ha config --quiet
-      - name: Validate unified Compose profiles
-        env:
-          POSTGRES_PASSWORD: ci-production-password
-          DORIS_USERNAME: sbase_app
-          DORIS_PASSWORD: ci-doris-password
-          JWT_ISSUER_URI: https://identity.example.test/realms/sbase
-          JWT_JWK_SET_URI: https://identity.example.test/realms/sbase/protocol/openid-connect/certs
-          SBASE_IMAGE: ghcr.io/selimrepo/sbase:ci-test
-        run: |
-          docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.development.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
-          docker compose --profile app-ha --profile doris-fe-ha config --quiet
-          docker compose --profile app-ha --profile doris-fe-ha --profile observability config --quiet
-          MINIO_ROOT_USER=ci-minio MINIO_ROOT_PASSWORD=ci-minio-password docker compose --profile object-storage config --quiet
+          docker compose --profile app-ha config --quiet
+          docker compose --profile app-ha --profile observability config --quiet
+          docker compose --profile object-storage config --quiet
           docker compose --profile kafka config --quiet
-          docker compose --profile app-ha --profile doris-fe-ha --profile doris-ha config --quiet
-      - name: Configure host kernel for Doris BE
-        run: |
-          sudo sysctl -w vm.max_map_count=2000000
-          sudo swapoff -a
-          if [ "$(awk 'NR > 1 { total += $3 } END { print total + 0 }' /proc/swaps)" -ne 0 ]; then
-            echo "Swap is still enabled; Doris BE requires swap to be disabled."
-            cat /proc/swaps
-            exit 1
-          fi
-      - name: Build and start complete stack
-        env:
-          POSTGRES_PASSWORD: ci-sbase-password
-          DORIS_USERNAME: root
-          DORIS_PASSWORD: ""
-        run: DORIS_FE_SERVERS=fe1:172.30.0.10:9010,fe2:172.30.0.12:9010,fe3:172.30.0.13:9010 docker compose --profile app-ha --profile doris-fe-ha up --build -d
-      - name: Wait for application liveness
+      - name: Build and start PostgreSQL and Spark stack
+        run: docker compose --profile app-ha up --build -d
+      - name: Wait for both application nodes
         run: |
           set -eu
-          max_attempts=48
-          for attempt in $(seq 1 "$max_attempts"); do
-            if curl --fail --silent --show-error --connect-timeout 1 --max-time 2 http://localhost:8080/actuator/health/liveness; then
-              echo
-              echo "SBase application liveness check passed."
-              exit 0
+          for port in 8080 8082; do
+            ready=false
+            for attempt in $(seq 1 60); do
+              if curl --fail --silent --show-error --connect-timeout 1 --max-time 3 "http://localhost:${port}/actuator/health/liveness"; then
+                echo
+                ready=true
+                break
+              fi
+              sleep 5
+            done
+            if [ "$ready" != true ]; then
+              docker compose --profile app-ha ps
+              docker compose --profile app-ha logs --no-color --tail=250
+              exit 1
             fi
-            echo "Waiting for SBase startup ($attempt/$max_attempts)..."
-            if [ "$((attempt % 6))" -eq 0 ]; then
-              docker compose --profile app-ha --profile doris-fe-ha ps
-              docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=40 sbase
-            fi
-            sleep 5
           done
-          echo "SBase did not become live within 6 minutes."
-          docker compose --profile app-ha --profile doris-fe-ha ps
-          docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200
-          exit 1
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -114,105 +92,59 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14'
-      - name: Compile integration tests before fault injection
-        run: gradle --no-daemon testClasses
-      - name: Verify second SBase node and application node restart
+      - name: Verify Spark PostgreSQL writes, idempotency and tenant isolation
+        run: |
+          gradle --no-daemon test \
+            --tests '*SparkPostgresResilienceTest' \
+            --tests '*PostgresTenantIsolationIntegrationTest' \
+            --tests '*PipelineLeaseCoordinatorIntegrationTest'
+      - name: Verify PostgreSQL outage and recovery
         run: |
           set -eu
+          docker compose stop postgres
+          sleep 5
+          curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness
+          docker compose start postgres
           for attempt in $(seq 1 36); do
-            if curl --fail --silent --show-error --connect-timeout 1 --max-time 2 http://localhost:8082/actuator/health/liveness; then
-              echo
-              echo "Second SBase application node is live."
+            if docker inspect --format '{{.State.Health.Status}}' sbase-postgres 2>/dev/null | grep -q healthy; then
               break
             fi
             sleep 5
           done
-          if ! curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8082/actuator/health/liveness; then
-            docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200 sbase-node-2
+          if [ "$(docker inspect --format '{{.State.Health.Status}}' sbase-postgres 2>/dev/null || true)" != "healthy" ]; then
+            docker compose --profile app-ha logs --no-color --tail=250 postgres sbase
             exit 1
           fi
-          docker compose --profile app-ha --profile doris-fe-ha stop sbase-node-2
-          curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness
-          docker compose --profile app-ha --profile doris-fe-ha start sbase-node-2
           for attempt in $(seq 1 36); do
-            if curl --fail --silent --show-error --connect-timeout 1 --max-time 2 http://localhost:8082/actuator/health/liveness; then
+            if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/readiness; then
               echo
-              echo "Second SBase node recovered after restart."
               exit 0
             fi
             sleep 5
           done
-          docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200 sbase-node-2
+          docker compose --profile app-ha logs --no-color --tail=250 sbase
           exit 1
-      - name: Exercise Doris SQL endpoint outage and recovery
+      - name: Verify application node restart
         run: |
           set -eu
-          # The FE owns the MySQL protocol endpoint (9030). Verify the published
-          # host port actually closes after the container is stopped; checking
-          # DriverManager alone can be fooled by a still-open Docker proxy socket.
-          docker compose --profile app-ha --profile doris-fe-ha stop doris-fe
-          endpoint_closed=false
-          for attempt in $(seq 1 12); do
-            if ! timeout 2 bash -c '</dev/tcp/127.0.0.1/9030' 2>/dev/null; then
-              endpoint_closed=true
-              break
-            fi
-            sleep 2
-          done
-          if [ "$endpoint_closed" != true ]; then
-            echo "Doris FE SQL port 9030 remained reachable after stopping the FE."
-            exit 1
-          fi
+          docker compose --profile app-ha stop sbase-node-2
           curl --fail --silent --show-error --connect-timeout 2 --max-time 4 http://localhost:8080/actuator/health/liveness
-          echo "Doris FE-1 SQL endpoint is unreachable while SBase remains live."
-          SBASE_DORIS_TEST_JDBC_URL='jdbc:mysql:loadbalance://127.0.0.1:9030,127.0.0.1:9031,127.0.0.1:9032/analytics?useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000&retriesAllDown=3&loadBalanceBlacklistTimeout=15000' \
-          SBASE_DORIS_TEST_USERNAME=root SBASE_DORIS_TEST_PASSWORD='' \
-            gradle --no-daemon test --tests '*SparkDorisResilienceTest'
-          echo "Doris SQL workload passed with FE-1 stopped; JDBC load-balancer used surviving FEs."
-          docker compose --profile app-ha --profile doris-fe-ha start doris-fe
+          docker compose --profile app-ha start sbase-node-2
           for attempt in $(seq 1 36); do
-            state="$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-fe 2>/dev/null || true)"
-            if [ "$state" = "healthy" ]; then
-              echo "Doris frontend SQL endpoint recovered."
-              break
+            if curl --fail --silent --show-error --connect-timeout 1 --max-time 3 http://localhost:8082/actuator/health/liveness; then
+              echo
+              exit 0
             fi
             sleep 5
           done
-          if [ "$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-fe 2>/dev/null || true)" != "healthy" ]; then
-            docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200 doris-fe doris-be
-            exit 1
-          fi
-          # Force a fresh BE heartbeat/storage-path report after FE recovery.
-          # A still-running BE can leave the restarted FE without its disk-path
-          # scheduling state even while SHOW BACKENDS reports stale capacity.
-          docker compose --profile app-ha --profile doris-fe-ha restart doris-be
-          for attempt in $(seq 1 36); do
-            state="$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-be 2>/dev/null || true)"
-            if [ "$state" = "healthy" ]; then
-              echo "Doris backend restarted and its heartbeat port is healthy."
-              break
-            fi
-            sleep 5
-          done
-          if [ "$(docker inspect --format '{{.State.Health.Status}}' sbase-doris-be 2>/dev/null || true)" != "healthy" ]; then
-            docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=200 doris-be
-            exit 1
-          fi
-          # Re-run initialization so SQL readiness and backend storage capacity
-          # are checked against the recovered FE, not the pre-fault FE state.
-          docker compose --profile app-ha --profile doris-fe-ha run --rm --no-deps doris-init
-      - name: Run real Spark-Doris load and idempotency test
-        env:
-          SBASE_DORIS_TEST_JDBC_URL: jdbc:mysql://127.0.0.1:9030/analytics?useSSL=false&allowPublicKeyRetrieval=true
-          SBASE_DORIS_TEST_USERNAME: root
-          SBASE_DORIS_TEST_PASSWORD: ""
-        run: gradle --no-daemon test --tests '*SparkDorisResilienceTest' --tests '*DorisTenantIsolationIntegrationTest'
+          docker compose --profile app-ha logs --no-color --tail=250 sbase-node-2
+          exit 1
       - name: Show container status
         if: always()
-        run: docker compose --profile app-ha --profile doris-fe-ha ps
+        run: docker compose --profile app-ha ps
       - name: Collect logs on failure
         if: failure()
-        run: docker compose --profile app-ha --profile doris-fe-ha logs --no-color --tail=300
-      - name: Stop stack and remove volumes
+        run: docker compose --profile app-ha logs --no-color --tail=300
+      - name: Stop stack and remove ephemeral CI volumes
         if: always()
-        run: docker compose --profile app-ha --profile doris-fe-ha down --volumes --remove-orphans
+        run: docker compose --profile app-ha down --volumes --remove-orphans
