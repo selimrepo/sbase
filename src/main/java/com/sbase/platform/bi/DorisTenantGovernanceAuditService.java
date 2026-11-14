@@ -15,7 +15,7 @@ public class DorisTenantGovernanceAuditService {
     private final String schema;
 
     public DorisTenantGovernanceAuditService(JdbcTemplate postgres,
-            @Value("${sbase.doris.database:public}") String schema) {
+            @Value("${sbase.postgres.database:public}") String schema) {
         this.postgres = postgres;
         if (schema == null || !schema.matches("[A-Za-z_][A-Za-z0-9_]*"))
             throw new IllegalArgumentException("Invalid PostgreSQL schema identifier");
