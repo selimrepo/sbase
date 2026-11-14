@@ -1,6 +1,6 @@
 package com.sbase.doris;
 
-import com.sbase.platform.bi.DorisTenantTablePolicy;
+import com.sbase.platform.bi.PostgreSQLTenantTablePolicy;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.functions;
@@ -38,7 +38,7 @@ public class DorisDatasetWriter {
     private void write(Dataset<Row> dataset,String table) {
         dataset.write().format("jdbc").option("url",doris.jdbcUrl()).option("dbtable",table)
             .option("user",doris.username()).option("password",doris.password())
-            .option("driver","com.mysql.cj.jdbc.Driver").option("batchsize","5000")
+            .option("driver","org.postgresql.Driver").option("batchsize","5000")
             .mode("append").save();
     }
 }
