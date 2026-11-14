@@ -533,25 +533,39 @@ public class PipelineExecutionService {
     }
 
     private void verifyDorisUniqueKey(String table, String[] keyColumns) {
-        try (java.sql.Connection connection = doris.openConnection();
-             java.sql.Statement statement = connection.createStatement();
-             java.sql.ResultSet result = statement.executeQuery("SHOW CREATE TABLE " + table)) {
-            if (!result.next()) throw new IllegalStateException("Doris target table does not exist: " + table);
-            String ddl = result.getString(2).toUpperCase(Locale.ROOT).replace("`", "");
-            int keyStart = ddl.indexOf("UNIQUE KEY");
-            if (keyStart < 0) throw new IllegalArgumentException(
-                "Idempotent append requires a Doris UNIQUE KEY target table: " + table);
-            int open = ddl.indexOf('(', keyStart);
-            int close = ddl.indexOf(')', open);
-            if (open < 0 || close < 0) throw new IllegalStateException("Cannot inspect Doris UNIQUE KEY definition");
-            Set<String> declaredKeys = Arrays.stream(ddl.substring(open + 1, close).split(","))
-                .map(String::trim).collect(java.util.stream.Collectors.toSet());
-            Set<String> requestedKeys = Arrays.stream(keyColumns)
-                .map(key -> key.toUpperCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
-            if (!declaredKeys.equals(requestedKeys))
-                throw new IllegalArgumentException("idempotencyColumns must exactly match the Doris UNIQUE KEY columns: " + declaredKeys);
-        } catch (java.sql.SQLException ex) {
-            throw new IllegalStateException("Cannot verify Doris idempotency constraints for " + table, ex);
+        String[] parts=table.split("\\.",2);
+        String schema=parts.length==2?parts[0]:defaultDorisSchema();
+        String name=parts.length==2?parts[1]:parts[0];
+        try (java.sql.Connection connection=doris.openConnection();
+             java.sql.PreparedStatement statement=connection.prepareStatement("""
+                SELECT array_agg(a.attname ORDER BY k.ordinality)
+                  FROM pg_index i
+                  JOIN pg_class t ON t.oid=i.indrelid
+                  JOIN pg_namespace n ON n.oid=t.relnamespace
+                  JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum,ordinality) ON true
+                  JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.attnum
+                 WHERE i.indisunique AND i.indpred IS NULL
+                   AND n.nspname=? AND t.relname=?
+                 GROUP BY i.indexrelid
+                """)) {
+            statement.setString(1,schema); statement.setString(2,name);
+            Set<String> requested=Arrays.stream(keyColumns).map(v->v.toLowerCase(Locale.ROOT))
+                .collect(java.util.stream.Collectors.toSet());
+            boolean matched=false;
+            try(java.sql.ResultSet result=statement.executeQuery()) {
+                while(result.next()) {
+                    java.sql.Array array=result.getArray(1);
+                    if(array==null) continue;
+                    String[] declared=(String[])array.getArray();
+                    Set<String> actual=Arrays.stream(declared).map(v->v.toLowerCase(Locale.ROOT))
+                        .collect(java.util.stream.Collectors.toSet());
+                    if(actual.equals(requested)) { matched=true; break; }
+                }
+            }
+            if(!matched) throw new IllegalArgumentException(
+                "idempotencyColumns must exactly match a PostgreSQL UNIQUE or PRIMARY KEY constraint");
+        } catch(java.sql.SQLException ex) {
+            throw new IllegalStateException("Cannot verify PostgreSQL idempotency constraints for "+table,ex);
         }
     }
 
