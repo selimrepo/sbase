@@ -1,22 +1,23 @@
 package com.sbase.platform.ingestion;
 
 import com.sbase.platform.IngestionConnector;
-import com.sbase.platform.bi.PostgreSQLTenantTablePolicy;
-import com.sbase.postgres.PostgreSQLClient;
+import com.sbase.platform.bi.DorisTenantTablePolicy;
+import com.sbase.doris.DorisClient;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
+/** Legacy connector id retained for stored configurations; writes target PostgreSQL. */
 @Component
-public class PostgreSQLIngestionConnector extends JdbcIngestionConnector implements IngestionConnector {
-    private final PostgreSQLTenantTablePolicy tablePolicy;
-    private final PostgreSQLClient postgres;
+public class DorisIngestionConnector extends JdbcIngestionConnector implements IngestionConnector {
+    private final DorisTenantTablePolicy tablePolicy;
+    private final DorisClient postgres;
 
-    public PostgreSQLIngestionConnector(DurableRecordSink checkpoints,PostgreSQLTenantTablePolicy tablePolicy,PostgreSQLClient postgres) {
+    public DorisIngestionConnector(DurableRecordSink checkpoints, DorisTenantTablePolicy tablePolicy, DorisClient postgres) {
         super(checkpoints);
-        this.tablePolicy=tablePolicy;
-        this.postgres=postgres;
+        this.tablePolicy = tablePolicy;
+        this.postgres = postgres;
     }
 
     @Override protected String validateTargetTable(String table) {
@@ -27,8 +28,5 @@ public class PostgreSQLIngestionConnector extends JdbcIngestionConnector impleme
         return postgres.openConnection();
     }
 
-    @Override
-    public String type() {
-        return "postgresql";
-    }
+    @Override public String type() { return "postgresql"; }
 }
