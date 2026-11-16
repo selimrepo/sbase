@@ -71,7 +71,9 @@ public final class CatalogService implements AutoCloseable {
     /** Executes a bounded, read-only PostgreSQL SELECT with JDBC bind parameters. */
     public Map<String,Object> queryPostgres(String sql, List<Object> parameters, int limit) throws SQLException {
         if(sql==null||sql.isBlank())throw new IllegalArgumentException("SQL query is required");
-        SqlNode parsed=SqlParser.create(sql).parseQuery();
+        SqlNode parsed;
+        try{parsed=SqlParser.create(sql).parseQuery();}
+        catch(Exception invalid){throw new IllegalArgumentException("Invalid or non-read-only SQL query",invalid);}
         if(parsed.getKind()!=SqlKind.SELECT&&parsed.getKind()!=SqlKind.WITH)
             throw new IllegalArgumentException("Only read-only SELECT queries are allowed");
         int bounded = Math.max(1, Math.min(limit, 5000));
