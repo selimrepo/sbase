@@ -25,10 +25,26 @@ final class OperatorRegistry {
     case "mahout-vector-sum" =>
      val values=config.fields.getOrElse("values",JsArray()).convertTo[Vector[Double]]
      val vector=new DenseVector(values.toArray)
-     JsObject("sum"->JsNumber(vector.zSum),"count"->JsNumber(values.size))
+     JsObject("sum"->JsNumber(vector.zSum()),"count"->JsNumber(values.size))
     case "spark-sql" =>
      val query=config.fields.getOrElse("query",JsString("SELECT 1 AS value")).convertTo[String]
      JsObject("rows"->JsArray(spark.sql(query).toJSON.collect().toVector.map(JsString(_))))
+    case "flink-submit" =>
+      val base = sys.env.getOrElse("FLINK_REST_URL", "http://localhost:8082")
+      val jarId = config.fields.getOrElse("jarId", throw new IllegalArgumentException("flink-submit requires config.jarId")).convertTo[String]
+      val payload = JsObject(
+        "entryClass" -> config.fields.getOrElse("entryClass", JsString("")),
+        "parallelism" -> config.fields.getOrElse("parallelism", JsNumber(1)),
+        "programArgs" -> config.fields.getOrElse("programArgs", JsString(""))
+      ).compactPrint
+      val request = HttpRequest.newBuilder(URI.create(base.stripSuffix("/") + "/jars/" + jarId + "/run"))
+        .timeout(Duration.ofSeconds(30))
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(payload)).build()
+      val response = http.send(request, HttpResponse.BodyHandlers.ofString())
+      if (response.statusCode() / 100 != 2)
+        throw new IllegalStateException("Flink job submission failed with HTTP " + response.statusCode() + ": " + response.body())
+      response.body().parseJson
     case "flink-jobs-overview" =>
      val base=sys.env.getOrElse("FLINK_REST_URL","http://localhost:8082")
      val request=HttpRequest.newBuilder(URI.create(base.stripSuffix("/")+"/jobs/overview"))
