@@ -87,13 +87,13 @@ object Main {
       }
     }} ~
     path("catalogs"/"postgresql"/"query"){post{entity(as[PgQuery]){request=>
-      val params=request.parameters.map {
+      val params: java.util.List[Object] = request.parameters.map {
        case JsString(v)=>v
        case JsNumber(v)=>v.bigDecimal
        case JsBoolean(v)=>java.lang.Boolean.valueOf(v)
        case JsNull=>null
        case other=>other.compactPrint
-      }.asJava
+      }.map(_.asInstanceOf[Object]).asJava
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.queryPostgres(request.sql,params,request.limit)).parseJson))){
        case Success(value)=>complete(value)
        case Failure(error)=>system.log.warn("PostgreSQL query rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query failed"))))
