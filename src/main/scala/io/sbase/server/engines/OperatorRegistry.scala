@@ -10,7 +10,7 @@ import java.time.Duration
 import scala.collection.mutable
 
 final class OperatorRegistry {
- private val supported=Set("dataset-values","mahout-vector-sum","spark-sql","flink-submit","flink-jobs-overview")
+ private val supported=Set("dataset-values","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","spark-sql","flink-submit","flink-jobs-overview")
  private lazy val spark=SparkSession.builder().appName("SBase-Workflow-Operator")
   .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
   .config("spark.ui.enabled","false")
@@ -72,6 +72,20 @@ final class OperatorRegistry {
      val values:Vector[Double]=configured.getOrElse(inherited)
      val vector=new DenseVector(values.toArray)
      JsObject("sum"->JsNumber(vector.zSum()),"count"->JsNumber(values.size))
+    case "mahout-cosine-similarity" =>
+     val leftValues=config.fields.getOrElse("left",throw new IllegalArgumentException("left vector is required")).convertTo[Vector[Double]]
+     val rightValues=config.fields.getOrElse("right",throw new IllegalArgumentException("right vector is required")).convertTo[Vector[Double]]
+     require(leftValues.nonEmpty && leftValues.size==rightValues.size,"Cosine vectors must have equal non-zero dimensions")
+     val left=new DenseVector(leftValues.toArray);val right=new DenseVector(rightValues.toArray)
+     val denominator=left.norm(2.0)*right.norm(2.0)
+     val similarity=if(denominator==0.0) 0.0 else left.dot(right)/denominator
+     JsObject("cosineSimilarity"->JsNumber(similarity))
+    case "mahout-euclidean-distance" =>
+     val leftValues=config.fields.getOrElse("left",throw new IllegalArgumentException("left vector is required")).convertTo[Vector[Double]]
+     val rightValues=config.fields.getOrElse("right",throw new IllegalArgumentException("right vector is required")).convertTo[Vector[Double]]
+     require(leftValues.nonEmpty && leftValues.size==rightValues.size,"Distance vectors must have equal non-zero dimensions")
+     val distance=new DenseVector(leftValues.toArray).minus(new DenseVector(rightValues.toArray)).norm(2.0)
+     JsObject("euclideanDistance"->JsNumber(distance))
     case "spark-sql" =>
      val query=config.fields.getOrElse("query",JsString("SELECT 1 AS value")).convertTo[String]
      JsObject("rows"->JsArray(spark.sql(query).toJSON.collect().toVector.map(JsString(_))))
