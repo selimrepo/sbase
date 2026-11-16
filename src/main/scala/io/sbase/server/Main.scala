@@ -12,6 +12,7 @@ import com.typesafe.config.ConfigFactory
 import io.sbase.server.jobs.{JobDispatcher,JobRepository,WorkerSharding}
 import io.sbase.server.engines.OperatorRegistry
 import io.sbase.server.catalog.CatalogService
+import io.sbase.server.engines.FederatedQueryPlanner
 import com.fasterxml.jackson.databind.ObjectMapper
 import scala.concurrent.{ExecutionContext,Future}
 import scala.util.{Failure,Success}
@@ -76,7 +77,7 @@ object Main {
    pathPrefix("api"/"v1"){
     path("capabilities"){get{complete(JsObject(
       "catalogs"->JsArray(JsString("postgresql"),JsString("cassandra"),JsString("solr")),
-      "queryEngines"->JsArray(JsString("calcite-sql"),JsString("spark-sql")),
+      "queryEngines"->JsArray(JsString("calcite-sql"),JsString("federated-calcite"),JsString("spark-sql")),
       "compute"->JsArray(JsString("mahout"),JsString("spark-ml-automl"),JsString("flink")),
       "apiVersion"->JsString("v1")
     ))}} ~
@@ -109,6 +110,17 @@ object Main {
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.querySolr(request.collection,request.q,request.limit)).parseJson))){
        case Success(value)=>complete(value)
        case Failure(error)=>system.log.warn("Solr query rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query failed"))))
+      }
+    }}} ~
+    path("query"/"plan"){post{entity(as[JsObject]){request=>
+      val sql=request.fields.getOrElse("sql",JsString("")).convertTo[String]
+      val catalogJson=request.fields.getOrElse("catalog",JsObject()).compactPrint
+      onComplete(Future(scala.concurrent.blocking{
+       val stats=mapper.readValue(catalogJson,classOf[java.util.Map[String,java.util.Map[String,Object]]])
+       mapper.writeValueAsString(new FederatedQueryPlanner().plan(sql,stats)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Federated query planning failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("planning failed"))))
       }
     }}} ~
     path("automl"/"train"){post{entity(as[JsObject]){request=>
