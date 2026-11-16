@@ -24,6 +24,7 @@ dependencies {
     implementation "org.apache.pekko:pekko-actor-typed_${scalaBinaryVersion}:${pekkoVersion}"
     implementation "org.apache.pekko:pekko-cluster-typed_${scalaBinaryVersion}:${pekkoVersion}"
     implementation "org.apache.pekko:pekko-cluster-sharding-typed_${scalaBinaryVersion}:${pekkoVersion}"
+    implementation "org.apache.pekko:pekko-serialization-jackson_${scalaBinaryVersion}:${pekkoVersion}"
     implementation "org.apache.pekko:pekko-http_${scalaBinaryVersion}:${pekkoHttpVersion}"
     implementation "org.apache.pekko:pekko-http-spray-json_${scalaBinaryVersion}:${pekkoHttpVersion}"
     implementation "com.typesafe:config:1.4.3"
