@@ -64,10 +64,19 @@ public final class FederatedQueryExecutor implements AutoCloseable {
         List<Map<String,Object>> rows=new ArrayList<>();
         for(String row:jsonResults)rows.add(JSON.readValue(row,new TypeReference<>(){}));
         long inputRows=tables.values().stream().mapToLong(List::size).sum();
-        return Map.of("status","SUCCEEDED","engine","calcite-validated-spark-sql",
-                "sourceCount",sources.size(),"sourceTables",tables.keySet(),"inputRows",inputRows,
-                "rows",rows,"rowCount",rows.size(),"rowLimit",rowLimit,
-                "adaptiveExecution",true,"costBasedJoinReorder",true,"executionEngine","Spark SQL Catalyst with Adaptive Query Execution");
+        Map<String,Object> response = new LinkedHashMap<>();
+        response.put("status","SUCCEEDED");
+        response.put("engine","calcite-validated-spark-sql");
+        response.put("sourceCount",sources.size());
+        response.put("sourceTables",tables.keySet());
+        response.put("inputRows",inputRows);
+        response.put("rows",rows);
+        response.put("rowCount",rows.size());
+        response.put("rowLimit",rowLimit);
+        response.put("adaptiveExecution",true);
+        response.put("costBasedJoinReorder",true);
+        response.put("executionEngine","Spark SQL Catalyst with Adaptive Query Execution");
+        return response;
     }
 
     private List<Map<String,Object>> scan(String type,Map<String,Object> spec,int limit)throws Exception{
