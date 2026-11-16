@@ -30,7 +30,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
     | ORDER BY submitted_at LIMIT ? FOR UPDATE SKIP LOCKED
     |) UPDATE job_execution j SET status='RUNNING',lease_owner=gen_random_uuid(),
     | lease_expires_at=now()+(? * interval '1 second'),heartbeat_at=now(),
-    | started_at=COALESCE(started_at,now()),attempt=j.attempt+1,updated_at=now()
+    | started_at=COALESCE(started_at,now()),attempt=j.attempt+1,error_code=NULL,error_message=NULL,updated_at=now()
     | FROM candidates x WHERE j.id=x.id
     | RETURNING j.id,j.lease_owner,j.attempt,j.max_attempts,
     | (SELECT v.definition::text FROM workflow_version v
@@ -115,7 +115,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   try {
    c.setAutoCommit(false)
    val p=c.prepareStatement("""UPDATE job_execution SET status='SUCCEEDED',result=?::jsonb,
-    |finished_at=now(),lease_owner=NULL,lease_expires_at=NULL,updated_at=now()
+    |finished_at=now(),lease_owner=NULL,lease_expires_at=NULL,error_code=NULL,error_message=NULL,updated_at=now()
     |WHERE id=? AND status='RUNNING' AND lease_owner=?""".stripMargin)
    p.setString(1,result); p.setObject(2,lease.id); p.setObject(3,lease.leaseOwner)
    val n=p.executeUpdate(); if(n==1) event(c,lease.id,"SUCCEEDED",lease.attempt,"{}")
