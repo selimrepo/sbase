@@ -1,67 +1,133 @@
 # SBase
 
-**SBase** is an open-source, KNIME-inspired data science and data-mining server. It is designed around a visual, reproducible workflow environment for data ingestion, preparation, distributed analytics, mining, model lifecycle and operational reporting.
+SBase is a KNIME-inspired distributed data science and mining server. The current `develop` branch contains the first runnable workflow execution foundation. It is not yet a fully production-certified enterprise platform.
 
-> Current status: foundational scaffold on the `develop` branch. The roadmap describes intended capabilities; components are not production-ready until their integrations, recovery behavior and tests are implemented.
+## Stack
 
-## Technology architecture
+- Scala 2.13 + Gradle
+- Apache Pekko Typed, Cluster and Cluster Sharding
+- PostgreSQL + Flyway for OLTP, immutable workflow versions, durable jobs, leases and execution events
+- Apache Spark SQL for batch operators
+- Apache Mahout math for mining operators
+- Apache Flink REST for submitting pre-uploaded JARs and inspecting running jobs
+- React + React Flow for visual workflow authoring
+- Cassandra, Solr and Geode remain planned connector integrations in this development phase
 
-| Area | Technology | Responsibility |
-|---|---|---|
-| Platform runtime | Scala 2.13 + Apache Pekko | Typed actors, service runtime, clustering and distributed coordination |
-| Build | Gradle + Scala plugin | Reproducible build, tests and application packaging |
-| OLTP/control plane | PostgreSQL | Workspaces, workflow versions, jobs, leases, lineage metadata |
-| Batch analytics | Apache Spark | Distributed SQL, batch transformations and feature engineering |
-| Mining | Apache Mahout | Mathematical and distributed mining algorithms |
-| Streaming | Apache Flink | Stateful stream processing, event time and checkpoints |
-| NoSQL | Apache Cassandra | High-volume wide-column and time-series workloads |
-| Search | Apache Solr | Full-text, faceted and metadata search |
-| In-memory grid | Apache Geode | Distributed cache and low-latency shared data |
-| Visual studio | React (planned) | Node-based workflow editor, previews and execution monitoring |
+Authentication is intentionally out of scope. No login, registration, OAuth/OIDC, MFA or Keycloak components are included. Protect deployments with private networks, firewalls and TLS at the infrastructure edge.
 
-Authentication is deliberately out of scope. Do not add Keycloak, OAuth/OIDC, MFA, registration or login flows. Operators must protect deployments through network isolation, TLS termination and infrastructure-level access controls.
-
-## Run locally
+## Run the stack
 
 Requirements: JDK 17+, Gradle 8.14.3+, Docker Engine and Compose v2.
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres
-gradle clean test run
+docker compose up --build
 ```
 
-Health endpoint: `http://localhost:8080/health`
+- Studio: http://localhost:3000
+- API: http://localhost:8080/api/v1
+- Health: http://localhost:8080/health
+- PostgreSQL: localhost:5432
 
-Optional development engines: `docker compose --profile nosql --profile search up -d`, `docker compose --profile spark up -d`, `docker compose --profile flink up -d`.
+Run backend tests without Docker except for PostgreSQL Testcontainers tests (Docker required):
 
-The Compose topology is for local development, not production HA.
+```bash
+gradle --no-daemon clean test installDist
+```
 
-## Engineering principles
+Build the studio:
 
-1. PostgreSQL is the source of truth for workflow definitions, versions and durable execution state.
-2. Workflow versions are immutable and checksum-addressable.
-3. Engine adapters isolate workflow semantics from Spark, Flink and other engines.
-4. Long-running work is asynchronous, idempotent and recoverable after worker restart.
-5. Backpressure, bounded concurrency, deadlines, cancellation and retries are explicit.
-6. Search indexes and caches are derived data, not authoritative state.
-7. Credentials are injected at runtime and never committed.
-8. Integration tests use real service containers when correctness depends on external behavior.
+```bash
+cd web
+npm install
+npm run build
+```
+
+## Workflow API
+
+Create a workflow with an immutable version 1 definition:
+
+```http
+POST /api/v1/workflows
+Content-Type: application/json
+
+{
+  "name": "Vector mining",
+  "definition": {
+    "nodes": [
+      {
+        "id": "sum",
+        "operator": "mahout-vector-sum",
+        "config": { "values": [1, 2, 3] }
+      }
+    ],
+    "edges": []
+  }
+}
+```
+
+Submit a run (the idempotency key must be unique per logical submission):
+
+```http
+POST /api/v1/workflows/{workflowId}/runs
+Content-Type: application/json
+
+{ "idempotencyKey": "run-001", "maxAttempts": 3 }
+```
+
+Poll the job:
+
+```http
+GET /api/v1/jobs/{jobId}
+```
+
+Available operators:
+
+- `mahout-vector-sum`: runs a Mahout DenseVector reduction.
+- `spark-sql`: executes a Spark SQL statement. Set `SPARK_MASTER` to the cluster master URL for distributed execution; defaults to local mode for development.
+- `flink-submit`: submits a previously uploaded Flink JAR by `jarId`; optional `entryClass`, `parallelism` and `programArgs` can be supplied.
+- `flink-jobs-overview`: reads Flink's jobs overview endpoint.
+
+For Flink, set `FLINK_REST_URL` (Compose profile default is `http://flink-jobmanager:8081`). The Flink JAR upload step is an external artifact publication operation; this adapter invokes the Flink REST run endpoint.
+
+## Durable execution design
+
+1. Workflow definitions are JSONB snapshots with SHA-256 checksums and immutable version references.
+2. Job submission is idempotent and stored transactionally in PostgreSQL.
+3. Workers claim jobs using `FOR UPDATE SKIP LOCKED`.
+4. Each claim receives a fresh database-generated fencing token and lease expiry.
+5. Sharded Pekko worker actors execute the workflow and periodically heartbeat the lease.
+6. A worker that loses its lease cannot commit a stale result.
+7. Expired leases are recovered; exponential retry backoff is applied to failed attempts.
+8. Jobs that exhaust their retry budget are terminally failed instead of being requeued forever.
+9. Execution events are recorded for queue, lease, success and failure transitions.
+
+Pekko seed nodes and advertised/bind addresses can be configured with `SBASE_CLUSTER_SEEDS`, `SBASE_CLUSTER_HOST`, `SBASE_CLUSTER_PORT`, `SBASE_CLUSTER_BIND_HOST` and `SBASE_CLUSTER_BIND_PORT`. Use stable, directly reachable node addresses for multi-node deployments.
+
+## CI
+
+GitHub Actions runs:
+
+- Gradle Scala compilation, JUnit unit tests, PostgreSQL Testcontainers integration tests and application distribution packaging.
+- React production build.
+- Backend Docker image build.
+
+The Compose file includes optional development profiles for Cassandra, Solr, Spark and Flink. They are not an HA/DR production topology.
 
 ## Roadmap
 
-- [x] Gradle + Scala project foundation and Pekko HTTP service.
-- [x] Initial PostgreSQL control-plane schema.
-- [ ] Pekko Cluster/Sharding, durable leases, fencing and worker recovery.
-- [ ] Transactional outbox and idempotent job dispatch.
-- [ ] Typed connectors for PostgreSQL, Cassandra, Solr and Geode.
-- [ ] Spark batch execution and Mahout mining operators.
-- [ ] Flink streaming lifecycle, checkpoints and savepoints.
-- [ ] React workflow studio with typed nodes, validation, previews and live run status.
-- [ ] Dataset catalog, lineage, profiling, data quality and feature engineering.
-- [ ] Experiment tracking, model registry, evaluation and model serving.
-- [ ] Metrics, tracing, structured logs, backup/restore and HA/DR.
-- [ ] Load, soak, chaos and disaster-recovery verification.
+- [x] Gradle Scala + Pekko service foundation
+- [x] Pekko Cluster Sharding worker region
+- [x] PostgreSQL durable queue, lease fencing, heartbeats, retries and expired-lease recovery
+- [x] Mahout vector mining and Spark SQL operators
+- [x] Flink REST job submission and job overview
+- [x] React Flow workflow graph editor and job polling
+- [ ] Node input/output contracts and persisted per-node execution previews
+- [ ] Spark structured streaming and Flink checkpoint/savepoint lifecycle management
+- [ ] Cassandra, Solr and Geode production connector implementations
+- [ ] Outbox dispatcher, scheduler, resource quotas and cancellation
+- [ ] OpenTelemetry metrics/traces, alerting, HA/DR and restore drills
+- [ ] Multi-node chaos, load and week-long soak verification
 
 ## License
 
