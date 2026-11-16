@@ -37,10 +37,8 @@ public final class AutoMlLifecycleService {
             String metric=String.valueOf(result.get("metric"));
             double score=((Number)result.get("score")).doubleValue();
             List<Map<String,Object>> trials=(List<Map<String,Object>>)result.get("trials");
-            persistTrials(experimentId,trials);
             UUID modelId=UUID.randomUUID();
-            registerModel(modelId,experimentId,name,algorithm,task,metric,score,modelPath,features);
-            updateStatus(experimentId,"SUCCEEDED",algorithm,metric,score,modelPath);
+            completeTraining(experimentId,modelId,name,algorithm,task,metric,score,modelPath,features,trials);
             Map<String,Object> response=new LinkedHashMap<>(result);
             response.put("experimentId",experimentId.toString());
             response.put("modelId",modelId.toString());
@@ -147,6 +145,34 @@ public final class AutoMlLifecycleService {
             }
             try(PreparedStatement upsert=c.prepareStatement("INSERT INTO model_alias(alias,model_id) VALUES(?,?) ON CONFLICT(alias) DO UPDATE SET model_id=EXCLUDED.model_id,updated_at=now()")){
                 upsert.setString(1,alias);upsert.setObject(2,modelId);upsert.executeUpdate();
+            }
+            c.commit();
+        }
+    }
+
+    private void completeTraining(UUID experimentId,UUID modelId,String name,String algorithm,String task,
+                                  String metric,double score,String modelPath,List<?> features,
+                                  List<Map<String,Object>> trials)throws SQLException{
+        try(Connection c=connection()){
+            c.setAutoCommit(false);
+            try(PreparedStatement p=c.prepareStatement("INSERT INTO automl_trial(experiment_id,trial_number,algorithm,parameters,metrics,status,duration_ms,error_message) VALUES(?,?,?,?::jsonb,?::jsonb,?,?,?)")){
+                int index=0;
+                for(Map<String,Object> t:trials){
+                    p.setObject(1,experimentId);p.setInt(2,++index);p.setString(3,String.valueOf(t.get("algorithm")));
+                    p.setString(4,"{}");p.setString(5,JSONString(t));p.setString(6,String.valueOf(t.get("status")));
+                    p.setLong(7,((Number)t.getOrDefault("durationMs",0)).longValue());
+                    p.setString(8,t.get("error")==null?null:String.valueOf(t.get("error")));p.addBatch();
+                }
+                p.executeBatch();
+            }
+            try(PreparedStatement p=c.prepareStatement("INSERT INTO model_registry(id,experiment_id,name,algorithm,task_type,metric,best_score,model_uri,version,status,feature_columns) VALUES(?,?,?,?,?,?,?,?,1,'READY',?::jsonb)")){
+                p.setObject(1,modelId);p.setObject(2,experimentId);p.setString(3,name);p.setString(4,algorithm);
+                p.setString(5,task);p.setString(6,metric);p.setDouble(7,score);p.setString(8,modelPath);
+                p.setString(9,JSONString(features));p.executeUpdate();
+            }
+            try(PreparedStatement p=c.prepareStatement("UPDATE automl_experiment SET status='SUCCEEDED',best_algorithm=?,best_metric=?,best_score=?,model_uri=?,finished_at=now() WHERE id=? AND status='RUNNING'")){
+                p.setString(1,algorithm);p.setString(2,metric);p.setDouble(3,score);p.setString(4,modelPath);p.setObject(5,experimentId);
+                if(p.executeUpdate()!=1)throw new SQLException("Experiment was not RUNNING at completion");
             }
             c.commit();
         }
