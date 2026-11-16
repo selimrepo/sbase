@@ -14,7 +14,7 @@ import io.sbase.server.engines.{OperatorRegistry,FederatedQueryPlanner,CalciteSq
 import io.sbase.server.catalog.CatalogService
 import io.sbase.server.automl.{AutoMlLifecycleService,AutoMlJobQueue}
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.core.`type`.TypeReference
 import scala.concurrent.{ExecutionContext,Future}
 import scala.util.{Failure,Success}
 import java.util.UUID
@@ -217,7 +217,7 @@ object Main {
         case Failure(error)=>system.log.error("Model prediction failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("prediction failed"))))
        }
       }}
-    }}
+    }
    } ~
    pathPrefix("api"/"v1"){
     pathEndOrSingleSlash{get{complete(ApiInfo(ApiInfoName(),"0.2.0-SNAPSHOT","WORKFLOW_ENGINE"))}} ~
