@@ -7,7 +7,7 @@ final class JobDispatcher(system:ActorSystem[_],repo:JobRepository,region:ActorR
  private implicit val ec:ExecutionContext=system.executionContext
  def start():Unit={
   system.scheduler.scheduleAtFixedRate(1.second,2.seconds)(()=>ec.execute(()=> {
-   try repo.claim(owner,8).foreach(lease=>region ! WorkerSharding.Process(lease))
+   try repo.claim(8).foreach(lease=>region ! WorkerSharding.Process(lease))
    catch {case error:Throwable=>system.log.error("Job dispatch cycle failed",error)}
   }))
  }
