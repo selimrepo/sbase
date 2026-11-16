@@ -10,9 +10,9 @@ import spray.json._
 import spray.json.DefaultJsonProtocol._
 import com.typesafe.config.ConfigFactory
 import io.sbase.server.jobs.{JobDispatcher,JobRepository,WorkerSharding}
-import io.sbase.server.engines.{OperatorRegistry,FederatedQueryPlanner}
+import io.sbase.server.engines.{OperatorRegistry,FederatedQueryPlanner,CalciteSqlEngine,FederatedQueryExecutor}
 import io.sbase.server.catalog.CatalogService
-import io.sbase.server.engines.FederatedQueryPlanner
+import io.sbase.server.automl.AutoMlLifecycleService
 import com.fasterxml.jackson.databind.ObjectMapper
 import scala.concurrent.{ExecutionContext,Future}
 import scala.util.{Failure,Success}
@@ -66,6 +66,8 @@ object Main {
   val operators=new OperatorRegistry()
   val catalogs=new CatalogService()
   val mapper=new ObjectMapper()
+  val federated=new FederatedQueryExecutor(catalogs,new CalciteSqlEngine(),sys.env.get("SBASE_FEDERATED_SCAN_PARALLELISM").flatMap(_.toIntOption).getOrElse(8))
+  val autoMl=new AutoMlLifecycleService(operators.sparkSession)
   val workerRegion=WorkerSharding.start(system,repository,operators)
   new JobDispatcher(system,repository,workerRegion).start()
 
@@ -124,12 +126,48 @@ object Main {
        case Failure(error)=>system.log.warn("Federated query planning failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("planning failed"))))
       }
     }}} ~
+    path("query"/"execute"){post{entity(as[JsObject]){request=>
+      val sql=request.fields.getOrElse("sql",JsString("")).convertTo[String]
+      val sourceJson=request.fields.getOrElse("sources",JsObject()).compactPrint
+      val limit=request.fields.get("limit").map(_.convertTo[Int]).getOrElse(1000)
+      onComplete(Future(scala.concurrent.blocking{
+       val sources=mapper.readValue(sourceJson,classOf[java.util.Map[String,java.util.Map[String,Object]]])
+       mapper.writeValueAsString(federated.execute(sql,sources,limit)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Federated query execution failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query execution failed"))))
+      }
+    }}} ~
     path("automl"/"train"){post{entity(as[JsObject]){request=>
-      onComplete(Future(scala.concurrent.blocking(operators.autoMl(request.compactPrint)))){
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(autoMl.train(input)).parseJson
+      })){
        case Success(value)=>complete(value)
        case Failure(error)=>system.log.error("AutoML training failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("training failed"))))
       }
-    }}}
+    }}} ~
+    path("automl"/"experiments"){get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.experiments(100)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("AutoML experiment listing failed",error);complete(StatusCodes.InternalServerError)
+      }
+    }} ~
+    path("models"/JavaUUID){modelId=>
+      get{onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.model(modelId)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>system.log.error("Model lookup failed",error);complete(StatusCodes.InternalServerError)
+      }} ~
+      post{entity(as[JsObject]){request=>
+       val rows=mapper.readValue(request.fields.getOrElse("rows",JsArray()).compactPrint,
+         mapper.getTypeFactory.constructCollectionType(classOf[java.util.List[_]],classOf[java.util.Map[_,_]]))
+       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.predict(modelId,rows.asInstanceOf[java.util.List[java.util.Map[String,Object]]].asScala.toList.asJava)).parseJson))){
+        case Success(value)=>complete(value)
+        case Failure(error)=>system.log.error("Model prediction failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("prediction failed"))))
+       }
+      }}
+    }}
    } ~
    pathPrefix("api"/"v1"){
     pathEndOrSingleSlash{get{complete(ApiInfo(ApiInfoName(),"0.2.0-SNAPSHOT","WORKFLOW_ENGINE"))}} ~
