@@ -1,3 +1,4 @@
 package io.sbase.server.jobs
 
-trait SBaseSerializable extends org.apache.pekko.serialization.jackson.CborSerializable
+/** Marker trait for messages serialized by the configured Pekko Jackson CBOR binding. */
+trait SBaseSerializable extends Serializable
