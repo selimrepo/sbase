@@ -76,11 +76,17 @@ object Main {
        if(name.isEmpty) complete(StatusCodes.BadRequest)
        else {
         val definition=request.definition.compactPrint
-        operators.validate(definition)
-        val future=Future(scala.concurrent.blocking(repository.createWorkflow(name,definition)))
-        onComplete(future){
-         case Success((workspaceId,workflowId))=>complete(StatusCodes.Created->WorkflowCreated(workspaceId.toString,workflowId.toString))
-         case Failure(error)=>system.log.error("Workflow creation failed",error);complete(StatusCodes.InternalServerError)
+        try {
+         operators.validate(definition)
+         val future=Future(scala.concurrent.blocking(repository.createWorkflow(name,definition)))
+         onComplete(future){
+          case Success((workspaceId,workflowId))=>complete(StatusCodes.Created->WorkflowCreated(workspaceId.toString,workflowId.toString))
+          case Failure(error)=>system.log.error("Workflow creation failed",error);complete(StatusCodes.InternalServerError)
+         }
+        } catch {
+         case error:IllegalArgumentException =>
+          system.log.warn("Rejected invalid workflow definition: {}",error.getMessage)
+          complete(StatusCodes.BadRequest)
         }
        }
       }
