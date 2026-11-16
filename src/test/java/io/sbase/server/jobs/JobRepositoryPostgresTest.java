@@ -70,7 +70,9 @@ class JobRepositoryPostgresTest {
         assertNotNull(lease);
         Thread.sleep(1300);
         repository.claim(100);
-        var status = repository.status(jobId).orElseThrow();
+        var statusOption = repository.status(jobId);
+        assertTrue(statusOption.isDefined());
+        var status = statusOption.get();
         assertEquals("FAILED", status._1());
     }
 
