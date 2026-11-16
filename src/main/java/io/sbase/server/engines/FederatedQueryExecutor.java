@@ -8,7 +8,8 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.spark.sql.*;
 
-import java.util.*;\nimport java.nio.file.Path;
+import java.util.*;
+import java.nio.file.Path;
 import java.util.concurrent.*;
 
 /**
