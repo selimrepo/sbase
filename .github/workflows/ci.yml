@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  scala:
+  gradle:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +22,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: sbt
-      - uses: sbt/setup-sbt@v1
-      - name: Compile and test
-        run: sbt -batch clean test
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: Compile, test and package
+        run: gradle --no-daemon clean test installDist
