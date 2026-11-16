@@ -17,7 +17,9 @@ services:
       SBASE_CASSANDRA_PORT: ${SBASE_CASSANDRA_PORT:-9042}
       SBASE_CASSANDRA_DATACENTER: ${SBASE_CASSANDRA_DATACENTER:-datacenter1}
       SBASE_SOLR_URL: ${SBASE_SOLR_URL:-http://solr:8983/solr}
+      SBASE_MODEL_REGISTRY_PATH: /var/lib/sbase/models
     ports: ["8080:8080", "25520:25520"]
+    volumes: ["models_data:/var/lib/sbase/models"]
     depends_on:
       postgres:
         condition: service_healthy
