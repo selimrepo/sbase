@@ -45,6 +45,21 @@ class OperatorRegistryTest {
   }
 
   @Test
+  def mahoutCosineSimilarityExecutes(): Unit = {
+    val registry = new OperatorRegistry()
+    val result = registry.execute("""{"nodes":[{"id":"cos","operator":"mahout-cosine-similarity","config":{"left":[1,0],"right":[1,1]}}]}""").compactPrint
+    assertTrue(result.contains("cosineSimilarity"))
+    assertTrue(result.contains("0.707"))
+  }
+
+  @Test
+  def mahoutEuclideanDistanceExecutes(): Unit = {
+    val registry = new OperatorRegistry()
+    val result = registry.execute("""{"nodes":[{"id":"distance","operator":"mahout-euclidean-distance","config":{"left":[0,0],"right":[3,4]}}]}""").compactPrint
+    assertTrue(result.contains("euclideanDistance"))
+    assertTrue(result.contains("5.0"))
+  }
+  @Test
   def sparkSqlOperatorRunsAQuery(): Unit = {
     val registry = new OperatorRegistry()
     try {
