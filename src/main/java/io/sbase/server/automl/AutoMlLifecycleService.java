@@ -91,6 +91,60 @@ public final class AutoMlLifecycleService {
         return Map.of("modelId",modelId.toString(),"predictions",predictions,"rowCount",predictions.size());
     }
 
+
+    public Map<String,Object> experiment(UUID id)throws SQLException{
+        try(Connection c=connection();PreparedStatement p=c.prepareStatement("SELECT id,name,task_type,label_column,feature_columns,status,best_algorithm,best_metric,best_score,model_uri,error_message,created_at,finished_at FROM automl_experiment WHERE id=?")){
+            p.setObject(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())throw new NoSuchElementException("Experiment not found");
+                Map<String,Object> result=new LinkedHashMap<>();result.put("id",id.toString());result.put("name",r.getString("name"));
+                result.put("task",r.getString("task_type"));result.put("label",r.getString("label_column"));result.put("features",r.getString("feature_columns"));
+                result.put("status",r.getString("status"));result.put("algorithm",r.getString("best_algorithm"));result.put("metric",r.getString("best_metric"));
+                result.put("score",r.getObject("best_score"));result.put("modelUri",r.getString("model_uri"));result.put("error",r.getString("error_message"));
+                result.put("createdAt",r.getTimestamp("created_at").toInstant().toString());
+                Timestamp finished=r.getTimestamp("finished_at");result.put("finishedAt",finished==null?null:finished.toInstant().toString());
+                List<Map<String,Object>> trials=new ArrayList<>();
+                try(PreparedStatement t=c.prepareStatement("SELECT trial_number,algorithm,parameters,metrics,status,duration_ms,error_message FROM automl_trial WHERE experiment_id=? ORDER BY trial_number")){
+                    t.setObject(1,id);try(ResultSet tr=t.executeQuery()){while(tr.next()){
+                        Map<String,Object> trial=new LinkedHashMap<>();trial.put("number",tr.getInt("trial_number"));trial.put("algorithm",tr.getString("algorithm"));
+                        trial.put("parameters",tr.getString("parameters"));trial.put("metrics",tr.getString("metrics"));trial.put("status",tr.getString("status"));
+                        trial.put("durationMs",tr.getLong("duration_ms"));trial.put("error",tr.getString("error_message"));trials.add(trial);
+                    }}
+                }
+                result.put("trials",trials);return result;
+            }
+        }
+    }
+
+    public List<Map<String,Object>> models(int limit)throws SQLException{
+        try(Connection c=connection();PreparedStatement p=c.prepareStatement("SELECT id,experiment_id,name,algorithm,task_type,metric,best_score,version,status,created_at FROM model_registry ORDER BY created_at DESC LIMIT ?")){
+            p.setInt(1,Math.max(1,Math.min(limit,200)));try(ResultSet r=p.executeQuery()){List<Map<String,Object>> rows=new ArrayList<>();while(r.next()){
+                Map<String,Object> m=new LinkedHashMap<>();m.put("id",r.getObject("id").toString());m.put("experimentId",r.getObject("experiment_id").toString());
+                m.put("name",r.getString("name"));m.put("algorithm",r.getString("algorithm"));m.put("task",r.getString("task_type"));
+                m.put("metric",r.getString("metric"));m.put("score",r.getDouble("best_score"));m.put("version",r.getInt("version"));
+                m.put("status",r.getString("status"));m.put("createdAt",r.getTimestamp("created_at").toInstant().toString());rows.add(m);
+            }return rows;}
+        }
+    }
+
+    public void archive(UUID id)throws SQLException{
+        try(Connection c=connection();PreparedStatement p=c.prepareStatement("UPDATE model_registry SET status='ARCHIVED' WHERE id=? AND status='READY'")){
+            p.setObject(1,id);if(p.executeUpdate()!=1)throw new NoSuchElementException("Ready model not found");
+        }
+    }
+
+    public void promote(String alias,UUID modelId)throws SQLException{
+        if(alias==null||!alias.matches("[A-Za-z][A-Za-z0-9_.-]{0,63}"))throw new IllegalArgumentException("Invalid model alias");
+        try(Connection c=connection()){
+            c.setAutoCommit(false);
+            try(PreparedStatement check=c.prepareStatement("SELECT 1 FROM model_registry WHERE id=? AND status='READY'")){
+                check.setObject(1,modelId);try(ResultSet r=check.executeQuery()){if(!r.next())throw new NoSuchElementException("Ready model not found");}
+            }
+            try(PreparedStatement upsert=c.prepareStatement("INSERT INTO model_alias(alias,model_id) VALUES(?,?) ON CONFLICT(alias) DO UPDATE SET model_id=EXCLUDED.model_id,updated_at=now()")){
+                upsert.setString(1,alias);upsert.setObject(2,modelId);upsert.executeUpdate();
+            }
+            c.commit();
+        }
+    }
+
     private void insertExperiment(UUID id,String name,String task,String label,String features)throws SQLException{
         try(Connection c=connection();PreparedStatement p=c.prepareStatement("INSERT INTO automl_experiment(id,name,task_type,label_column,feature_columns,status) VALUES(?,?,?,?,?::jsonb,'QUEUED')")){
             p.setObject(1,id);p.setString(2,name);p.setString(3,task);p.setString(4,label);p.setString(5,features);p.executeUpdate();
