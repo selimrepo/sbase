@@ -13,6 +13,10 @@ services:
       SBASE_POSTGRES_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
       SBASE_POSTGRES_USER: ${POSTGRES_USER:-sbase}
       SBASE_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      SBASE_CASSANDRA_CONTACT_POINT: ${SBASE_CASSANDRA_CONTACT_POINT:-cassandra}
+      SBASE_CASSANDRA_PORT: ${SBASE_CASSANDRA_PORT:-9042}
+      SBASE_CASSANDRA_DATACENTER: ${SBASE_CASSANDRA_DATACENTER:-datacenter1}
+      SBASE_SOLR_URL: ${SBASE_SOLR_URL:-http://solr:8983/solr}
     ports: ["8080:8080", "25520:25520"]
     depends_on:
       postgres:
