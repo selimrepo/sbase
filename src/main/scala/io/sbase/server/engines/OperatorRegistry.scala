@@ -10,12 +10,12 @@ import java.time.Duration
 import scala.collection.mutable
 
 final class OperatorRegistry {
- private val supported=Set("dataset-values","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","spark-sql","flink-submit","flink-jobs-overview")
+ private val supported=Set("dataset-values","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","spark-sql","flink-submit","flink-jobs-overview","calcite-sql")
  private lazy val spark=SparkSession.builder().appName("SBase-Workflow-Operator")
   .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
   .config("spark.ui.enabled","false")
   .config("spark.driver.host",sys.env.getOrElse("SPARK_DRIVER_HOST","127.0.0.1")).getOrCreate()
- private val http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+ private val calcite=new CalciteSqlEngine()\n private val http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
 
  def validate(definition:String):Unit = orderedNodes(definition)
 
