@@ -87,15 +87,18 @@ public final class FederatedQueryExecutor implements AutoCloseable {
         return switch(type){
             case "postgresql"->{
                 @SuppressWarnings("unchecked") List<Object> params=(List<Object>)spec.getOrDefault("parameters",List.of());
-                String sourceQuery=spec.containsKey("query")?String.valueOf(spec.get("query")):FederatedPredicatePushdown.translate(sql,type,String.valueOf(spec.getOrDefault("table",table)),number(spec.get("limit"),limit)).orElseThrow(()->new IllegalArgumentException("Provide an explicit PostgreSQL source query when SQL cannot be safely pushed down"));\n                Map<String,Object> result=catalogs.queryPostgres(sourceQuery,params,number(spec.get("limit"),limit));
+                String sourceQuery=spec.containsKey("query")?String.valueOf(spec.get("query")):FederatedPredicatePushdown.translate(sql,type,String.valueOf(spec.getOrDefault("table",table)),number(spec.get("limit"),limit)).orElseThrow(()->new IllegalArgumentException("Provide an explicit PostgreSQL source query when SQL cannot be safely pushed down"));
+                Map<String,Object> result=catalogs.queryPostgres(sourceQuery,params,number(spec.get("limit"),limit));
                 @SuppressWarnings("unchecked") List<Map<String,Object>> rows=(List<Map<String,Object>>)result.get("rows");yield rows;
             }
             case "cassandra"->{
-                String sourceQuery=spec.containsKey("query")?String.valueOf(spec.get("query")):FederatedPredicatePushdown.translate(sql,type,String.valueOf(spec.getOrDefault("table",table)),number(spec.get("limit"),limit)).orElseThrow(()->new IllegalArgumentException("Provide an explicit CQL source query when SQL cannot be safely pushed down"));\n                Map<String,Object> result=catalogs.queryCassandra(sourceQuery,number(spec.get("limit"),limit));
+                String sourceQuery=spec.containsKey("query")?String.valueOf(spec.get("query")):FederatedPredicatePushdown.translate(sql,type,String.valueOf(spec.getOrDefault("table",table)),number(spec.get("limit"),limit)).orElseThrow(()->new IllegalArgumentException("Provide an explicit CQL source query when SQL cannot be safely pushed down"));
+                Map<String,Object> result=catalogs.queryCassandra(sourceQuery,number(spec.get("limit"),limit));
                 @SuppressWarnings("unchecked") List<Map<String,Object>> rows=(List<Map<String,Object>>)result.get("rows");yield rows;
             }
             case "solr"->{
-                String solrQuery=spec.containsKey("q")?String.valueOf(spec.get("q")):FederatedPredicatePushdown.translate(sql,type,null,number(spec.get("limit"),limit)).orElse("*:*");\n                Map<String,Object> result=catalogs.querySolr(String.valueOf(spec.get("collection")),solrQuery,number(spec.get("limit"),limit));
+                String solrQuery=spec.containsKey("q")?String.valueOf(spec.get("q")):FederatedPredicatePushdown.translate(sql,type,null,number(spec.get("limit"),limit)).orElse("*:*");
+                Map<String,Object> result=catalogs.querySolr(String.valueOf(spec.get("collection")),solrQuery,number(spec.get("limit"),limit));
                 Object docs=result.get("documents");List<Map<String,Object>> rows=new ArrayList<>();
                 if(docs instanceof Iterable<?> iterable)for(Object doc:iterable){
                     @SuppressWarnings("unchecked") Map<String,Object> map=JSON.convertValue(doc,Map.class);rows.add(map);
