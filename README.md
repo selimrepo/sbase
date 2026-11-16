@@ -222,7 +222,7 @@ The synchronous endpoint remains available. For non-blocking execution:
 - `GET /api/v1/automl/jobs/{id}` returns queue/training status and result.
 - `POST /api/v1/automl/jobs/{id}` requests cancellation; the queue interrupts the worker and cancels the associated Spark job group.
 
-Queue capacity and workers are controlled by `SBASE_AUTOML_WORKERS` and `SBASE_AUTOML_QUEUE_CAPACITY`. Experiment, trial and model metadata remain in PostgreSQL. Artifacts are written under `SBASE_MODEL_REGISTRY_PATH`. For multiple application servers, mount the same shared NFS/POSIX directory at `/var/lib/sbase/models` on every host and set `SBASE_MODEL_REGISTRY_HOST_PATH` to the corresponding host mount. The default local Docker volume is not shared across hosts and is suitable only for a single-node deployment.
+Queue capacity and workers are controlled by `SBASE_AUTOML_WORKERS` and `SBASE_AUTOML_QUEUE_CAPACITY`. Experiment, trial and model metadata remain in PostgreSQL. Artifacts are written under `SBASE_MODEL_REGISTRY_PATH`. For multiple application servers, replace the `model_registry_data` named volume with the same shared NFS/POSIX mount on every host; the default named volume is local to one Docker host.
 
 ### Federated execution
 
