@@ -9,7 +9,7 @@ import java.time.Duration
 import scala.collection.mutable
 
 final class OperatorRegistry {
- private val supported=Set("mahout-vector-sum","spark-sql","flink-submit","flink-jobs-overview")
+ private val supported=Set("dataset-values","mahout-vector-sum","spark-sql","flink-submit","flink-jobs-overview")
  private lazy val spark=SparkSession.builder().appName("SBase-Workflow-Operator")
   .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
   .config("spark.ui.enabled","false")
@@ -49,14 +49,26 @@ final class OperatorRegistry {
  }
 
  def execute(definition:String):JsValue = {
-  val outputs=orderedNodes(definition).map { value =>
+  val root=definition.parseJson.asJsObject
+  val edges=root.fields.get("edges").map(_.convertTo[Vector[JsValue]]).getOrElse(Vector.empty)
+  val incoming=edges.groupBy(_.asJsObject.fields("target").convertTo[String])
+    .view.mapValues(_.map(_.asJsObject.fields("source").convertTo[String])).toMap
+  val outputsById=mutable.Map.empty[String,JsValue]
+  val outputs=mutable.ArrayBuffer.empty[JsValue]
+  orderedNodes(definition).foreach { value =>
    val node=value.asJsObject
    val id=node.fields("id").convertTo[String]
    val op=node.fields("operator").convertTo[String]
    val config=node.fields.getOrElse("config",JsObject()).asJsObject
+   val upstream=incoming.getOrElse(id,Vector.empty).flatMap(outputsById.get)
    val output=op match {
-    case "mahout-vector-sum" =>
+    case "dataset-values" =>
      val values=config.fields.getOrElse("values",JsArray()).convertTo[Vector[Double]]
+     JsObject("values"->JsArray(values.map(JsNumber(_))))
+    case "mahout-vector-sum" =>
+     val configured=config.fields.get("values").map(_.convertTo[Vector[Double]])
+     val inherited=upstream.flatMap(_.asJsObject.fields.get("values").map(_.convertTo[Vector[Double]])).flatten
+     val values=configured.getOrElse(inherited)
      val vector=new DenseVector(values.toArray)
      JsObject("sum"->JsNumber(vector.zSum()),"count"->JsNumber(values.size))
     case "spark-sql" =>
@@ -83,9 +95,10 @@ final class OperatorRegistry {
      if(response.statusCode()/100!=2) throw new IllegalStateException("Flink REST HTTP "+response.statusCode())
      response.body().parseJson
    }
-   JsObject("nodeId"->JsString(id),"operator"->JsString(op),"output"->output)
+   outputsById += id -> output
+   outputs += JsObject("nodeId"->JsString(id),"operator"->JsString(op),"output"->output)
   }
-  JsObject("nodes"->JsArray(outputs))
+  JsObject("nodes"->JsArray(outputs.toVector))
  }
  def stop():Unit=if(spark!=null)spark.stop()
 }
