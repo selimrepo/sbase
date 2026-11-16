@@ -1,5 +1,24 @@
 name: sbase
 services:
+  app:
+    build: .
+    environment:
+      SBASE_HTTP_HOST: 0.0.0.0
+      SBASE_POSTGRES_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
+      SBASE_POSTGRES_USER: ${POSTGRES_USER:-sbase}
+      SBASE_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports: ["8080:8080", "25520:25520"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    ports: ["3000:80"]
+    depends_on: [app]
+    restart: unless-stopped
+
   postgres:
     image: postgres:17
     environment:
