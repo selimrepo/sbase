@@ -57,7 +57,8 @@ object Main {
        if(name.isEmpty) complete(StatusCodes.BadRequest)
        else {
         val definition=request.definition.compactPrint
-        val future=Future(repository.createWorkflow(name,definition))
+        operators.validate(definition)
+        val future=Future(scala.concurrent.blocking(repository.createWorkflow(name,definition)))
         onComplete(future){
          case Success((workspaceId,workflowId))=>complete(StatusCodes.Created->WorkflowCreated(workspaceId.toString,workflowId.toString))
          case Failure(error)=>system.log.error("Workflow creation failed",error);complete(StatusCodes.InternalServerError)
@@ -70,7 +71,7 @@ object Main {
      post{
       entity(as[JobSubmit]){request=>
        val key=Option(request.idempotencyKey).map(_.trim).filter(_.nonEmpty).getOrElse(UUID.randomUUID().toString)
-       onComplete(Future(repository.submit(workflowId,key,request.maxAttempts))){
+       onComplete(Future(scala.concurrent.blocking(repository.submit(workflowId,key,request.maxAttempts)))){
         case Success(jobId)=>complete(StatusCodes.Accepted->JobAccepted(jobId.toString))
         case Failure(error)=>system.log.error("Job submission failed",error);complete(StatusCodes.BadRequest)
        }
@@ -79,7 +80,7 @@ object Main {
     } ~
     path("jobs"/JavaUUID){jobId=>
      get{
-      onComplete(Future(repository.status(jobId))){
+      onComplete(Future(scala.concurrent.blocking(repository.status(jobId)))){
        case Success(Some((status,attempt,error)))=>complete(JobStatus(status,attempt,error))
        case Success(None)=>complete(StatusCodes.NotFound)
        case Failure(error)=>system.log.error("Job status lookup failed",error);complete(StatusCodes.InternalServerError)
