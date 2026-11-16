@@ -57,7 +57,9 @@ export default function App() {
       <input aria-label="API endpoint" value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
       <button onClick={() => addNode("dataset-values", "Dataset values", { values: [1, 2, 3] })}>+ Dataset</button>
       <button onClick={() => addNode("spark-sql", "Spark SQL", { query: "SELECT 1 AS value" })}>+ Spark SQL</button>
-      <button onClick={() => addNode("mahout-vector-sum", "Mahout mining", { values: [1, 2, 3] })}>+ Mahout</button>
+      <button onClick={() => addNode("mahout-vector-sum", "Mahout vector sum", { values: [1, 2, 3] })}>+ Mahout sum</button>
+      <button onClick={() => addNode("mahout-cosine-similarity", "Cosine similarity", { left: [1, 0], right: [1, 1] })}>+ Cosine</button>
+      <button onClick={() => addNode("mahout-euclidean-distance", "Euclidean distance", { left: [0, 0], right: [3, 4] })}>+ Distance</button>
       <input aria-label="Flink uploaded JAR ID" placeholder="Flink JAR ID" value={flinkJarId} onChange={(e) => setFlinkJarId(e.target.value)} />
       <button onClick={() => addNode("flink-submit", "Flink stream job", { jarId: flinkJarId, parallelism: 1 })} disabled={!flinkJarId.trim()}>+ Flink</button>
       <button className="primary" onClick={runWorkflow}>Run workflow ↗</button>
