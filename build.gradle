@@ -1,6 +1,7 @@
 plugins {
     id 'scala'
     id 'application'
+    id 'com.gradleup.shadow' version '8.3.6'
 }
 
 group = 'io.sbase'
@@ -37,7 +38,7 @@ dependencies {
     implementation "org.apache.spark:spark-sql_${scalaBinaryVersion}:${sparkVersion}"
     implementation "org.apache.spark:spark-mllib_${scalaBinaryVersion}:${sparkVersion}"
     implementation "org.apache.mahout:mahout-math:0.13.0"
-    compileOnly "org.apache.flink:flink-streaming-java:${flinkVersion}"
+    implementation "org.apache.flink:flink-streaming-java:${flinkVersion}"
     implementation "com.datastax.oss:java-driver-core:4.17.0"
     implementation "org.apache.solr:solr-solrj:9.8.1"
     compileOnly "org.apache.geode:geode-core:1.15.2"
@@ -63,3 +64,12 @@ tasks.withType(Test).configureEach {
     testLogging { events 'failed', 'skipped' }
 }
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+
+
+tasks.named('shadowJar') {
+    archiveClassifier.set('all')
+    zip64 true
+    mergeServiceFiles()
+    manifest { attributes('Main-Class': application.mainClass.get(), 'Implementation-Title': 'SBase Data Science Server', 'Implementation-Version': project.version) }
+}
+tasks.named('build') { dependsOn tasks.named('shadowJar') }
