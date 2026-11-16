@@ -145,6 +145,91 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   val p=c.prepareStatement("INSERT INTO job_execution_event(job_id,event_type,attempt,details) VALUES (?,?,?,?::jsonb)")
   p.setObject(1,id);p.setString(2,name);p.setInt(3,attempt);p.setString(4,details);p.executeUpdate();p.close()
  }
+
+ def createWorkflowVersion(workflowId:UUID,definition:String,activate:Boolean):Int = {
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false)
+   val lock=c.prepareStatement("SELECT id FROM workflow WHERE id=? FOR UPDATE")
+   lock.setObject(1,workflowId);val exists=lock.executeQuery()
+   if(!exists.next()) throw new NoSuchElementException("Workflow not found")
+   exists.close();lock.close()
+   val q=c.prepareStatement("SELECT COALESCE(MAX(version),0)+1 FROM workflow_version WHERE workflow_id=?")
+   q.setObject(1,workflowId);val rs=q.executeQuery();rs.next();val version=rs.getInt(1);rs.close();q.close()
+   val p=c.prepareStatement("INSERT INTO workflow_version(workflow_id,version,definition,checksum) VALUES (?, ?, ?::jsonb, ?)")
+   p.setObject(1,workflowId);p.setInt(2,version);p.setString(3,definition)
+   p.setString(4,java.security.MessageDigest.getInstance("SHA-256").digest(definition.getBytes("UTF-8")).map(b=>f"${b & 0xff}%02x").mkString)
+   p.executeUpdate();p.close()
+   if(activate) { val a=c.prepareStatement("UPDATE workflow SET active_version=?,updated_at=now() WHERE id=?");a.setInt(1,version);a.setObject(2,workflowId);a.executeUpdate();a.close() }
+   c.commit();version
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ def activateWorkflowVersion(workflowId:UUID,version:Int):Boolean = {
+  val c=dataSource.getConnection
+  try { val p=c.prepareStatement("UPDATE workflow SET active_version=?,updated_at=now() WHERE id=? AND EXISTS (SELECT 1 FROM workflow_version v WHERE v.workflow_id=? AND v.version=?)")
+   p.setInt(1,version);p.setObject(2,workflowId);p.setObject(3,workflowId);p.setInt(4,version)
+   val changed=p.executeUpdate();p.close();changed==1
+  } finally c.close()
+ }
+
+ def workflowVersions(workflowId:UUID):Seq[(Int,String,String,java.time.OffsetDateTime)] = {
+  val c=dataSource.getConnection
+  try { val p=c.prepareStatement("SELECT v.version,v.checksum,v.definition::text,v.created_at FROM workflow_version v WHERE v.workflow_id=? ORDER BY v.version DESC")
+   p.setObject(1,workflowId);val rs=p.executeQuery();val out=ArrayBuffer.empty[(Int,String,String,java.time.OffsetDateTime)]
+   while(rs.next()) out += ((rs.getInt(1),rs.getString(2),rs.getString(3),rs.getObject(4,classOf[java.time.OffsetDateTime])))
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
+ def createSchedule(workflowId:UUID,intervalSeconds:Int,maxAttempts:Int):UUID = {
+  require(intervalSeconds>=10 && intervalSeconds<=31536000,"Schedule interval must be between 10 seconds and 365 days")
+  val c=dataSource.getConnection
+  try { val id=UUID.randomUUID()
+   val p=c.prepareStatement("INSERT INTO workflow_schedule(id,workflow_id,workflow_version,interval_seconds,max_attempts,next_run_at) SELECT ?,id,active_version,?,?,now() FROM workflow WHERE id=? AND active_version IS NOT NULL")
+   p.setObject(1,id);p.setInt(2,intervalSeconds);p.setInt(3,math.max(1,math.min(maxAttempts,20)));p.setObject(4,workflowId)
+   val n=p.executeUpdate();p.close();if(n==0)throw new NoSuchElementException("Workflow not found or has no active version");id
+  } finally c.close()
+ }
+
+ def schedules(workflowId:Option[UUID]):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try { val sql="SELECT id,workflow_id,workflow_version,interval_seconds,max_attempts,enabled,next_run_at,last_triggered_at FROM workflow_schedule "+(if(workflowId.isDefined)"WHERE workflow_id=? " else "")+"ORDER BY created_at DESC"
+   val p=c.prepareStatement(sql);workflowId.foreach(p.setObject(1,_));val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next()) out += Map[String,Object]("id"->rs.getObject(1),"workflowId"->rs.getObject(2),"workflowVersion"->Int.box(rs.getInt(3)),"intervalSeconds"->Int.box(rs.getInt(4)),"maxAttempts"->Int.box(rs.getInt(5)),"enabled"->Boolean.box(rs.getBoolean(6)),"nextRunAt"->rs.getObject(7),"lastTriggeredAt"->rs.getObject(8))
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
+ def setScheduleEnabled(id:UUID,enabled:Boolean):Boolean = {
+  val c=dataSource.getConnection
+  try { val p=c.prepareStatement("UPDATE workflow_schedule SET enabled=?,next_run_at=CASE WHEN ? THEN now() ELSE next_run_at END,updated_at=now() WHERE id=?")
+   p.setBoolean(1,enabled);p.setBoolean(2,enabled);p.setObject(3,id);val n=p.executeUpdate();p.close();n==1
+  } finally c.close()
+ }
+
+ def dispatchDueSchedules(limit:Int):Int = {
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false)
+   val q=c.prepareStatement("SELECT id,workflow_id,workflow_version,interval_seconds,max_attempts,next_run_at FROM workflow_schedule WHERE enabled=TRUE AND next_run_at<=now() ORDER BY next_run_at LIMIT ? FOR UPDATE SKIP LOCKED")
+   q.setInt(1,math.max(1,limit));val rs=q.executeQuery()
+   val due=ArrayBuffer.empty[(UUID,UUID,Int,Int,Int,java.time.OffsetDateTime)]
+   while(rs.next()) due += ((rs.getObject(1,classOf[UUID]),rs.getObject(2,classOf[UUID]),rs.getInt(3),rs.getInt(4),rs.getInt(5),rs.getObject(6,classOf[java.time.OffsetDateTime])))
+   rs.close();q.close()
+   due.foreach { case (id,wf,version,interval,attempts,next)=>
+    val job=UUID.randomUUID()
+    val p=c.prepareStatement("INSERT INTO job_execution(id,workflow_id,workflow_version,status,idempotency_key,correlation_id,max_attempts) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING")
+    p.setObject(1,job);p.setObject(2,wf);p.setInt(3,version);p.setString(4,"schedule:"+id.toString+":"+next.toInstant.toEpochMilli);p.setObject(5,UUID.randomUUID());p.setInt(6,attempts)
+    val created=p.executeUpdate()==1;p.close()
+    if(created) event(c,job,"QUEUED_BY_SCHEDULE",0,"{}")
+    val u=c.prepareStatement("UPDATE workflow_schedule SET next_run_at=now()+(? * interval '1 second'),last_triggered_at=now(),updated_at=now() WHERE id=?")
+    u.setInt(1,interval);u.setObject(2,id);u.executeUpdate();u.close()
+   }
+   c.commit();due.size
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
  def isHealthy:Boolean = {
   val c=dataSource.getConnection
   try { val s=c.createStatement(); val rs=s.executeQuery("SELECT 1"); val ok=rs.next();rs.close();s.close();ok } finally c.close()
