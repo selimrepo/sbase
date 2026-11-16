@@ -115,5 +115,12 @@ final class OperatorRegistry {
   }
   JsObject("nodes"->JsArray(outputs.toVector))
  }
- def stop():Unit=if(spark!=null)spark.stop()
+
+ def autoMl(request:String):JsValue = {
+  val mapper=new com.fasterxml.jackson.databind.ObjectMapper()
+  val input=mapper.readValue(request,classOf[java.util.Map[String,Object]])
+  val result=new io.sbase.server.automl.AutoMlService(spark).train(input)
+  mapper.writeValueAsString(result).parseJson
+ }
+\n def stop():Unit=if(spark!=null)spark.stop()
 }
