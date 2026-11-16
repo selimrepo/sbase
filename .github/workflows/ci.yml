@@ -44,7 +44,7 @@ jobs:
         with:
           gradle-version: "8.14.3"
       - name: Compile, unit test, PostgreSQL integration test and package
-        run: gradle --no-daemon clean test installDist
+        run: gradle --no-daemon clean test installDist shadowJar
 
   workflow-studio:
     runs-on: ubuntu-latest
