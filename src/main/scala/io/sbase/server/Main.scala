@@ -323,7 +323,7 @@ object Main {
     }} ~
     path("workflows"/JavaUUID/"runs"){workflowId=>
      get {
-      parameter("limit".as[Int].?(100)){limit=>
+      parameter("limit".as[Int].withDefault(100)){limit=>
        onComplete(Future(scala.concurrent.blocking(repository.workflowRuns(workflowId,limit)))) {
         case Success(items)=>complete(mapper.writeValueAsString(items).parseJson)
         case Failure(error)=>system.log.error("Workflow run history failed",error);complete(StatusCodes.InternalServerError)
