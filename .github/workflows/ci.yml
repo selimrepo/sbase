@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gradle:
+  backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,5 +25,30 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.14.3"
-      - name: Compile, test and package
+      - name: Compile, unit test, PostgreSQL integration test and package
         run: gradle --no-daemon clean test installDist
+
+  workflow-studio:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build React Workflow Studio
+        run: npm run build
+
+  container:
+    runs-on: ubuntu-latest
+    needs: [backend, workflow-studio]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build server image
+        run: docker build -t sbase-server:ci .
