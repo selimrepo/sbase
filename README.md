@@ -12,7 +12,7 @@ SBase is a KNIME-inspired distributed data science and mining server. The curren
 - Apache Mahout math for mining operators
 - Apache Flink REST for submitting pre-uploaded JARs and inspecting running jobs
 - React + React Flow for visual workflow authoring
-- Cassandra, Solr and Geode remain planned connector integrations in this development phase
+- PostgreSQL, Cassandra and Solr read-only catalog/query adapters; Cassandra and Solr are optional runtime profiles
 
 Authentication is intentionally out of scope. No login, registration, OAuth/OIDC, MFA or Keycloak components are included. Protect deployments with private networks, firewalls and TLS at the infrastructure edge.
 
@@ -131,6 +131,78 @@ A workflow node can run Calcite SQL over in-memory workflow-local tables:
 
 Calcite is embedded in the SBase process and requires no separate service. This first adapter materializes node-configured JSON tables. Persistent catalog-backed tables, JDBC pushdown, query resource limits and streaming SQL are follow-up integration work. Use Spark SQL for distributed processing; Calcite's enumerable runtime is an in-process query engine.
 
+## Platform APIs
+
+All platform capabilities are exposed under `/api/v1`:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/capabilities` | Discover engines and exposed API groups |
+| `GET /api/v1/catalogs` | Inspect PostgreSQL tables, Cassandra keyspaces and Solr availability |
+| `POST /api/v1/catalogs/postgresql/query` | Bounded read-only SQL with bind parameters |
+| `POST /api/v1/catalogs/cassandra/query` | Bounded read-only CQL |
+| `POST /api/v1/catalogs/solr/query` | Bounded Solr query by collection |
+| `POST /api/v1/query/plan` | Calcite-parser-backed federated cost/physical-plan proposal from supplied table statistics |
+| `POST /api/v1/automl/train` | Spark ML classification/regression candidate search |
+| `POST /api/v1/workflows` | Validate and persist an immutable workflow version |
+| `POST /api/v1/workflows/{workflowId}/runs` | Submit an idempotent distributed workflow run |
+| `GET /api/v1/jobs/{jobId}` | Read job status and result |
+
+PostgreSQL query request:
+
+```json
+{
+  "sql": "SELECT customer_id, SUM(amount) AS revenue FROM sales WHERE amount > ? GROUP BY customer_id",
+  "parameters": [100],
+  "limit": 1000
+}
+```
+
+Cassandra and Solr use `{"cql":"SELECT ...","limit":500}` and
+`{"collection":"products","q":"category:books","limit":100}` respectively.
+The adapters enforce read-only statements and result limits. Cassandra and Solr are
+optional Compose profiles; enable them with `docker compose --profile nosql --profile search up --build`.
+Set `SBASE_CASSANDRA_CONTACT_POINT`, `SBASE_CASSANDRA_PORT`,
+`SBASE_CASSANDRA_DATACENTER` and `SBASE_SOLR_URL` for external deployments.
+
+### Federated query planning
+
+The planner parses SQL with Calcite, matches referenced tables against caller-supplied
+catalog statistics, orders scans by estimated cardinality, selects a source-local or
+cross-source exchange strategy, and estimates scan/exchange cost and parallelism.
+Example:
+
+```json
+{
+  "sql": "SELECT c.id, o.total FROM customers c JOIN orders o ON c.id = o.customer_id",
+  "catalog": {
+    "customers": {"source":"postgresql","rows":10000,"bytes":1200000,"partitions":4},
+    "orders": {"source":"cassandra","rows":8000000,"bytes":900000000,"partitions":64}
+  }
+}
+```
+
+This API returns an optimization proposal, not an executed federated SQL result. The
+current version does not yet perform adaptive runtime re-optimization, cross-source
+join execution, or Calcite JDBC/Cassandra/Solr adapter pushdown. Those require a
+runtime exchange layer and persistent statistics collection; the planner does not
+pretend that a generated plan is already executable.
+
+### AutoML
+
+`POST /api/v1/automl/train` accepts `task` (`classification` or `regression`),
+`label`, numeric `features`, inline `data` rows and optional `maxCandidates`
+(up to 3). It evaluates Spark ML Logistic Regression, Random Forest and Decision Tree
+candidates for classification, or Linear Regression, Random Forest and Decision Tree
+for regression, using a deterministic 80/20 holdout split. The response contains
+per-candidate metrics and the best candidate.
+
+The current API is a bounded synchronous baseline: it does not yet persist trained
+models, run distributed cross-validation/hyperparameter search, perform automated
+feature selection, support categorical preprocessing, or manage experiment lifecycle.
+The V3 migration creates experiment/trial metadata tables for the next persistence
+step; the current training endpoint does not write those records yet.
+
 ## Durable execution design
 
 1. Workflow definitions are JSONB snapshots with SHA-256 checksums and immutable version references.
@@ -165,7 +237,12 @@ The Compose file includes optional development profiles for Cassandra, Solr, Spa
 - [x] React Flow workflow graph editor and job polling
 - [ ] Node input/output contracts and persisted per-node execution previews
 - [ ] Spark structured streaming and Flink checkpoint/savepoint lifecycle management
-- [ ] Cassandra, Solr and Geode production connector implementations
+- [x] Read-only PostgreSQL, Cassandra and Solr catalog/query APIs
+- [x] Calcite-backed federated cost/plan proposal API
+- [x] Spark ML baseline AutoML classification/regression candidate search API
+- [ ] Executable cross-source joins, adaptive distributed query optimization and JDBC/source pushdown
+- [ ] Persistent AutoML experiments, model registry, cross-validation and automated feature engineering
+- [ ] Geode production connector implementation
 - [ ] Outbox dispatcher, scheduler, resource quotas and cancellation
 - [ ] OpenTelemetry metrics/traces, alerting, HA/DR and restore drills
 - [ ] Multi-node chaos, load and week-long soak verification
