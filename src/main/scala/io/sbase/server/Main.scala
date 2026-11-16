@@ -68,7 +68,8 @@ object Main {
   val catalogs=new CatalogService()
   val mapper=new ObjectMapper()
   val federated=new FederatedQueryExecutor(catalogs,operators.sparkSession,sys.env.get("SBASE_FEDERATED_SCAN_PARALLELISM").flatMap(_.toIntOption).getOrElse(8))
-  val autoMl=new AutoMlLifecycleService(operators.sparkSession)\n  val autoMlJobs=new AutoMlJobQueue(autoMl,operators.sparkSession,sys.env.get("SBASE_AUTOML_WORKERS").flatMap(_.toIntOption).getOrElse(2),sys.env.get("SBASE_AUTOML_QUEUE_CAPACITY").flatMap(_.toIntOption).getOrElse(16))
+  val autoMl=new AutoMlLifecycleService(operators.sparkSession)
+  val autoMlJobs=new AutoMlJobQueue(autoMl,operators.sparkSession,sys.env.get("SBASE_AUTOML_WORKERS").flatMap(_.toIntOption).getOrElse(2),sys.env.get("SBASE_AUTOML_QUEUE_CAPACITY").flatMap(_.toIntOption).getOrElse(16))
   val workerRegion=WorkerSharding.start(system,repository,operators)
   new JobDispatcher(system,repository,workerRegion).start()
 
