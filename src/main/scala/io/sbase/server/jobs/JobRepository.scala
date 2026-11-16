@@ -100,6 +100,27 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
  }
 
+
+ def workflowRuns(workflowId:UUID,limit:Int):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("SELECT id,workflow_version,status,attempt,max_attempts,error_code,error_message,submitted_at,started_at,finished_at,result::text FROM job_execution WHERE workflow_id=? ORDER BY submitted_at DESC LIMIT ?")
+   p.setObject(1,workflowId);p.setInt(2,math.max(1,math.min(limit,500)));val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next()) out += Map[String,Object]("jobId"->rs.getObject(1),"workflowVersion"->Int.box(rs.getInt(2)),"status"->rs.getString(3),"attempt"->Int.box(rs.getInt(4)),"maxAttempts"->Int.box(rs.getInt(5)),"errorCode"->Option(rs.getString(6)).orNull,"errorMessage"->Option(rs.getString(7)).orNull,"submittedAt"->rs.getString(8),"startedAt"->Option(rs.getString(9)).orNull,"finishedAt"->Option(rs.getString(10)).orNull,"result"->Option(rs.getString(11)).orNull)
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
+ def jobEvents(jobId:UUID):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("SELECT event_type,attempt,details::text,created_at FROM job_execution_event WHERE job_id=? ORDER BY created_at,id")
+   p.setObject(1,jobId);val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next()) out += Map[String,Object]("eventType"->rs.getString(1),"attempt"->Int.box(rs.getInt(2)),"details"->rs.getString(3),"createdAt"->rs.getString(4))
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
  def status(id:UUID):Option[(String,Int,Option[String],Option[String])] = {
   val c=dataSource.getConnection
   try {
