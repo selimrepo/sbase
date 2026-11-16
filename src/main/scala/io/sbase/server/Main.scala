@@ -11,9 +11,12 @@ import spray.json.DefaultJsonProtocol._
 import com.typesafe.config.ConfigFactory
 import io.sbase.server.jobs.{JobDispatcher,JobRepository,WorkerSharding}
 import io.sbase.server.engines.OperatorRegistry
+import io.sbase.server.catalog.CatalogService
+import com.fasterxml.jackson.databind.ObjectMapper
 import scala.concurrent.{ExecutionContext,Future}
 import scala.util.{Failure,Success}
 import java.util.UUID
+import scala.jdk.CollectionConverters._
 
 object Main {
  final case class ApiInfo(name:String,version:String,status:String)
@@ -23,6 +26,9 @@ object Main {
  final case class JobSubmit(idempotencyKey:String,maxAttempts:Int=5)
  final case class JobAccepted(jobId:String)
  final case class JobStatus(status:String,attempt:Int,error:Option[String],result:Option[String])
+ final case class PgQuery(sql:String,parameters:Vector[JsValue]=Vector.empty,limit:Int=1000)
+ final case class CassandraQuery(cql:String,limit:Int=500)
+ final case class SolrQueryRequest(collection:String,q:String="*:*",limit:Int=100)
 
  def ApiInfoName():String="SBase Data Science Server"
 
@@ -50,10 +56,15 @@ object Main {
   implicit val jobSubmitFormat=jsonFormat2(JobSubmit.apply)
   implicit val jobAcceptedFormat=jsonFormat1(JobAccepted.apply)
   implicit val jobStatusFormat=jsonFormat4(JobStatus.apply)
+  implicit val pgQueryFormat=jsonFormat3(PgQuery.apply)
+  implicit val cassandraQueryFormat=jsonFormat2(CassandraQuery.apply)
+  implicit val solrQueryFormat=jsonFormat3(SolrQueryRequest.apply)
 
   val repository=JobRepository.fromEnvironment()
   repository.migrate()
   val operators=new OperatorRegistry()
+  val catalogs=new CatalogService()
+  val mapper=new ObjectMapper()
   val workerRegion=WorkerSharding.start(system,repository,operators)
   new JobDispatcher(system,repository,workerRegion).start()
 
@@ -62,6 +73,51 @@ object Main {
 
   val route=
    path("health"){get{complete(Health("UP","sbase-server"))}} ~
+   pathPrefix("api"/"v1"){
+    path("capabilities"){get{complete(JsObject(
+      "catalogs"->JsArray(JsString("postgresql"),JsString("cassandra"),JsString("solr")),
+      "queryEngines"->JsArray(JsString("calcite-sql"),JsString("spark-sql")),
+      "compute"->JsArray(JsString("mahout"),JsString("spark-ml-automl"),JsString("flink")),
+      "apiVersion"->JsString("v1")
+    ))}} ~
+    path("catalogs"){get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.catalogs()).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Catalog discovery failed",error);complete(StatusCodes.InternalServerError)
+      }
+    }} ~
+    path("catalogs"/"postgresql"/"query"){post{entity(as[PgQuery]){request=>
+      val params=request.parameters.map {
+       case JsString(v)=>v
+       case JsNumber(v)=>v.bigDecimal
+       case JsBoolean(v)=>java.lang.Boolean.valueOf(v)
+       case JsNull=>null
+       case other=>other.compactPrint
+      }.asJava
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.queryPostgres(request.sql,params,request.limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("PostgreSQL query rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query failed"))))
+      }
+    }}} ~
+    path("catalogs"/"cassandra"/"query"){post{entity(as[CassandraQuery]){request=>
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.queryCassandra(request.cql,request.limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Cassandra query rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query failed"))))
+      }
+    }}} ~
+    path("catalogs"/"solr"/"query"){post{entity(as[SolrQueryRequest]){request=>
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.querySolr(request.collection,request.q,request.limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Solr query rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query failed"))))
+      }
+    }}} ~
+    path("automl"/"train"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking(operators.autoMl(request.compactPrint)))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("AutoML training failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("training failed"))))
+      }
+    }}}
+   } ~
    pathPrefix("api"/"v1"){
     pathEndOrSingleSlash{get{complete(ApiInfo(ApiInfoName(),"0.2.0-SNAPSHOT","WORKFLOW_ENGINE"))}} ~
     path("ready"){get{onComplete(Future(scala.concurrent.blocking(repository.isHealthy))){
