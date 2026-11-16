@@ -14,6 +14,7 @@ ext {
     pekkoHttpVersion = '1.1.0'
     sparkVersion = '4.0.1'
     flinkVersion = '2.1.0'
+    calciteVersion = '1.40.0'
 }
 
 java {
@@ -38,6 +39,8 @@ dependencies {
     implementation "org.apache.spark:spark-sql_${scalaBinaryVersion}:${sparkVersion}"
     implementation "org.apache.spark:spark-mllib_${scalaBinaryVersion}:${sparkVersion}"
     implementation "org.apache.mahout:mahout-math:0.13.0"
+    implementation "org.apache.calcite:calcite-core:${calciteVersion}"
+    implementation "com.fasterxml.jackson.core:jackson-databind:2.18.3"
     implementation "org.apache.flink:flink-streaming-java:${flinkVersion}"
     implementation "com.datastax.oss:java-driver-core:4.17.0"
     implementation "org.apache.solr:solr-solrj:9.8.1"
