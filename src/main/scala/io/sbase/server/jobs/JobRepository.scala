@@ -196,7 +196,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   val c=dataSource.getConnection
   try { val sql="SELECT id,workflow_id,workflow_version,interval_seconds,max_attempts,enabled,next_run_at,last_triggered_at FROM workflow_schedule "+(if(workflowId.isDefined)"WHERE workflow_id=? " else "")+"ORDER BY created_at DESC"
    val p=c.prepareStatement(sql);workflowId.foreach(p.setObject(1,_));val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
-   while(rs.next()) out += Map[String,Object]("id"->rs.getObject(1),"workflowId"->rs.getObject(2),"workflowVersion"->Int.box(rs.getInt(3)),"intervalSeconds"->Int.box(rs.getInt(4)),"maxAttempts"->Int.box(rs.getInt(5)),"enabled"->Boolean.box(rs.getBoolean(6)),"nextRunAt"->rs.getObject(7),"lastTriggeredAt"->rs.getObject(8))
+   while(rs.next()) out += Map[String,Object]("id"->rs.getObject(1),"workflowId"->rs.getObject(2),"workflowVersion"->Int.box(rs.getInt(3)),"intervalSeconds"->Int.box(rs.getInt(4)),"maxAttempts"->Int.box(rs.getInt(5)),"enabled"->Boolean.box(rs.getBoolean(6)),"nextRunAt"->Option(rs.getString(7)).orNull,"lastTriggeredAt"->Option(rs.getString(8)).orNull)
    rs.close();p.close();out.toSeq
   } finally c.close()
  }
