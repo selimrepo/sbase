@@ -15,6 +15,7 @@ export default function App() {
   const [status, setStatus] = useState("Idle");
   const [output, setOutput] = useState("");
   const [apiBase, setApiBase] = useState("/api/v1");
+  const [flinkJarId, setFlinkJarId] = useState("");
   const onConnect = useCallback((connection) => setEdges((eds) => addEdge(connection, eds)), [setEdges]);
   const definition = useMemo(() => ({ nodes: nodes.map((node) => ({ id: node.id, operator: node.data.operator, config: node.data.config })), edges: edges.map((edge) => ({ source: edge.source, target: edge.target })) }), [nodes, edges]);
 
@@ -56,6 +57,8 @@ export default function App() {
       <input aria-label="API endpoint" value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
       <button onClick={() => addNode("spark-sql", "Spark SQL", { query: "SELECT 1 AS value" })}>+ Spark SQL</button>
       <button onClick={() => addNode("mahout-vector-sum", "Mahout mining", { values: [1, 2, 3] })}>+ Mahout</button>
+      <input aria-label="Flink uploaded JAR ID" placeholder="Flink JAR ID" value={flinkJarId} onChange={(e) => setFlinkJarId(e.target.value)} />
+      <button onClick={() => addNode("flink-submit", "Flink stream job", { jarId: flinkJarId, parallelism: 1 })} disabled={!flinkJarId.trim()}>+ Flink</button>
       <button className="primary" onClick={runWorkflow}>Run workflow ↗</button>
     </section>
     <section className="workspace">
