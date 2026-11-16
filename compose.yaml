@@ -17,9 +17,9 @@ services:
       SBASE_CASSANDRA_PORT: ${SBASE_CASSANDRA_PORT:-9042}
       SBASE_CASSANDRA_DATACENTER: ${SBASE_CASSANDRA_DATACENTER:-datacenter1}
       SBASE_SOLR_URL: ${SBASE_SOLR_URL:-http://solr:8983/solr}
-      SBASE_MODEL_REGISTRY_PATH: /var/lib/sbase/models
+      SBASE_MODEL_REGISTRY_PATH: /var/lib/sbase/models\n      SBASE_FEDERATED_SPILL_PATH: /var/lib/sbase/spark-tmp/federation\n      SBASE_AUTOML_WORKERS: ${SBASE_AUTOML_WORKERS:-2}\n      SBASE_AUTOML_QUEUE_CAPACITY: ${SBASE_AUTOML_QUEUE_CAPACITY:-16}\n      SPARK_LOCAL_DIRS: /var/lib/sbase/spark-tmp
     ports: ["8080:8080", "25520:25520"]
-    volumes: ["models_data:/var/lib/sbase/models"]
+    volumes: ["${SBASE_MODEL_REGISTRY_HOST_PATH:-./data/models}:/var/lib/sbase/models", "spark_tmp:/var/lib/sbase/spark-tmp"]
     depends_on:
       postgres:
         condition: service_healthy
