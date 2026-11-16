@@ -7,16 +7,17 @@ import org.apache.pekko.http.scaladsl.server.Directives._
 import org.apache.pekko.http.scaladsl.model.StatusCodes
 import org.apache.pekko.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import spray.json.DefaultJsonProtocol._
-import com.typesafe.config.ConfigFactory
-import scala.concurrent.{ExecutionContext, Future}
+
+import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
 object Main {
   final case class ApiInfo(name: String, version: String, status: String)
   final case class Health(status: String, service: String)
 
+  def ApiInfoName(): String = "SBase Data Science Server"
+
   def main(args: Array[String]): Unit = {
-    val config = ConfigFactory.load()
     implicit val system: ActorSystem[Nothing] = ActorSystem(Behaviors.empty, "sbase")
     implicit val ec: ExecutionContext = system.executionContext
     implicit val apiInfoFormat = jsonFormat3(ApiInfo.apply)
@@ -34,7 +35,7 @@ object Main {
       pathPrefix("api" / "v1") {
         pathEndOrSingleSlash {
           get {
-            complete(ApiInfo("SBase Data Science Server", "0.1.0-SNAPSHOT", "FOUNDATION"))
+            complete(ApiInfo(ApiInfoName(), "0.1.0-SNAPSHOT", "FOUNDATION"))
           }
         } ~
         path("ready") {
