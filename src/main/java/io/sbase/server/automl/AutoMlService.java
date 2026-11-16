@@ -88,7 +88,7 @@ public final class AutoMlService {
         Dataset<Row> train,validation;
         if(timeSeries){
             Dataset<Row> ordered=raw.orderBy(org.apache.spark.sql.functions.col(String.valueOf(request.get("timeColumn"))));
-            long trainingCount=Math.max(2,(long)Math.floor(ordered.count()*0.8));
+            int trainingCount=Math.max(2,(int)Math.floor(ordered.count()*0.8));
             train=ordered.limit(trainingCount);
             validation=ordered.exceptAll(train);
         }else{
