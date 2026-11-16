@@ -57,13 +57,23 @@ public final class FederatedQueryPlanner {
                 ? Map.of("type","BROADCAST_SMALL_SIDE_OR_HASH_SHUFFLE","buildSide","smallest-estimated-input",
                          "exchange","bounded-partitioned-exchange","estimatedExchangeBytes",totalBytes)
                 : Map.of("type","SOURCE_LOCAL_PUSHDOWN","exchange","none");
-        return Map.of("engine","apache-calcite-federated-planner","sql",sql,"scans",scans,
-                "scanOrder","ascending-estimated-cardinality","sources",sources,"crossSourceJoin",crossSource,
-                "filterPushdownCandidate",filterPushdown,"projectionPushdownCandidate",projectionPushdown,
-                "joinStrategy",joinStrategy,"parallelism",maxParallelism,"estimatedRows",totalRows,
-                "estimatedBytes",totalBytes,"estimatedCost",estimatedCost,
-                "notes",List.of("Estimates depend on supplied catalog statistics",
-                        "This endpoint returns a physical plan; execution and adaptive re-optimization are separate"));
+        Map<String,Object> plan = new LinkedHashMap<>();
+        plan.put("engine","apache-calcite-federated-planner");
+        plan.put("sql",sql);
+        plan.put("scans",scans);
+        plan.put("scanOrder","ascending-estimated-cardinality");
+        plan.put("sources",sources);
+        plan.put("crossSourceJoin",crossSource);
+        plan.put("filterPushdownCandidate",filterPushdown);
+        plan.put("projectionPushdownCandidate",projectionPushdown);
+        plan.put("joinStrategy",joinStrategy);
+        plan.put("parallelism",maxParallelism);
+        plan.put("estimatedRows",totalRows);
+        plan.put("estimatedBytes",totalBytes);
+        plan.put("estimatedCost",estimatedCost);
+        plan.put("notes",List.of("Estimates depend on supplied catalog statistics",
+                "This endpoint returns a physical plan; execution and adaptive re-optimization are separate"));
+        return plan;
     }
     private static long number(Object value,long fallback) {
         return value instanceof Number n?Math.max(0,n.longValue()):fallback;
