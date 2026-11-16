@@ -61,7 +61,7 @@ class JobRepositoryPostgresTest {
 
     @Test
     void expiredFinalAttemptIsMarkedFailedInsteadOfRequeuedForever() throws Exception {
-        var workflow = repository.createWorkflow("final-attempt-test", "{\\"nodes\\":[]}");
+        var workflow = repository.createWorkflow("final-attempt-test", "{\"nodes\":[]}");
         UUID jobId = repository.submit(workflow._2(), "final-" + UUID.randomUUID(), 1);
         var claims = repository.claim(100);
         JobLease lease = null;
