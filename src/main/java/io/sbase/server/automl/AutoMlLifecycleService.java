@@ -126,8 +126,15 @@ public final class AutoMlLifecycleService {
     }
 
     public void archive(UUID id)throws SQLException{
-        try(Connection c=connection();PreparedStatement p=c.prepareStatement("UPDATE model_registry SET status='ARCHIVED' WHERE id=? AND status='READY'")){
-            p.setObject(1,id);if(p.executeUpdate()!=1)throw new NoSuchElementException("Ready model not found");
+        try(Connection c=connection()){
+            c.setAutoCommit(false);
+            try(PreparedStatement p=c.prepareStatement("UPDATE model_registry SET status='ARCHIVED' WHERE id=? AND status='READY'")){
+                p.setObject(1,id);if(p.executeUpdate()!=1)throw new NoSuchElementException("Ready model not found");
+            }
+            try(PreparedStatement p=c.prepareStatement("DELETE FROM model_alias WHERE model_id=?")){
+                p.setObject(1,id);p.executeUpdate();
+            }
+            c.commit();
         }
     }
 
@@ -162,10 +169,11 @@ public final class AutoMlLifecycleService {
         }
     }
     private void persistTrials(UUID id,List<Map<String,Object>> trials)throws SQLException{
-        try(Connection c=connection();PreparedStatement p=c.prepareStatement("INSERT INTO automl_trial(experiment_id,trial_number,algorithm,parameters,metrics,status,duration_ms) VALUES(?,?,?,?::jsonb,?::jsonb,?,?)")){
+        try(Connection c=connection();PreparedStatement p=c.prepareStatement("INSERT INTO automl_trial(experiment_id,trial_number,algorithm,parameters,metrics,status,duration_ms,error_message) VALUES(?,?,?,?::jsonb,?::jsonb,?,?,?)")){
             int index=0;for(Map<String,Object> t:trials){p.setObject(1,id);p.setInt(2,++index);p.setString(3,String.valueOf(t.get("algorithm")));
                 p.setString(4,"{}");p.setString(5,JSONString(t));p.setString(6,String.valueOf(t.get("status")));
-                p.setLong(7,((Number)t.getOrDefault("durationMs",0)).longValue());p.addBatch();}p.executeBatch();
+                p.setLong(7,((Number)t.getOrDefault("durationMs",0)).longValue());
+                p.setString(8,t.get("error")==null?null:String.valueOf(t.get("error")));p.addBatch();}p.executeBatch();
         }
     }
     private void registerModel(UUID id,UUID experiment,String name,String algorithm,String task,String metric,double score,String uri,List<?> features)throws SQLException{
