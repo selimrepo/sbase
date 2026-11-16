@@ -2,8 +2,8 @@ import { useCallback, useMemo, useState } from "react";
 import { ReactFlow, Background, Controls, MiniMap, addEdge, useEdgesState, useNodesState } from "@xyflow/react";
 
 const initialNodes = [
-  { id: "source", position: { x: 80, y: 150 }, data: { label: "Dataset input", kind: "source", operator: "mahout-vector-sum", config: { values: [2, 4, 8] } }, type: "default" },
-  { id: "mining", position: { x: 360, y: 150 }, data: { label: "Mahout vector mining", kind: "mining", operator: "mahout-vector-sum", config: { values: [2, 4, 8] } }, type: "default" }
+  { id: "source", position: { x: 80, y: 150 }, data: { label: "Dataset input", kind: "source", operator: "dataset-values", config: { values: [2, 4, 8] } }, type: "default" },
+  { id: "mining", position: { x: 360, y: 150 }, data: { label: "Mahout vector mining", kind: "mining", operator: "mahout-vector-sum", config: {} }, type: "default" }
 ];
 const initialEdges = [{ id: "e1", source: "source", target: "mining", animated: true }];
 
@@ -55,6 +55,7 @@ export default function App() {
     <section className="toolbar">
       <input aria-label="Workflow name" value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} />
       <input aria-label="API endpoint" value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
+      <button onClick={() => addNode("dataset-values", "Dataset values", { values: [1, 2, 3] })}>+ Dataset</button>
       <button onClick={() => addNode("spark-sql", "Spark SQL", { query: "SELECT 1 AS value" })}>+ Spark SQL</button>
       <button onClick={() => addNode("mahout-vector-sum", "Mahout mining", { values: [1, 2, 3] })}>+ Mahout</button>
       <input aria-label="Flink uploaded JAR ID" placeholder="Flink JAR ID" value={flinkJarId} onChange={(e) => setFlinkJarId(e.target.value)} />
