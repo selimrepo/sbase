@@ -5,7 +5,7 @@ ThisBuild / scalaVersion := "2.13.16"
 lazy val pekkoVersion = "1.1.3"
 lazy val pekkoHttpVersion = "1.1.0"
 
-lazy val root = (project in file("."))
+lazy val root = (project in file(".")).enablePlugins(JavaAppPackaging)
   .settings(
     name := "sbase-server",
     Compile / mainClass := Some("io.sbase.server.Main"),
