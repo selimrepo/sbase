@@ -54,7 +54,7 @@ public final class AutoMlService {
             candidates.add(new RandomForestRegressor().setLabelCol(label).setFeaturesCol("features").setNumTrees(100).setMaxDepth(8).setSeed(42));
             candidates.add(new DecisionTreeRegressor().setLabelCol(label).setFeaturesCol("features").setMaxDepth(8).setSeed(42));
         }
-        int max=Math.max(1,Math.min(3,((Number)request.getOrDefault("maxCandidates",3)).intValue()));
+        int max=Math.max(1,Math.min(4,((Number)request.getOrDefault("maxCandidates",timeSeries?4:3)).intValue()));
         boolean classification=task.equals("classification");
         String metric=classification?"accuracy":"rmse";
         double bestScore=classification?Double.NEGATIVE_INFINITY:Double.POSITIVE_INFINITY;
