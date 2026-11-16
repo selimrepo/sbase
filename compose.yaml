@@ -8,6 +8,8 @@ services:
       SBASE_CLUSTER_PORT: ${SBASE_CLUSTER_PORT:-25520}
       SBASE_CLUSTER_BIND_HOST: 0.0.0.0
       SBASE_CLUSTER_SEEDS: ${SBASE_CLUSTER_SEEDS:-pekko://sbase@app:25520}
+      SPARK_MASTER: ${SPARK_MASTER:-local[*]}
+      FLINK_REST_URL: ${FLINK_REST_URL:-http://flink-jobmanager:8081}
       SBASE_POSTGRES_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
       SBASE_POSTGRES_USER: ${POSTGRES_USER:-sbase}
       SBASE_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
