@@ -33,6 +33,9 @@ Run backend tests without Docker except for PostgreSQL Testcontainers tests (Doc
 
 ```bash
 gradle --no-daemon clean test installDist
+
+# When running the server directly on the host (instead of Compose):
+SBASE_CLUSTER_HOST=127.0.0.1 SBASE_CLUSTER_SEEDS=pekko://sbase@127.0.0.1:25520 gradle run
 ```
 
 Build the studio:
