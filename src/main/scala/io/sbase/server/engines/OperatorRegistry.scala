@@ -123,5 +123,6 @@ final class OperatorRegistry {
   val result=new io.sbase.server.automl.AutoMlService(spark).train(input)
   mapper.writeValueAsString(result).parseJson
  }
-\n def stop():Unit=if(spark!=null)spark.stop()
+
+ def stop():Unit=if(spark!=null)spark.stop()
 }
