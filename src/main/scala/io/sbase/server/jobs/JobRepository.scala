@@ -13,6 +13,16 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   val c=dataSource.getConnection
   try {
    c.setAutoCommit(false)
+   val expire=c.createStatement()
+   expire.executeUpdate("""WITH expired AS (
+    | UPDATE job_execution SET status='FAILED',finished_at=now(),lease_owner=NULL,lease_expires_at=NULL,
+    | error_code='LEASE_EXPIRED_MAX_ATTEMPTS',error_message='Worker lease expired after the final attempt',updated_at=now()
+    | WHERE status='RUNNING' AND lease_expires_at<now() AND attempt>=max_attempts
+    | RETURNING id,attempt
+    |) INSERT INTO job_execution_event(job_id,event_type,attempt,details)
+    | SELECT id,'FAILED_LEASE_EXPIRED',attempt,'{}'::jsonb FROM expired
+    |""".stripMargin)
+   expire.close()
    val sql="""WITH candidates AS (
     | SELECT id FROM job_execution
     | WHERE ((status IN ('QUEUED','RETRY_WAIT') AND next_run_at<=now())
