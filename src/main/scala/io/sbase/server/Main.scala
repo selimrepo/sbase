@@ -10,7 +10,7 @@ import spray.json._
 import spray.json.DefaultJsonProtocol._
 import com.typesafe.config.ConfigFactory
 import io.sbase.server.jobs.{JobDispatcher,JobRepository,WorkerSharding}
-import io.sbase.server.engines.OperatorRegistry
+import io.sbase.server.engines.{OperatorRegistry,FederatedQueryPlanner}
 import io.sbase.server.catalog.CatalogService
 import io.sbase.server.engines.FederatedQueryPlanner
 import com.fasterxml.jackson.databind.ObjectMapper
