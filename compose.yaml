@@ -86,6 +86,8 @@ services:
     depends_on: [spark-master]
     environment:
       SPARK_NO_DAEMONIZE: "true"
+      SPARK_LOCAL_DIRS: /var/lib/sbase/spark-tmp
+    volumes: ["spark_tmp:/var/lib/sbase/spark-tmp"]
     restart: unless-stopped
 
   flink-jobmanager:
