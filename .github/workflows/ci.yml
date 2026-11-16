@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feature/catalog-federation-automl-api]
   pull_request:
     branches: [main, develop]
 
