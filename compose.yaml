@@ -1,0 +1,77 @@
+name: sbase
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sbase}
+      POSTGRES_USER: ${POSTGRES_USER:-sbase}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports: ["5432:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sbase} -d ${POSTGRES_DB:-sbase}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  cassandra:
+    image: cassandra:5.0
+    profiles: ["nosql"]
+    ports: ["9042:9042"]
+    volumes: ["cassandra_data:/var/lib/cassandra"]
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  solr:
+    image: solr:9.8
+    profiles: ["search"]
+    command: ["solr", "-f"]
+    ports: ["8983:8983"]
+    volumes: ["solr_data:/var/solr"]
+    restart: unless-stopped
+
+  spark-master:
+    image: apache/spark:4.0.1
+    profiles: ["spark"]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    ports: ["7077:7077", "8081:8081"]
+    restart: unless-stopped
+
+  spark-worker:
+    image: apache/spark:4.0.1
+    profiles: ["spark"]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    depends_on: [spark-master]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    restart: unless-stopped
+
+  flink-jobmanager:
+    image: flink:2.1.0
+    profiles: ["flink"]
+    command: ["jobmanager"]
+    ports: ["8082:8081"]
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+    restart: unless-stopped
+
+  flink-taskmanager:
+    image: flink:2.1.0
+    profiles: ["flink"]
+    command: ["taskmanager"]
+    depends_on: [flink-jobmanager]
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  cassandra_data:
+  solr_data:
