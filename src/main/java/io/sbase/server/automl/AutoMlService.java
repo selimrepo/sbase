@@ -26,7 +26,20 @@ public final class AutoMlService {
         String label=String.valueOf(request.getOrDefault("label","label"));
         List<String> features=((List<?>)request.getOrDefault("features",List.of())).stream().map(String::valueOf).toList();
         List<?> input=(List<?>)request.getOrDefault("data",List.of());
-        boolean timeSeries=task.equals("time_series");\n        List<String> droppedFeatures=new ArrayList<>();\n        if(timeSeries){\n            String timeColumn=String.valueOf(request.getOrDefault("timeColumn",""));\n            int lags=Math.max(1,Math.min(24,((Number)request.getOrDefault("lags",3)).intValue()));\n            if(timeColumn.isBlank()||input.isEmpty())throw new IllegalArgumentException("time_series requires timeColumn and data");\n            List<Map<String,Object>> ordered=new ArrayList<>();\n            for(Object row:input){if(!(row instanceof Map<?,?> map)||!map.containsKey(timeColumn)||!(map.get(label) instanceof Number))throw new IllegalArgumentException("time_series rows require timeColumn and numeric label"); Map<String,Object> copy=new LinkedHashMap<>();map.forEach((k,v)->copy.put(String.valueOf(k),v));ordered.add(copy);}\n            ordered.sort(Comparator.comparing(row->String.valueOf(row.get(timeColumn))));\n            List<Map<String,Object>> lagged=new ArrayList<>();\n            List<String> expanded=new ArrayList<>(features);\n            for(int i=lags;i<ordered.size();i++){Map<String,Object> row=new LinkedHashMap<>(ordered.get(i));for(int lag=1;lag<=lags;lag++){String column=label+"__lag_"+lag;row.put(column,((Number)ordered.get(i-lag).get(label)).doubleValue());if(!expanded.contains(column))expanded.add(column);}lagged.add(row);}\n            features=expanded; input=lagged;\n        }
+        boolean timeSeries=task.equals("time_series");
+        List<String> droppedFeatures=new ArrayList<>();
+        if(timeSeries){
+            String timeColumn=String.valueOf(request.getOrDefault("timeColumn",""));
+            int lags=Math.max(1,Math.min(24,((Number)request.getOrDefault("lags",3)).intValue()));
+            if(timeColumn.isBlank()||input.isEmpty())throw new IllegalArgumentException("time_series requires timeColumn and data");
+            List<Map<String,Object>> ordered=new ArrayList<>();
+            for(Object row:input){if(!(row instanceof Map<?,?> map)||!map.containsKey(timeColumn)||!(map.get(label) instanceof Number))throw new IllegalArgumentException("time_series rows require timeColumn and numeric label"); Map<String,Object> copy=new LinkedHashMap<>();map.forEach((k,v)->copy.put(String.valueOf(k),v));ordered.add(copy);}
+            ordered.sort(Comparator.comparing(row->String.valueOf(row.get(timeColumn))));
+            List<Map<String,Object>> lagged=new ArrayList<>();
+            List<String> expanded=new ArrayList<>(features);
+            for(int i=lags;i<ordered.size();i++){Map<String,Object> row=new LinkedHashMap<>(ordered.get(i));for(int lag=1;lag<=lags;lag++){String column=label+"__lag_"+lag;row.put(column,((Number)ordered.get(i-lag).get(label)).doubleValue());if(!expanded.contains(column))expanded.add(column);}lagged.add(row);}
+            features=expanded; input=lagged;
+        }
         if(!Set.of("classification","regression","time_series").contains(task))throw new IllegalArgumentException("task must be classification, regression or time_series");
         if(features.isEmpty()||input.size()<50)throw new IllegalArgumentException("AutoML requires features and at least 50 rows");
         if(input.size()>100000)throw new IllegalArgumentException("AutoML inline data limit is 100000 rows");
@@ -40,10 +53,40 @@ public final class AutoMlService {
         Dataset<Row> raw=spark.read().json(spark.createDataset(jsonRows,Encoders.STRING()));
         Set<String> columns=new HashSet<>(Arrays.asList(raw.columns()));
         if(!columns.contains(label)||!columns.containsAll(features))throw new IllegalArgumentException("Unknown label or feature column");
-        VectorAssembler assembler=new VectorAssembler().setInputCols(features.toArray(String[]::new))
+        List<String> selectedFeatures=new ArrayList<>();
+        for(String feature:features){
+            if(raw.select(org.apache.spark.sql.functions.col(feature)).distinct().limit(2).count()>1) selectedFeatures.add(feature);
+            else droppedFeatures.add(feature);
+        }
+        features=selectedFeatures;
+        if(features.isEmpty())throw new IllegalArgumentException("Feature selection removed every constant feature");
+        List<PipelineStage> preprocessing=new ArrayList<>();
+        List<String> assemblerInputs=new ArrayList<>(), indexedColumns=new ArrayList<>(), encodedColumns=new ArrayList<>();
+        Set<String> numericTypes=Set.of("byte","short","integer","long","float","double","decimal");
+        for(String feature:features){
+            String type=raw.schema().apply(feature).dataType().typeName().toLowerCase(Locale.ROOT);
+            if(numericTypes.contains(type)) assemblerInputs.add(feature);
+            else {
+                String indexed=feature+"__sbase_index", encoded=feature+"__sbase_ohe";
+                preprocessing.add(new StringIndexer().setInputCol(feature).setOutputCol(indexed).setHandleInvalid("keep"));
+                indexedColumns.add(indexed); encodedColumns.add(encoded); assemblerInputs.add(encoded);
+            }
+        }
+        if(!indexedColumns.isEmpty()) preprocessing.add(new OneHotEncoder().setInputCols(indexedColumns.toArray(String[]::new))
+                .setOutputCols(encodedColumns.toArray(String[]::new)).setHandleInvalid("keep"));
+        VectorAssembler assembler=new VectorAssembler().setInputCols(assemblerInputs.toArray(String[]::new))
                 .setOutputCol("features").setHandleInvalid("skip");
-        Dataset<Row>[] split=raw.randomSplit(new double[]{0.8,0.2},42L);
-        Dataset<Row> train=split[0],validation=split[1];
+        preprocessing.add(assembler);
+        Dataset<Row> train,validation;
+        if(timeSeries){
+            Dataset<Row> ordered=raw.orderBy(org.apache.spark.sql.functions.col(String.valueOf(request.get("timeColumn"))));
+            long trainingCount=Math.max(2,(long)Math.floor(ordered.count()*0.8));
+            train=ordered.limit(trainingCount);
+            validation=ordered.exceptAll(train);
+        }else{
+            Dataset<Row>[] split=raw.randomSplit(new double[]{0.8,0.2},42L);
+            train=split[0]; validation=split[1];
+        }
         if(train.limit(2).count()<2||validation.limit(2).count()<2)throw new IllegalArgumentException("Not enough rows after validation split");
         List<PipelineStage> candidates=new ArrayList<>();
         if(task.equals("classification")){
@@ -54,6 +97,7 @@ public final class AutoMlService {
             candidates.add(new LinearRegression().setLabelCol(label).setFeaturesCol("features").setMaxIter(100).setRegParam(0.01));
             candidates.add(new RandomForestRegressor().setLabelCol(label).setFeaturesCol("features").setNumTrees(100).setMaxDepth(8).setSeed(42));
             candidates.add(new DecisionTreeRegressor().setLabelCol(label).setFeaturesCol("features").setMaxDepth(8).setSeed(42));
+            if(timeSeries)candidates.add(new GBTRegressor().setLabelCol(label).setFeaturesCol("features").setMaxIter(80).setMaxDepth(5).setSeed(42));
         }
         int max=Math.max(1,Math.min(4,((Number)request.getOrDefault("maxCandidates",timeSeries?4:3)).intValue()));
         boolean classification=task.equals("classification");
@@ -117,6 +161,8 @@ public final class AutoMlService {
             grid.addGrid(model.maxDepth(),new int[]{4,8,12});
         else if(estimator instanceof DecisionTreeRegressor model)
             grid.addGrid(model.maxDepth(),new int[]{4,8,12});
+        else if(estimator instanceof GBTRegressor model)
+            grid.addGrid(model.maxIter(),new int[]{40,80}).addGrid(model.maxDepth(),new int[]{3,5});
         return grid.build();
     }
     private static final class TimeUnitNanos{
