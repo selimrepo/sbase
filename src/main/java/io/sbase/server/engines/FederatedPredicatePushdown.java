@@ -17,8 +17,10 @@ public final class FederatedPredicatePushdown {
             SqlNode node = SqlParser.create(sql, SqlParser.config().withCaseSensitive(false)).parseQuery();
             if (!(node instanceof SqlSelect select)) return Optional.empty();
             if (!(select.getFrom() instanceof SqlIdentifier from) || from.names.size() != 1) return Optional.empty();
-            if (select.getGroup() != null || select.getHaving() != null || select.getWindowList() != null
-                    || select.getQualify() != null || select.getOrderList() != null && select.getOrderList().size() > 0) return Optional.empty();
+            if (select.getGroup() != null || select.getHaving() != null
+                    || select.getWindowList() != null && select.getWindowList().size() > 0
+                    || select.getQualify() != null
+                    || select.getOrderList() != null && select.getOrderList().size() > 0) return Optional.empty();
             String where = select.getWhere() == null ? null : predicate(select.getWhere(), source);
             String dialect = source.toLowerCase(Locale.ROOT);
             if (dialect.equals("solr")) return Optional.of(where == null ? "*:*" : where);
