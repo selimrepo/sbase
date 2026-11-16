@@ -68,7 +68,7 @@ final class OperatorRegistry {
      JsObject("values"->JsArray(values.map(JsNumber(_))))
     case "mahout-vector-sum" =>
      val configured=config.fields.get("values").map(_.convertTo[Vector[Double]])
-     val inherited:Vector[Double]=upstream.flatMap(_.asJsObject.fields.get("values").map(_.convertTo[Vector[Double]])).toVector
+     val inherited:Vector[Double]=upstream.flatMap(_.asJsObject.fields.get("values").map(_.convertTo[Vector[Double]])).flatten
      val values:Vector[Double]=configured.getOrElse(inherited)
      val vector=new DenseVector(values.toArray)
      JsObject("sum"->JsNumber(vector.zSum()),"count"->JsNumber(values.size))
