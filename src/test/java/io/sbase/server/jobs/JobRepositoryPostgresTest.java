@@ -60,6 +60,21 @@ class JobRepositoryPostgresTest {
     }
 
     @Test
+    void expiredFinalAttemptIsMarkedFailedInsteadOfRequeuedForever() throws Exception {
+        var workflow = repository.createWorkflow("final-attempt-test", "{\\"nodes\\":[]}");
+        UUID jobId = repository.submit(workflow._2(), "final-" + UUID.randomUUID(), 1);
+        var claims = repository.claim(100);
+        JobLease lease = null;
+        var iterator = claims.iterator();
+        while (iterator.hasNext()) { var candidate = iterator.next(); if (candidate.id().equals(jobId)) lease = candidate; }
+        assertNotNull(lease);
+        Thread.sleep(1300);
+        repository.claim(100);
+        var status = repository.status(jobId).orElseThrow();
+        assertEquals("FAILED", status._1());
+    }
+
+    @Test
     void idempotencyKeyReturnsSameJob() {
         var workflow = repository.createWorkflow("idempotency-test", "{\"nodes\":[]}");
         String key = "same-key-" + UUID.randomUUID();
