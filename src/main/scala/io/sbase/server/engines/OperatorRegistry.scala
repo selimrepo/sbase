@@ -3,6 +3,7 @@ package io.sbase.server.engines
 import org.apache.spark.sql.SparkSession
 import org.apache.mahout.math.DenseVector
 import spray.json._
+import spray.json.DefaultJsonProtocol._
 import java.net.URI
 import java.net.http.{HttpClient,HttpRequest,HttpResponse}
 import java.time.Duration
