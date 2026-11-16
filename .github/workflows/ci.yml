@@ -66,7 +66,29 @@ jobs:
     needs: [backend, workflow-studio]
     steps:
       - uses: actions/checkout@v4
-      - name: Build server image
-        run: docker build -t sbase-server:ci .
-      - name: Build Workflow Studio image
-        run: docker build -t sbase-studio:ci ./web
+      - name: Validate complete Compose configuration
+        run: docker compose -f compose.yaml -f compose.full.yaml --profile full config --quiet
+      - name: Start core platform with Docker Compose
+        run: docker compose up --build -d
+      - name: Smoke test API, Studio and PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..60}; do
+            if curl --fail --silent http://localhost:8080/health >/dev/null \
+              && curl --fail --silent http://localhost:3000/ >/dev/null \
+              && docker compose exec -T postgres pg_isready -U sbase -d sbase; then
+              echo "SBase API, Workflow Studio and PostgreSQL are ready."
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose ps
+          docker compose logs --no-color
+          exit 1
+      - name: Show Compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop Compose stack
+        if: always()
+        run: docker compose down -v
