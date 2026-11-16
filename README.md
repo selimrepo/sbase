@@ -160,7 +160,7 @@ The Compose file includes optional development profiles for Cassandra, Solr, Spa
 - [x] Gradle Scala + Pekko service foundation
 - [x] Pekko Cluster Sharding worker region
 - [x] PostgreSQL durable queue, lease fencing, heartbeats, retries and expired-lease recovery
-- [x] Mahout vector mining and Spark SQL operators
+- [x] Mahout vector mining, embedded Apache Calcite SQL and Spark SQL operators
 - [x] Flink REST job submission and job overview
 - [x] React Flow workflow graph editor and job polling
 - [ ] Node input/output contracts and persisted per-node execution previews
