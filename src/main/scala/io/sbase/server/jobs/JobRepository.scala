@@ -93,9 +93,9 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
  def status(id:UUID):Option[(String,Int,Option[String])] = {
   val c=dataSource.getConnection
   try {
-   val p=c.prepareStatement("SELECT status,attempt,error_message FROM job_execution WHERE id=?")
+   val p=c.prepareStatement("SELECT status,attempt,error_message,result::text FROM job_execution WHERE id=?")
    p.setObject(1,id);val rs=p.executeQuery()
-   val result=if(rs.next())Some((rs.getString(1),rs.getInt(2),Option(rs.getString(3))))else None
+   val result=if(rs.next())Some((rs.getString(1),rs.getInt(2),Option(rs.getString(3)),Option(rs.getString(4))))else None
    rs.close();p.close();result
   } finally c.close()
  }
@@ -135,7 +135,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   val p=c.prepareStatement("INSERT INTO job_execution_event(job_id,event_type,attempt,details) VALUES (?,?,?,?::jsonb)")
   p.setObject(1,id);p.setString(2,name);p.setInt(3,attempt);p.setString(4,details);p.executeUpdate();p.close()
  }
- def close():Unit=dataSource.close()
+ def isHealthy:Boolean = {\n  val c=dataSource.getConnection\n  try { val s=c.createStatement(); val rs=s.executeQuery("SELECT 1"); val ok=rs.next();rs.close();s.close();ok } finally c.close()\n }\n def close():Unit=dataSource.close()
 }
 object JobRepository {
  def fromEnvironment():JobRepository = {
