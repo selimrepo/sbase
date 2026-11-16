@@ -8,6 +8,7 @@ import org.apache.pekko.http.scaladsl.model.StatusCodes
 import org.apache.pekko.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import spray.json._
 import spray.json.DefaultJsonProtocol._
+import com.typesafe.config.ConfigFactory
 import io.sbase.server.jobs.{JobDispatcher,JobRepository,WorkerSharding}
 import io.sbase.server.engines.OperatorRegistry
 import scala.concurrent.{ExecutionContext,Future}
@@ -26,7 +27,21 @@ object Main {
  def ApiInfoName():String="SBase Data Science Server"
 
  def main(args:Array[String]):Unit={
-  implicit val system:ActorSystem[Nothing]=ActorSystem(Behaviors.empty,"sbase")
+  val clusterHost=sys.env.getOrElse("SBASE_CLUSTER_HOST","127.0.0.1")
+  val clusterPort=sys.env.get("SBASE_CLUSTER_PORT").flatMap(_.toIntOption).getOrElse(25520)
+  val bindHost=sys.env.getOrElse("SBASE_CLUSTER_BIND_HOST",clusterHost)
+  val bindPort=sys.env.get("SBASE_CLUSTER_BIND_PORT").flatMap(_.toIntOption).getOrElse(clusterPort)
+  val seedNodes=sys.env.get("SBASE_CLUSTER_SEEDS")
+    .map(_.split(",").map(_.trim).filter(_.nonEmpty).map(s=>"\\""+s+"\\"").mkString(","))
+    .getOrElse("\\"pekko://sbase@127.0.0.1:25520\\"")
+  val clusterConfigText =
+    "pekko.remote.artery.canonical.hostname=\\""+clusterHost+"\\"\n"+
+    "pekko.remote.artery.canonical.port="+clusterPort+"\n"+
+    "pekko.remote.artery.bind.hostname=\\""+bindHost+"\\"\n"+
+    "pekko.remote.artery.bind.port="+bindPort+"\n"+
+    "pekko.cluster.seed-nodes=["+seedNodes+"]\n"
+  val clusterConfig=ConfigFactory.parseString(clusterConfigText).withFallback(ConfigFactory.load())
+  implicit val system:ActorSystem[Nothing]=ActorSystem(Behaviors.empty,"sbase",clusterConfig)
   implicit val ec:ExecutionContext=system.executionContext
   implicit val apiInfoFormat=jsonFormat3(ApiInfo.apply)
   implicit val healthFormat=jsonFormat2(Health.apply)
