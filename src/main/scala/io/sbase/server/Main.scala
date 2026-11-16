@@ -21,7 +21,7 @@ object Main {
  final case class WorkflowCreated(workspaceId:String,workflowId:String)
  final case class JobSubmit(idempotencyKey:String,maxAttempts:Int=5)
  final case class JobAccepted(jobId:String)
- final case class JobStatus(status:String,attempt:Int,error:Option[String])
+ final case class JobStatus(status:String,attempt:Int,error:Option[String],result:Option[String])
 
  def ApiInfoName():String="SBase Data Science Server"
 
@@ -34,7 +34,7 @@ object Main {
   implicit val workflowCreatedFormat=jsonFormat2(WorkflowCreated.apply)
   implicit val jobSubmitFormat=jsonFormat2(JobSubmit.apply)
   implicit val jobAcceptedFormat=jsonFormat1(JobAccepted.apply)
-  implicit val jobStatusFormat=jsonFormat3(JobStatus.apply)
+  implicit val jobStatusFormat=jsonFormat4(JobStatus.apply)
 
   val repository=JobRepository.fromEnvironment()
   repository.migrate()
@@ -49,7 +49,7 @@ object Main {
    path("health"){get{complete(Health("UP","sbase-server"))}} ~
    pathPrefix("api"/"v1"){
     pathEndOrSingleSlash{get{complete(ApiInfo(ApiInfoName(),"0.2.0-SNAPSHOT","WORKFLOW_ENGINE"))}} ~
-    path("ready"){get{complete(Health("UP","postgres-and-pekko-sharding"))}} ~
+    path("ready"){get{onComplete(Future(scala.concurrent.blocking(repository.isHealthy))){\n      case Success(true)=>complete(Health("UP","postgres-and-pekko-sharding"))\n      case Success(false)=>complete(StatusCodes.ServiceUnavailable->Health("NOT_READY","postgres"))\n      case Failure(error)=>system.log.error("Readiness check failed",error);complete(StatusCodes.ServiceUnavailable->Health("NOT_READY","postgres"))\n     }}} ~
     path("workflows"){
      post{
       entity(as[WorkflowCreate]){request=>
@@ -81,7 +81,7 @@ object Main {
     path("jobs"/JavaUUID){jobId=>
      get{
       onComplete(Future(scala.concurrent.blocking(repository.status(jobId)))){
-       case Success(Some((status,attempt,error)))=>complete(JobStatus(status,attempt,error))
+       case Success(Some((status,attempt,error,result)))=>complete(JobStatus(status,attempt,error,result))
        case Success(None)=>complete(StatusCodes.NotFound)
        case Failure(error)=>system.log.error("Job status lookup failed",error);complete(StatusCodes.InternalServerError)
       }
