@@ -73,7 +73,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
    val id=UUID.randomUUID()
    val p=c.prepareStatement("""INSERT INTO job_execution(id,workflow_id,workflow_version,status,idempotency_key,correlation_id,max_attempts)
     |SELECT ?,id,active_version,'QUEUED',?,?,? FROM workflow WHERE id=? AND active_version IS NOT NULL
-    |ON CONFLICT (idempotency_key) DO NOTHING RETURNING id""".stripMargin)
+    |ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id""".stripMargin)
    p.setObject(1,id);p.setString(2,idempotencyKey);p.setObject(3,UUID.randomUUID())
    p.setInt(4,math.max(1,math.min(maxAttempts,20)));p.setObject(5,workflowId)
    val rs=p.executeQuery()
