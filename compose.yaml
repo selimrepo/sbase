@@ -85,7 +85,7 @@ services:
   spark-master:
     image: apache/spark:4.0.1
     profiles: ["spark"]
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--webui-port", "8081"]
     environment:
       SPARK_NO_DAEMONIZE: "true"
     ports:
@@ -101,9 +101,7 @@ services:
       - spark-master
     environment:
       SPARK_NO_DAEMONIZE: "true"
-      SPARK_LOCAL_DIRS: /var/lib/sbase/spark-tmp
-    volumes:
-      - spark_tmp:/var/lib/sbase/spark-tmp
+      SPARK_LOCAL_DIRS: /tmp
     restart: unless-stopped
 
   flink-jobmanager:
