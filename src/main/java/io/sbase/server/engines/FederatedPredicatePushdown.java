@@ -16,6 +16,9 @@ public final class FederatedPredicatePushdown {
         try {
             SqlNode node = SqlParser.create(sql, SqlParser.config().withCaseSensitive(false)).parseQuery();
             if (!(node instanceof SqlSelect select)) return Optional.empty();
+            if (!(select.getFrom() instanceof SqlIdentifier from) || from.names.size() != 1) return Optional.empty();
+            if (select.getGroup() != null || select.getHaving() != null || select.getWindowList() != null
+                    || select.getQualify() != null || select.getOrderList() != null && select.getOrderList().size() > 0) return Optional.empty();
             String where = select.getWhere() == null ? null : predicate(select.getWhere(), source);
             String dialect = source.toLowerCase(Locale.ROOT);
             if (dialect.equals("solr")) return Optional.of(where == null ? "*:*" : where);
@@ -39,7 +42,7 @@ public final class FederatedPredicatePushdown {
                 String name = id.names.get(id.names.size() - 1);
                 if (!name.matches("[A-Za-z_][A-Za-z0-9_]*") && !name.equals("*"))
                     throw new IllegalArgumentException("Unsafe projection");
-                columns.add(name);
+                columns.add(name.toLowerCase(Locale.ROOT));
             } else if (node instanceof SqlNodeList) {
                 throw new IllegalArgumentException("Unsupported projection");
             } else {
@@ -66,7 +69,7 @@ public final class FederatedPredicatePushdown {
         SqlNode left = call.operand(0), right = call.operand(1);
         if (!(left instanceof SqlIdentifier id) || !(right instanceof SqlLiteral))
             throw new IllegalArgumentException("Predicate must compare a column to a literal");
-        String field = id.names.get(id.names.size() - 1);
+        String field = id.names.get(id.names.size() - 1).toLowerCase(Locale.ROOT);
         if (!field.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Unsafe field");
         Object value = ((SqlLiteral) right).getValue();
         String literal = literal((SqlLiteral) right);
