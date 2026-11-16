@@ -34,7 +34,7 @@ dependencies {
     implementation "org.flywaydb:flyway-database-postgresql:11.8.2"
 
     implementation "org.apache.spark:spark-sql_${scalaBinaryVersion}:${sparkVersion}"
-    compileOnly "org.apache.spark:spark-mllib_${scalaBinaryVersion}:${sparkVersion}"
+    implementation "org.apache.spark:spark-mllib_${scalaBinaryVersion}:${sparkVersion}"
     implementation "org.apache.mahout:mahout-math:0.13.0"
     compileOnly "org.apache.flink:flink-streaming-java:${flinkVersion}"
     implementation "com.datastax.oss:java-driver-core:4.17.0"
