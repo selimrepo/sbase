@@ -1,0 +1,132 @@
+name: sbase
+services:
+  app:
+    build: .
+    environment:
+      SBASE_HTTP_HOST: 0.0.0.0
+      SBASE_CLUSTER_HOST: ${SBASE_CLUSTER_HOST:-app}
+      SBASE_CLUSTER_PORT: ${SBASE_CLUSTER_PORT:-25520}
+      SBASE_CLUSTER_BIND_HOST: 0.0.0.0
+      SBASE_CLUSTER_SEEDS: ${SBASE_CLUSTER_SEEDS:-pekko://sbase@app:25520}
+      SPARK_MASTER: ${SPARK_MASTER:-local[*]}
+      FLINK_REST_URL: ${FLINK_REST_URL:-http://flink-jobmanager:8081}
+      SBASE_POSTGRES_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
+      SBASE_POSTGRES_USER: ${POSTGRES_USER:-sbase}
+      SBASE_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      SBASE_CASSANDRA_CONTACT_POINT: ${SBASE_CASSANDRA_CONTACT_POINT:-cassandra}
+      SBASE_CASSANDRA_PORT: ${SBASE_CASSANDRA_PORT:-9042}
+      SBASE_CASSANDRA_DATACENTER: ${SBASE_CASSANDRA_DATACENTER:-datacenter1}
+      SBASE_SOLR_URL: ${SBASE_SOLR_URL:-http://solr:8983/solr}
+      SBASE_MODEL_REGISTRY_PATH: /var/lib/sbase/models
+      SBASE_FEDERATED_SPILL_PATH: /var/lib/sbase/spark-tmp/federation
+      SBASE_AUTOML_WORKERS: ${SBASE_AUTOML_WORKERS:-2}
+      SBASE_AUTOML_QUEUE_CAPACITY: ${SBASE_AUTOML_QUEUE_CAPACITY:-16}
+      SPARK_LOCAL_DIRS: /var/lib/sbase/spark-tmp
+    ports:
+      - "${SBASE_HTTP_PORT:-8080}:8080"
+      - "${SBASE_CLUSTER_PORT:-25520}:25520"
+    volumes:
+      - model_registry_data:/var/lib/sbase/models
+      - spark_tmp:/var/lib/sbase/spark-tmp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    ports:
+      - "${SBASE_WEB_PORT:-3000}:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sbase}
+      POSTGRES_USER: ${POSTGRES_USER:-sbase}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sbase} -d ${POSTGRES_DB:-sbase}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  cassandra:
+    image: cassandra:5.0
+    profiles: ["nosql"]
+    ports:
+      - "${CASSANDRA_PORT:-9042}:9042"
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  solr:
+    image: solr:9.8
+    profiles: ["search"]
+    command: ["solr", "-f"]
+    ports:
+      - "${SOLR_PORT:-8983}:8983"
+    volumes:
+      - solr_data:/var/solr
+    restart: unless-stopped
+
+  spark-master:
+    image: apache/spark:4.0.1
+    profiles: ["spark"]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--webui-port", "8081"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    ports:
+      - "${SPARK_MASTER_PORT:-7077}:7077"
+      - "${SPARK_MASTER_UI_PORT:-8081}:8081"
+    restart: unless-stopped
+
+  spark-worker:
+    image: apache/spark:4.0.1
+    profiles: ["spark"]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    depends_on:
+      - spark-master
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_LOCAL_DIRS: /tmp
+    restart: unless-stopped
+
+  flink-jobmanager:
+    image: flink:2.1.0
+    profiles: ["flink"]
+    command: ["jobmanager"]
+    ports:
+      - "${FLINK_UI_PORT:-8082}:8081"
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+    restart: unless-stopped
+
+  flink-taskmanager:
+    image: flink:2.1.0
+    profiles: ["flink"]
+    command: ["taskmanager"]
+    depends_on:
+      - flink-jobmanager
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+    restart: unless-stopped
+
+volumes:
+  model_registry_data:
+  postgres_data:
+  cassandra_data:
+  solr_data:
+  spark_tmp:

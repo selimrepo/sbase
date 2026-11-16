@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, feature/catalog-federation-automl-api]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: sbase
+          POSTGRES_USER: sbase
+          POSTGRES_PASSWORD: sbase-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sbase -d sbase"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      SBASE_TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/sbase
+      SBASE_TEST_POSTGRES_USER: sbase
+      SBASE_TEST_POSTGRES_PASSWORD: sbase-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: Compile, unit test, PostgreSQL integration test and package
+        run: gradle --no-daemon clean test installDist shadowJar
+
+  workflow-studio:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build React Workflow Studio
+        run: npm run build
+
+  container:
+    runs-on: ubuntu-latest
+    needs: [backend, workflow-studio]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate full platform Compose configuration
+        run: docker compose -f compose.yaml -f compose.full.yaml --profile full config --quiet
+      - name: Build and start every platform service
+        run: docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d
+      - name: Wait for API, Studio, PostgreSQL and all engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() {
+            local name="$1"
+            shift
+            if ! "$@"; then
+              echo "Not ready: $name"
+              return 1
+            fi
+          }
+          for attempt in {1..90}; do
+            if curl --fail --silent http://localhost:8080/health >/dev/null \
+              && curl --fail --silent http://localhost:3000/ >/dev/null \
+              && docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T postgres pg_isready -U sbase -d sbase >/dev/null 2>&1 \
+              && docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T cassandra cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1 \
+              && curl --fail --silent 'http://localhost:8983/solr/admin/info/system?wt=json' >/dev/null \
+              && curl --fail --silent http://localhost:8081/json/ >/dev/null \
+              && curl --fail --silent http://localhost:8082/overview >/dev/null; then
+              echo "API, Studio, PostgreSQL, Cassandra, Solr, Spark Master and Flink JobManager are ready."
+              break
+            fi
+            if [ "$attempt" -eq 90 ]; then
+              echo "Timed out waiting for full platform readiness."
+              docker compose -f compose.yaml -f compose.full.yaml --profile full ps
+              docker compose -f compose.yaml -f compose.full.yaml --profile full logs --no-color
+              exit 1
+            fi
+            sleep 10
+          done
+      - name: Verify Spark worker registration and Flink TaskManager
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent http://localhost:8081/json/ | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d.get("workers", [])) >= 1, "Spark has no registered workers"'
+          curl --fail --silent http://localhost:8082/taskmanagers | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d.get("taskmanagers", [])) >= 1, "Flink has no registered TaskManagers"'
+      - name: Show full platform logs on failure
+        if: failure()
+        run: docker compose -f compose.yaml -f compose.full.yaml --profile full logs --no-color
+      - name: Stop full platform
+        if: always()
+        run: docker compose -f compose.yaml -f compose.full.yaml --profile full down -v
