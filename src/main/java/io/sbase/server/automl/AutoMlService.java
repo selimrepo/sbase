@@ -35,7 +35,7 @@ public final class AutoMlService {
             jsonRows.add(new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(row).toString());
         }
         Dataset<Row> raw=spark.read().json(spark.createDataset(jsonRows, Encoders.STRING()));
-        for(String column:features) if(!raw.columnsAsList().contains(column)) throw new IllegalArgumentException("Unknown feature: "+column);
+        for(String column:features) if(!Arrays.asList(raw.columns()).contains(column)) throw new IllegalArgumentException("Unknown feature: "+column);
         if(!Arrays.asList(raw.columns()).contains(label)) throw new IllegalArgumentException("Unknown label: "+label);
         Dataset<Row>[] split=raw.randomSplit(new double[]{0.8,0.2},42L);
         Dataset<Row> train=split[0], test=split[1];
