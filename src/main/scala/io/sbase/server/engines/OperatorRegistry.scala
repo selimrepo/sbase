@@ -15,7 +15,8 @@ final class OperatorRegistry {
   .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
   .config("spark.ui.enabled","false")
   .config("spark.driver.host",sys.env.getOrElse("SPARK_DRIVER_HOST","127.0.0.1")).getOrCreate()
- private val calcite=new CalciteSqlEngine()\n private val http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+ private val calcite=new CalciteSqlEngine()
+ private val http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
 
  def validate(definition:String):Unit = orderedNodes(definition)
 
