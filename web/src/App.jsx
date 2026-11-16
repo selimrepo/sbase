@@ -14,9 +14,9 @@ export default function App() {
   const [jobId, setJobId] = useState("");
   const [status, setStatus] = useState("Idle");
   const [output, setOutput] = useState("");
-  const [apiBase, setApiBase] = useState("http://localhost:8080/api/v1");
+  const [apiBase, setApiBase] = useState("/api/v1");
   const onConnect = useCallback((connection) => setEdges((eds) => addEdge(connection, eds)), [setEdges]);
-  const definition = useMemo(() => ({ nodes: nodes.map((node) => ({ id: node.id, operator: node.data.operator, config: node.data.config })) }), [nodes]);
+  const definition = useMemo(() => ({ nodes: nodes.map((node) => ({ id: node.id, operator: node.data.operator, config: node.data.config })), edges: edges.map((edge) => ({ source: edge.source, target: edge.target })) }), [nodes]);
 
   async function runWorkflow() {
     setStatus("Saving workflow…"); setOutput("");
