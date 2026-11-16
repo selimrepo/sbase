@@ -16,7 +16,7 @@ export default function App() {
   const [output, setOutput] = useState("");
   const [apiBase, setApiBase] = useState("/api/v1");
   const onConnect = useCallback((connection) => setEdges((eds) => addEdge(connection, eds)), [setEdges]);
-  const definition = useMemo(() => ({ nodes: nodes.map((node) => ({ id: node.id, operator: node.data.operator, config: node.data.config })), edges: edges.map((edge) => ({ source: edge.source, target: edge.target })) }), [nodes]);
+  const definition = useMemo(() => ({ nodes: nodes.map((node) => ({ id: node.id, operator: node.data.operator, config: node.data.config })), edges: edges.map((edge) => ({ source: edge.source, target: edge.target })) }), [nodes, edges]);
 
   async function runWorkflow() {
     setStatus("Saving workflow…"); setOutput("");
@@ -37,7 +37,7 @@ export default function App() {
         const response = await fetch(apiBase + "/jobs/" + id);
         if (!response.ok) throw new Error("Status endpoint returned HTTP " + response.status);
         const state = await response.json(); setStatus(state.status + " · attempt " + state.attempt);
-        if (["SUCCEEDED", "FAILED", "CANCELLED"].includes(state.status)) { setOutput(state.error || JSON.stringify(state, null, 2)); return; }
+        if (["SUCCEEDED", "FAILED", "CANCELLED"].includes(state.status)) { setOutput(state.result || state.error || JSON.stringify(state, null, 2)); return; }
       } catch (error) { setOutput(error.message); }
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
