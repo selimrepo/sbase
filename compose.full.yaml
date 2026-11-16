@@ -1,0 +1,29 @@
+services:
+  app:
+    environment:
+      SPARK_MASTER: spark://spark-master:7077
+      FLINK_REST_URL: http://flink-jobmanager:8081
+    depends_on:
+      postgres:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+      solr:
+        condition: service_started
+      spark-master:
+        condition: service_started
+      flink-jobmanager:
+        condition: service_started
+
+  cassandra:
+    profiles: ["full"]
+  solr:
+    profiles: ["full"]
+  spark-master:
+    profiles: ["full"]
+  spark-worker:
+    profiles: ["full"]
+  flink-jobmanager:
+    profiles: ["full"]
+  flink-taskmanager:
+    profiles: ["full"]
