@@ -87,6 +87,8 @@ GET /api/v1/jobs/{jobId}
 Available operators:
 
 - `mahout-vector-sum`: runs a Mahout DenseVector reduction.
+- `mahout-cosine-similarity`: calculates cosine similarity between two dense vectors.
+- `mahout-euclidean-distance`: calculates Euclidean distance between two dense vectors.
 - `spark-sql`: executes a Spark SQL statement. Set `SPARK_MASTER` to the cluster master URL for distributed execution; defaults to local mode for development.
 - `flink-submit`: submits a previously uploaded Flink JAR by `jarId`; optional `entryClass`, `parallelism` and `programArgs` can be supplied.
 - `flink-jobs-overview`: reads Flink's jobs overview endpoint.
