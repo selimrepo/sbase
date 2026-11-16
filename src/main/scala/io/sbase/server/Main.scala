@@ -322,6 +322,14 @@ object Main {
      }
     }} ~
     path("workflows"/JavaUUID/"runs"){workflowId=>
+     get {
+      parameter("limit".as[Int].?(100)){limit=>
+       onComplete(Future(scala.concurrent.blocking(repository.workflowRuns(workflowId,limit)))) {
+        case Success(items)=>complete(mapper.writeValueAsString(items).parseJson)
+        case Failure(error)=>system.log.error("Workflow run history failed",error);complete(StatusCodes.InternalServerError)
+       }
+      }
+     } ~
      post{
       entity(as[JobSubmit]){request=>
        val key=Option(request.idempotencyKey).map(_.trim).filter(_.nonEmpty).getOrElse(UUID.randomUUID().toString)
@@ -329,6 +337,14 @@ object Main {
         case Success(jobId)=>complete(StatusCodes.Accepted->JobAccepted(jobId.toString))
         case Failure(error)=>system.log.error("Job submission failed",error);complete(StatusCodes.BadRequest)
        }
+      }
+     }
+    } ~
+    path("jobs"/JavaUUID/"events"){jobId=>
+     get {
+      onComplete(Future(scala.concurrent.blocking(repository.jobEvents(jobId)))) {
+       case Success(items)=>complete(mapper.writeValueAsString(items).parseJson)
+       case Failure(error)=>system.log.error("Job event history failed",error);complete(StatusCodes.InternalServerError)
       }
      }
     } ~
