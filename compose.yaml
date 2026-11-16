@@ -22,8 +22,12 @@ services:
       SBASE_AUTOML_WORKERS: ${SBASE_AUTOML_WORKERS:-2}
       SBASE_AUTOML_QUEUE_CAPACITY: ${SBASE_AUTOML_QUEUE_CAPACITY:-16}
       SPARK_LOCAL_DIRS: /var/lib/sbase/spark-tmp
-    ports: ["8080:8080", "25520:25520"]
-    volumes: ["${SBASE_MODEL_REGISTRY_HOST_PATH:-./data/models}:/var/lib/sbase/models", "spark_tmp:/var/lib/sbase/spark-tmp"]
+    ports:
+      - "${SBASE_HTTP_PORT:-8080}:8080"
+      - "${SBASE_CLUSTER_PORT:-25520}:25520"
+    volumes:
+      - ${SBASE_MODEL_REGISTRY_HOST_PATH:-./data/models}:/var/lib/sbase/models
+      - spark_tmp:/var/lib/sbase/spark-tmp
     depends_on:
       postgres:
         condition: service_healthy
@@ -31,8 +35,10 @@ services:
 
   web:
     build: ./web
-    ports: ["3000:80"]
-    depends_on: [app]
+    ports:
+      - "${SBASE_WEB_PORT:-3000}:80"
+    depends_on:
+      - app
     restart: unless-stopped
 
   postgres:
@@ -41,8 +47,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-sbase}
       POSTGRES_USER: ${POSTGRES_USER:-sbase}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-    ports: ["5432:5432"]
-    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sbase} -d ${POSTGRES_DB:-sbase}"]
       interval: 10s
@@ -53,8 +61,10 @@ services:
   cassandra:
     image: cassandra:5.0
     profiles: ["nosql"]
-    ports: ["9042:9042"]
-    volumes: ["cassandra_data:/var/lib/cassandra"]
+    ports:
+      - "${CASSANDRA_PORT:-9042}:9042"
+    volumes:
+      - cassandra_data:/var/lib/cassandra
     healthcheck:
       test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
       interval: 30s
@@ -66,8 +76,10 @@ services:
     image: solr:9.8
     profiles: ["search"]
     command: ["solr", "-f"]
-    ports: ["8983:8983"]
-    volumes: ["solr_data:/var/solr"]
+    ports:
+      - "${SOLR_PORT:-8983}:8983"
+    volumes:
+      - solr_data:/var/solr
     restart: unless-stopped
 
   spark-master:
@@ -76,25 +88,30 @@ services:
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
     environment:
       SPARK_NO_DAEMONIZE: "true"
-    ports: ["7077:7077", "8081:8081"]
+    ports:
+      - "${SPARK_MASTER_PORT:-7077}:7077"
+      - "${SPARK_MASTER_UI_PORT:-8081}:8081"
     restart: unless-stopped
 
   spark-worker:
     image: apache/spark:4.0.1
     profiles: ["spark"]
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
-    depends_on: [spark-master]
+    depends_on:
+      - spark-master
     environment:
       SPARK_NO_DAEMONIZE: "true"
       SPARK_LOCAL_DIRS: /var/lib/sbase/spark-tmp
-    volumes: ["spark_tmp:/var/lib/sbase/spark-tmp"]
+    volumes:
+      - spark_tmp:/var/lib/sbase/spark-tmp
     restart: unless-stopped
 
   flink-jobmanager:
     image: flink:2.1.0
     profiles: ["flink"]
     command: ["jobmanager"]
-    ports: ["8082:8081"]
+    ports:
+      - "${FLINK_UI_PORT:-8082}:8081"
     environment:
       FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
     restart: unless-stopped
@@ -103,7 +120,8 @@ services:
     image: flink:2.1.0
     profiles: ["flink"]
     command: ["taskmanager"]
-    depends_on: [flink-jobmanager]
+    depends_on:
+      - flink-jobmanager
     environment:
       FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
     restart: unless-stopped
@@ -112,3 +130,4 @@ volumes:
   postgres_data:
   cassandra_data:
   solr_data:
+  spark_tmp:
