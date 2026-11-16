@@ -81,6 +81,7 @@ object Main {
       "compute"->JsArray(JsString("mahout"),JsString("spark-ml-automl"),JsString("flink")),
       "apiVersion"->JsString("v1")
     ))}} ~
+    path("operators"){get{complete(JsArray(operators.availableOperators.map(JsString(_))))}} ~
     path("catalogs"){get{
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.catalogs()).parseJson))){
        case Success(value)=>complete(value)
