@@ -23,6 +23,7 @@ dependencies {
     implementation "org.scala-lang:scala-library:${scalaVersion}"
     implementation "org.apache.pekko:pekko-actor-typed_${scalaBinaryVersion}:${pekkoVersion}"
     implementation "org.apache.pekko:pekko-cluster-typed_${scalaBinaryVersion}:${pekkoVersion}"
+    implementation "org.apache.pekko:pekko-cluster-sharding-typed_${scalaBinaryVersion}:${pekkoVersion}"
     implementation "org.apache.pekko:pekko-http_${scalaBinaryVersion}:${pekkoHttpVersion}"
     implementation "org.apache.pekko:pekko-http-spray-json_${scalaBinaryVersion}:${pekkoHttpVersion}"
     implementation "com.typesafe:config:1.4.3"
@@ -32,7 +33,7 @@ dependencies {
     implementation "org.flywaydb:flyway-core:11.8.2"
     implementation "org.flywaydb:flyway-database-postgresql:11.8.2"
 
-    compileOnly "org.apache.spark:spark-sql_${scalaBinaryVersion}:${sparkVersion}"
+    implementation "org.apache.spark:spark-sql_${scalaBinaryVersion}:${sparkVersion}"
     compileOnly "org.apache.spark:spark-mllib_${scalaBinaryVersion}:${sparkVersion}"
     implementation "org.apache.mahout:mahout-math:0.13.0"
     compileOnly "org.apache.flink:flink-streaming-java:${flinkVersion}"
@@ -43,6 +44,8 @@ dependencies {
     implementation "ch.qos.logback:logback-classic:1.5.18"
     testImplementation "org.junit.jupiter:junit-jupiter:5.12.2"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation "org.testcontainers:junit-jupiter:1.21.3"
+    testImplementation "org.testcontainers:postgresql:1.21.3"
     testImplementation "org.apache.pekko:pekko-actor-testkit-typed_${scalaBinaryVersion}:${pekkoVersion}"
     testImplementation "org.apache.pekko:pekko-http-testkit_${scalaBinaryVersion}:${pekkoHttpVersion}"
 }
