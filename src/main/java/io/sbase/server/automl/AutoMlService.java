@@ -54,15 +54,23 @@ public final class AutoMlService {
         Set<String> columns=new HashSet<>(Arrays.asList(raw.columns()));
         if(!columns.contains(label)||!columns.containsAll(features))throw new IllegalArgumentException("Unknown label or feature column");
         List<String> selectedFeatures=new ArrayList<>();
+        double varianceThreshold=Math.max(0.0,((Number)request.getOrDefault("varianceThreshold",1.0e-12)).doubleValue());
+        Set<String> numericTypes=Set.of("byte","short","integer","long","float","double","decimal");
         for(String feature:features){
-            if(raw.select(org.apache.spark.sql.functions.col(feature)).distinct().limit(2).count()>1) selectedFeatures.add(feature);
-            else droppedFeatures.add(feature);
+            String type=raw.schema().apply(feature).dataType().typeName().toLowerCase(Locale.ROOT);
+            boolean useful;
+            if(numericTypes.contains(type)){
+                Row stats=raw.agg(org.apache.spark.sql.functions.variance(org.apache.spark.sql.functions.col(feature))).first();
+                useful=!stats.isNullAt(0)&&stats.getDouble(0)>varianceThreshold;
+            }else{
+                useful=raw.select(org.apache.spark.sql.functions.col(feature)).distinct().limit(2).count()>1;
+            }
+            if(useful)selectedFeatures.add(feature);else droppedFeatures.add(feature);
         }
         features=selectedFeatures;
         if(features.isEmpty())throw new IllegalArgumentException("Feature selection removed every constant feature");
         List<PipelineStage> preprocessing=new ArrayList<>();
         List<String> assemblerInputs=new ArrayList<>(), indexedColumns=new ArrayList<>(), encodedColumns=new ArrayList<>();
-        Set<String> numericTypes=Set.of("byte","short","integer","long","float","double","decimal");
         for(String feature:features){
             String type=raw.schema().apply(feature).dataType().typeName().toLowerCase(Locale.ROOT);
             if(numericTypes.contains(type)) assemblerInputs.add(feature);
@@ -142,7 +150,7 @@ public final class AutoMlService {
         Map<String,Object> result=new LinkedHashMap<>();
         result.put("status","SUCCEEDED");result.put("task",task);result.put("algorithm",bestAlgorithm);
         result.put("metric",metric);result.put("score",bestScore);result.put("trainingRows",train.count());
-        result.put("validationRows",validation.count());result.put("features",features);result.put("droppedConstantFeatures",droppedFeatures);result.put("categoricalEncoding","StringIndexer + OneHotEncoder");result.put("featureSelection","constant/near-constant column removal");result.put("timeSeriesLagFeatures",timeSeries);result.put("trials",trials);
+        result.put("validationRows",validation.count());result.put("features",features);result.put("droppedConstantFeatures",droppedFeatures);result.put("categoricalEncoding","StringIndexer + OneHotEncoder");result.put("featureSelection","variance threshold for numeric and cardinality filter for categorical columns");result.put("timeSeriesLagFeatures",timeSeries);result.put("trials",trials);
         result.put("modelFormat","Spark PipelineModel");if(modelUri!=null)result.put("modelUri",modelUri);
         return result;
     }
