@@ -154,6 +154,35 @@ object Main {
        case Failure(error)=>system.log.error("AutoML experiment listing failed",error);complete(StatusCodes.InternalServerError)
       }
     }} ~
+    path("automl"/"experiments"/JavaUUID){experimentId=>
+      get{onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.experiment(experimentId)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>system.log.error("AutoML experiment lookup failed",error);complete(StatusCodes.InternalServerError)
+      }}
+    } ~
+    path("models"){get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.models(100)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Model registry listing failed",error);complete(StatusCodes.InternalServerError)
+      }
+    }} ~
+    path("models"/"aliases"/Segment){alias=>
+      put{entity(as[JsObject]){request=>
+       val modelId=UUID.fromString(request.fields.getOrElse("modelId",JsString("")).convertTo[String])
+       onComplete(Future(scala.concurrent.blocking{autoMl.promote(alias,modelId);JsObject("alias"->JsString(alias),"modelId"->JsString(modelId.toString))})){
+        case Success(value)=>complete(value)
+        case Failure(error)=>system.log.error("Model promotion failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("promotion failed"))))
+       }
+      }}
+    } ~
+    path("models"/JavaUUID/"archive"){modelId=>
+      post{onComplete(Future(scala.concurrent.blocking{autoMl.archive(modelId);JsObject("status"->JsString("ARCHIVED"))})){
+       case Success(value)=>complete(value)
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>system.log.error("Model archival failed",error);complete(StatusCodes.BadRequest)
+      }}
+    } ~
     path("models"/JavaUUID){modelId=>
       get{onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.model(modelId)).parseJson))){
        case Success(value)=>complete(value)
