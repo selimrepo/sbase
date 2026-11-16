@@ -249,6 +249,78 @@ object Main {
       }
      }
     } ~
+    path("workflows"/JavaUUID/"versions"){workflowId=>
+     get {
+      onComplete(Future(scala.concurrent.blocking(repository.workflowVersions(workflowId)))) {
+       case Success(versions)=>
+        val payload=JsArray(versions.map{case (version,checksum,definition,created)=>
+         JsObject("version"->JsNumber(version),"checksum"->JsString(checksum),"definition"->definition.parseJson,"createdAt"->JsString(created.toString))
+        }.toVector)
+        complete(payload)
+       case Failure(error)=>system.log.error("Workflow version listing failed",error);complete(StatusCodes.InternalServerError)
+      }
+     } ~
+     post { entity(as[JsObject]){request=>
+      try {
+       val definition=request.fields.getOrElse("definition",JsObject()).compactPrint
+       operators.validate(definition)
+       val activate=request.fields.get("activate").exists(_.convertTo[Boolean])
+       onComplete(Future(scala.concurrent.blocking(repository.createWorkflowVersion(workflowId,definition,activate)))) {
+        case Success(version)=>complete(StatusCodes.Created->JsObject("workflowId"->JsString(workflowId.toString),"version"->JsNumber(version),"active"->JsBoolean(activate)))
+        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+        case Failure(error)=>system.log.error("Workflow version creation failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("version creation failed"))))
+       }
+      } catch {case error:IllegalArgumentException=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid workflow"))))}
+     }}
+    } ~
+    path("workflows"/JavaUUID/"versions"/IntNumber/"activate"){(workflowId,version)=>
+     put {
+      onComplete(Future(scala.concurrent.blocking(repository.activateWorkflowVersion(workflowId,version)))) {
+       case Success(true)=>complete(JsObject("workflowId"->JsString(workflowId.toString),"activeVersion"->JsNumber(version)))
+       case Success(false)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>system.log.error("Workflow activation failed",error);complete(StatusCodes.InternalServerError)
+      }
+     }
+    } ~
+    path("workflows"/JavaUUID/"schedules"){workflowId=>
+     get {
+      onComplete(Future(scala.concurrent.blocking(repository.schedules(Some(workflowId))))) {
+       case Success(items)=>complete(mapper.writeValueAsString(items).parseJson)
+       case Failure(error)=>system.log.error("Workflow schedules listing failed",error);complete(StatusCodes.InternalServerError)
+      }
+     } ~
+     post { entity(as[JsObject]){request=>
+      try {
+       val interval=request.fields.getOrElse("intervalSeconds",JsNumber(3600)).convertTo[Int]
+       val attempts=request.fields.getOrElse("maxAttempts",JsNumber(5)).convertTo[Int]
+       onComplete(Future(scala.concurrent.blocking(repository.createSchedule(workflowId,interval,attempts)))) {
+        case Success(id)=>complete(StatusCodes.Created->JsObject("scheduleId"->JsString(id.toString),"workflowId"->JsString(workflowId.toString),"intervalSeconds"->JsNumber(interval)))
+        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("schedule creation failed"))))
+       }
+      } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid schedule"))))}
+     }}
+    } ~
+    path("schedules"){get {
+     onComplete(Future(scala.concurrent.blocking(repository.schedules(None)))) {
+      case Success(items)=>complete(mapper.writeValueAsString(items).parseJson)
+      case Failure(error)=>system.log.error("Schedule listing failed",error);complete(StatusCodes.InternalServerError)
+     }
+    }} ~
+    path("schedules"/JavaUUID/"pause"){scheduleId=>post {
+     onComplete(Future(scala.concurrent.blocking(repository.setScheduleEnabled(scheduleId,false)))) {
+      case Success(true)=>complete(JsObject("scheduleId"->JsString(scheduleId.toString),"enabled"->JsBoolean(false)))
+      case Success(false)=>complete(StatusCodes.NotFound)
+      case Failure(error)=>system.log.error("Schedule pause failed",error);complete(StatusCodes.InternalServerError)
+     }
+    }} ~
+    path("schedules"/JavaUUID/"resume"){scheduleId=>post {
+     onComplete(Future(scala.concurrent.blocking(repository.setScheduleEnabled(scheduleId,true)))) {
+      case Success(true)=>complete(JsObject("scheduleId"->JsString(scheduleId.toString),"enabled"->JsBoolean(true)))
+      case Success(false)=>complete(StatusCodes.NotFound)
+      case Failure(error)=>system.log.error("Schedule resume failed",error);complete(StatusCodes.InternalServerError)
+     }
+    }} ~
     path("workflows"/JavaUUID/"runs"){workflowId=>
      post{
       entity(as[JobSubmit]){request=>
