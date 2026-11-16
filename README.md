@@ -32,7 +32,7 @@ docker compose up --build
 Run backend tests without Docker except for PostgreSQL Testcontainers tests (Docker required):
 
 ```bash
-gradle --no-daemon clean test installDist
+gradle --no-daemon clean test installDist shadowJar
 
 # When running the server directly on the host (instead of Compose):
 SBASE_CLUSTER_HOST=127.0.0.1 SBASE_CLUSTER_SEEDS=pekko://sbase@127.0.0.1:25520 gradle run
@@ -45,6 +45,17 @@ cd web
 npm install
 npm run build
 ```
+
+## Executable Fat JAR
+
+The Gradle Shadow plugin produces a self-contained executable archive at `build/libs/sbase-server-0.1.0-SNAPSHOT-all.jar`. It includes runtime dependencies and merges `META-INF/services` descriptors for JDBC drivers, logging providers and libraries that use Java service loading. Build it with:
+
+```bash
+gradle --no-daemon clean test shadowJar
+java -jar build/libs/sbase-server-0.1.0-SNAPSHOT-all.jar
+```
+
+The archive uses ZIP64 because Spark and Flink make the dependency bundle large. Optional Geode classes remain compile-only until a runtime Geode connector is implemented.
 
 ## Workflow API
 
