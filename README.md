@@ -143,7 +143,13 @@ All platform capabilities are exposed under `/api/v1`:
 | `POST /api/v1/catalogs/cassandra/query` | Bounded read-only CQL |
 | `POST /api/v1/catalogs/solr/query` | Bounded Solr query by collection |
 | `POST /api/v1/query/plan` | Calcite-parser-backed federated cost/physical-plan proposal from supplied table statistics |
-| `POST /api/v1/automl/train` | Spark ML classification/regression candidate search |
+| `POST /api/v1/query/execute` | Parallel PostgreSQL/Cassandra/Solr scans and Spark distributed SQL joins |
+| `POST /api/v1/automl/train` | Cross-validated Spark ML search, durable experiment and model registration |
+| `GET /api/v1/automl/experiments` and `GET /api/v1/automl/experiments/{id}` | Experiment history and trial metrics |
+| `GET /api/v1/models` and `GET /api/v1/models/{id}` | Model registry |
+| `POST /api/v1/models/{id}` | Batch prediction using a registered model |
+| `POST /api/v1/models/{id}/archive` | Archive a model |
+| `PUT /api/v1/models/aliases/{alias}` | Promote/rollback a deployment alias to a ready model |
 | `POST /api/v1/workflows` | Validate and persist an immutable workflow version |
 | `POST /api/v1/workflows/{workflowId}/runs` | Submit an idempotent distributed workflow run |
 | `GET /api/v1/jobs/{jobId}` | Read job status and result |
@@ -197,11 +203,26 @@ candidates for classification, or Linear Regression, Random Forest and Decision 
 for regression, using a deterministic 80/20 holdout split. The response contains
 per-candidate metrics and the best candidate.
 
-The current API is a bounded synchronous baseline: it does not yet persist trained
-models, run distributed cross-validation/hyperparameter search, perform automated
-feature selection, support categorical preprocessing, or manage experiment lifecycle.
-The V3 migration creates experiment/trial metadata tables for the next persistence
-step; the current training endpoint does not write those records yet.
+Training now runs a bounded cross-validation and hyperparameter grid for each selected
+Spark ML algorithm, scores candidates on a held-out validation split, persists the winning
+Spark PipelineModel under `SBASE_MODEL_REGISTRY_PATH`, and writes experiment/trial/model
+metadata to PostgreSQL. The API exposes experiment history/details, model metadata,
+prediction, archival and transactional deployment aliases. Docker Compose mounts a
+dedicated `models_data` volume. Models are versioned per experiment; aliases can be
+repointed for rollback. The current feature pipeline expects numeric input columns;
+categorical encoding, time-series tasks, distributed feature stores, drift monitoring
+and asynchronous cancellation are follow-up capabilities.
+
+### Federated execution
+
+`POST /api/v1/query/execute` accepts a SQL query plus named source scans. Source reads
+run concurrently with per-source and overall row caps; Calcite parses and validates
+the read-only query; the resulting tables are registered in an isolated Spark SQL
+session. Spark Catalyst performs join planning and Adaptive Query Execution can choose
+broadcast/shuffle strategies and distribute joins to the configured Spark cluster.
+This is an executable cross-source join path, not only a plan proposal. Connector
+pushdown is controlled by each source scan query supplied in the request; automatic
+SQL-to-CQL/Solr predicate decomposition and streaming spill-to-disk are not yet included.
 
 ## Durable execution design
 
