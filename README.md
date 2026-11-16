@@ -1,86 +1,68 @@
 # SBase
 
-**SBase** is an open-source, KNIME-inspired data science, analytics and data-mining server. The target is a visual, reproducible workspace for data ingestion, preparation, distributed processing, mining, model lifecycle and operational analytics.
+**SBase** is an open-source, KNIME-inspired data science and data-mining server. It is designed around a visual, reproducible workflow environment for data ingestion, preparation, distributed analytics, mining, model lifecycle and operational reporting.
 
-> Project status: foundation scaffold. This repository is being rebuilt from an empty baseline. The architecture and roadmap describe intended capabilities; they are not claims that every engine is already integrated or production-certified.
+> Current status: foundational scaffold on the `develop` branch. The roadmap describes intended capabilities; components are not production-ready until their integrations, recovery behavior and tests are implemented.
 
-## Architecture
+## Technology architecture
 
-- **Scala + Apache Pekko** — service runtime, typed actors, clustering and distributed job coordination.
-- **PostgreSQL** — transactional control plane: projects, workflows, versions, execution metadata and job state.
-- **Apache Spark** — batch analytics and large-scale feature engineering.
-- **Apache Mahout** — distributed and mathematically oriented mining algorithms.
-- **Apache Flink** — streaming and event-time processing.
-- **Apache Cassandra** — wide-column storage for high-volume operational and time-series data.
-- **Apache Solr** — full-text, faceted and metadata search.
-- **Apache Geode** — distributed in-memory data grid and low-latency shared state.
-- **React (planned)** — KNIME-like visual workflow and data science studio.
+| Area | Technology | Responsibility |
+|---|---|---|
+| Platform runtime | Scala 2.13 + Apache Pekko | Typed actors, service runtime, clustering and distributed coordination |
+| Build | Gradle + Scala plugin | Reproducible build, tests and application packaging |
+| OLTP/control plane | PostgreSQL | Workspaces, workflow versions, jobs, leases, lineage metadata |
+| Batch analytics | Apache Spark | Distributed SQL, batch transformations and feature engineering |
+| Mining | Apache Mahout | Mathematical and distributed mining algorithms |
+| Streaming | Apache Flink | Stateful stream processing, event time and checkpoints |
+| NoSQL | Apache Cassandra | High-volume wide-column and time-series workloads |
+| Search | Apache Solr | Full-text, faceted and metadata search |
+| In-memory grid | Apache Geode | Distributed cache and low-latency shared data |
+| Visual studio | React (planned) | Node-based workflow editor, previews and execution monitoring |
 
-Authentication is intentionally out of scope for this deployment. Do not add Keycloak, OAuth/OIDC, MFA, registration or login flows. Network isolation and infrastructure-level access controls remain the operator's responsibility.
-
-## Repository layout
-
-```
-.
-├── project/                 # sbt build configuration
-├── src/main/scala/          # Pekko service
-├── src/main/resources/db/   # PostgreSQL migrations
-├── src/test/scala/          # automated tests
-├── docker/                  # engine-specific configuration
-├── compose.yaml             # local development services
-├── Dockerfile
-└── .github/workflows/ci.yml
-```
-
-## Requirements
-
-- JDK 17+
-- sbt 1.10+
-- Docker Engine + Docker Compose v2
+Authentication is deliberately out of scope. Do not add Keycloak, OAuth/OIDC, MFA, registration or login flows. Operators must protect deployments through network isolation, TLS termination and infrastructure-level access controls.
 
 ## Run locally
 
-1. Copy `.env.example` to `.env` and adjust ports/passwords.
-2. Start infrastructure: `docker compose up -d postgres cassandra solr`
-3. Run the service: `sbt run`
-4. Check `http://localhost:8080/health` and `http://localhost:8080/api/v1`.
+Requirements: JDK 17+, Gradle 8.14.3+, Docker Engine and Compose v2.
 
-Optional engines are behind Compose profiles:
+```bash
+cp .env.example .env
+docker compose up -d postgres
+gradle clean test run
+```
 
-- `docker compose --profile spark up -d`
-- `docker compose --profile flink up -d`
-- `docker compose --profile geode up -d`
+Health endpoint: `http://localhost:8080/health`
 
-The optional profiles are development topology starters. They are not a production HA deployment.
+Optional development engines: `docker compose --profile nosql --profile search up -d`, `docker compose --profile spark up -d`, `docker compose --profile flink up -d`.
 
-## Configuration
-
-All settings are environment driven. See `.env.example`. Never commit real credentials. PostgreSQL is the authoritative OLTP/control-plane store; Cassandra, Solr and Geode are purpose-specific stores and must not become competing sources of truth.
+The Compose topology is for local development, not production HA.
 
 ## Engineering principles
 
-1. PostgreSQL transactions own workflow definitions, versions, leases and durable execution state.
-2. Every workflow run has an immutable workflow-version reference and correlation ID.
-3. Engine adapters are isolated behind interfaces; a workflow definition must not depend on a particular execution engine.
+1. PostgreSQL is the source of truth for workflow definitions, versions and durable execution state.
+2. Workflow versions are immutable and checksum-addressable.
+3. Engine adapters isolate workflow semantics from Spark, Flink and other engines.
 4. Long-running work is asynchronous, idempotent and recoverable after worker restart.
-5. Backpressure, bounded concurrency, deadlines, cancellation and retry policies are explicit.
-6. Secrets are injected at runtime; logs never include credentials or raw secret-bearing configuration.
-7. Integration tests use real service containers where behavior depends on the external engine.
+5. Backpressure, bounded concurrency, deadlines, cancellation and retries are explicit.
+6. Search indexes and caches are derived data, not authoritative state.
+7. Credentials are injected at runtime and never committed.
+8. Integration tests use real service containers when correctness depends on external behavior.
 
 ## Roadmap
 
-- [x] Establish Scala/Pekko repository foundation and local infrastructure topology.
-- [ ] Durable PostgreSQL workflow/job model, migrations and transactional outbox.
-- [ ] Pekko cluster, sharding, worker leases, retries and recovery.
-- [ ] Typed connector contracts for PostgreSQL, Cassandra, Solr and Geode.
+- [x] Gradle + Scala project foundation and Pekko HTTP service.
+- [x] Initial PostgreSQL control-plane schema.
+- [ ] Pekko Cluster/Sharding, durable leases, fencing and worker recovery.
+- [ ] Transactional outbox and idempotent job dispatch.
+- [ ] Typed connectors for PostgreSQL, Cassandra, Solr and Geode.
 - [ ] Spark batch execution and Mahout mining operators.
-- [ ] Flink streaming jobs, checkpoints and savepoint lifecycle.
-- [ ] Visual workflow editor, typed node catalog, validation and execution preview.
-- [ ] Dataset catalog, lineage, profiling, quality rules and feature engineering.
+- [ ] Flink streaming lifecycle, checkpoints and savepoints.
+- [ ] React workflow studio with typed nodes, validation, previews and live run status.
+- [ ] Dataset catalog, lineage, profiling, data quality and feature engineering.
 - [ ] Experiment tracking, model registry, evaluation and model serving.
-- [ ] Metrics, tracing, structured logs, HA/DR and security hardening.
-- [ ] Multi-hour soak, fault-injection, load and recovery tests.
+- [ ] Metrics, tracing, structured logs, backup/restore and HA/DR.
+- [ ] Load, soak, chaos and disaster-recovery verification.
 
 ## License
 
-Apache License 2.0 (see `LICENSE`).
+Apache License 2.0. See `LICENSE`.
