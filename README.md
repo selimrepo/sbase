@@ -144,7 +144,7 @@ All platform capabilities are exposed under `/api/v1`:
 | `POST /api/v1/catalogs/solr/query` | Bounded Solr query by collection |
 | `POST /api/v1/query/plan` | Calcite-parser-backed federated cost/physical-plan proposal from supplied table statistics |
 | `POST /api/v1/query/execute` | Parallel PostgreSQL/Cassandra/Solr scans and Spark distributed SQL joins |
-| `POST /api/v1/automl/train` | Cross-validated Spark ML search, durable experiment and model registration |
+| `POST /api/v1/automl/train` | Synchronous cross-validated AutoML training |\n| `POST /api/v1/automl/jobs` | Submit asynchronous AutoML training |\n| `GET /api/v1/automl/jobs/{id}` and `POST /api/v1/automl/jobs/{id}` | Read or cancel an AutoML job |
 | `GET /api/v1/automl/experiments` and `GET /api/v1/automl/experiments/{id}` | Experiment history and trial metrics |
 | `GET /api/v1/models` and `GET /api/v1/models/{id}` | Model registry |
 | `POST /api/v1/models/{id}` | Batch prediction using a registered model |
@@ -193,23 +193,21 @@ The plan endpoint is advisory. For actual cross-source joins, use the executable
 
 ### AutoML
 
-`POST /api/v1/automl/train` accepts `task` (`classification` or `regression`),
-`label`, numeric `features`, inline `data` rows and optional `maxCandidates`,
-`cvFolds` (2–5) and `cvParallelism`. It compares Logistic Regression, Random Forest
-and Decision Tree for classification, or Linear Regression, Random Forest and Decision
-Tree for regression. Each candidate receives a bounded Spark ML cross-validation and
-hyperparameter grid search; a deterministic 80/20 holdout split is used for final
-candidate selection.
+`POST /api/v1/automl/train` supports `classification`, `regression` and `time_series` tasks. Numeric features are assembled directly; string/categorical features are automatically processed with Spark ML `StringIndexer` and `OneHotEncoder`. Constant features are removed before fitting. For time-series tasks, supply `timeColumn` and optional `lags` (1–24); the service builds lagged target features and uses a chronological train/validation split. Candidate models include linear, tree and ensemble regressors/classifiers, including GBT for time-series regression. Cross-validation and bounded parameter grids are used for candidate comparison.
 
-Training now runs a bounded cross-validation and hyperparameter grid for each selected
-Spark ML algorithm, scores candidates on a held-out validation split, persists the winning
-Spark PipelineModel under `SBASE_MODEL_REGISTRY_PATH`, and writes experiment/trial/model
-metadata to PostgreSQL. The API exposes experiment history/details, model metadata,
-prediction, archival and transactional deployment aliases. Docker Compose mounts a
-dedicated `models_data` volume. Models are versioned per experiment; aliases can be
-repointed for rollback. The current feature pipeline expects numeric input columns;
-categorical encoding, time-series tasks, distributed feature stores, drift monitoring
-and asynchronous cancellation are follow-up capabilities.
+The synchronous endpoint remains available. For non-blocking execution:
+
+- `POST /api/v1/automl/jobs` submits to a bounded in-process worker queue and returns a job ID.
+- `GET /api/v1/automl/jobs/{id}` returns queue/training status and result.
+- `POST /api/v1/automl/jobs/{id}` requests cancellation; the queue interrupts the worker and cancels the associated Spark job group.
+
+Queue capacity and workers are controlled by `SBASE_AUTOML_WORKERS` and `SBASE_AUTOML_QUEUE_CAPACITY`. Experiment, trial and model metadata remain in PostgreSQL. Artifacts are written under `SBASE_MODEL_REGISTRY_PATH`. For multiple application servers, mount the same shared NFS/POSIX directory at `/var/lib/sbase/models` on every host and set `SBASE_MODEL_REGISTRY_HOST_PATH` to the corresponding host mount. The default local Docker volume is not shared across hosts and is suitable only for a single-node deployment.
+
+### Federated execution
+
+`POST /api/v1/query/execute` runs source scans concurrently and executes the resulting tables in Spark SQL. When the request omits a source-specific query, `FederatedPredicatePushdown` can translate a supported single-table SQL `SELECT` into PostgreSQL SQL, Cassandra CQL or a Solr query. The conservative translator handles direct column projections and literal comparisons (`=, !=, <, <=, >, >=`) combined with `AND`/`OR`; unsupported expressions, joins, aliases and ambiguous shapes require an explicit source query instead of unsafe rewriting.
+
+Source rows are staged as JSONL under `SBASE_FEDERATED_SPILL_PATH` before Spark reads them. Spark's shuffle/sort execution uses `SPARK_LOCAL_DIRS` for disk spill. Set both to fast persistent scratch storage with sufficient capacity. The connector layer still has bounded result caps and materializes source results before staging; this is not an unbounded streaming connector. Distributed joins require `SPARK_MASTER` to point at a reachable Spark cluster.
 
 ### Federated execution
 
