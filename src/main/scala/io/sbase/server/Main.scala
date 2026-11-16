@@ -41,7 +41,7 @@ object Main {
     "pekko.remote.artery.bind.port=" + bindPort + "\n" +
     "pekko.cluster.seed-nodes=[" + seedNodes + "]\n"
   val clusterConfig=ConfigFactory.parseString(clusterConfigText).withFallback(ConfigFactory.load())
-  implicit val system:ActorSystem[Nothing]=ActorSystem(Behaviors.empty,"sbase",clusterConfig)
+  implicit val system:ActorSystem[Nothing]=ActorSystem[Nothing](Behaviors.empty[Nothing],"sbase",clusterConfig)
   implicit val ec:ExecutionContext=system.executionContext
   implicit val apiInfoFormat=jsonFormat3(ApiInfo.apply)
   implicit val healthFormat=jsonFormat2(Health.apply)
