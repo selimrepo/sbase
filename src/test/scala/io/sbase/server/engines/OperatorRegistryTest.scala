@@ -24,6 +24,17 @@ class OperatorRegistryTest {
   }
 
   @Test
+  def connectedDatasetFeedsMahoutOperator(): Unit = {
+    val registry = new OperatorRegistry()
+    val definition = """{"nodes":[
+      {"id":"source","operator":"dataset-values","config":{"values":[2,4,8]}},
+      {"id":"sum","operator":"mahout-vector-sum","config":{}}
+    ],"edges":[{"source":"source","target":"sum"}]}"""
+    val output = registry.execute(definition).compactPrint
+    assertTrue(output.contains("\"sum\":14.0"))
+  }
+
+  @Test
   def cyclicWorkflowIsRejected(): Unit = {
     val registry = new OperatorRegistry()
     val cycle = """{"nodes":[
