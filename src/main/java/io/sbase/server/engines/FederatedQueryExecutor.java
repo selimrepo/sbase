@@ -55,15 +55,18 @@ public final class FederatedQueryExecutor implements AutoCloseable {
         requestSession.conf().set("spark.sql.adaptive.coalescePartitions.enabled","true");
         requestSession.conf().set("spark.sql.cbo.enabled","true");
         requestSession.conf().set("spark.sql.cbo.joinReorder.enabled","true");
+        List<Path> stagedFiles=new ArrayList<>();
         for(var entry:tables.entrySet()){
-            List<String> jsonRows=entry.getValue().stream().map(JSON::valueToTree).map(Object::toString).toList();
-            Dataset<Row> frame=requestSession.read().json(requestSession.createDataset(jsonRows,Encoders.STRING()));
+            Path staged=FederatedSpillStore.stage(entry.getValue());
+            stagedFiles.add(staged);
+            Dataset<Row> frame=requestSession.read().json(staged.toUri().toString());
             frame.createOrReplaceTempView(entry.getKey());
         }
         Dataset<Row> result=requestSession.sql(sql).limit(rowLimit);
         List<String> jsonResults=result.toJSON().collectAsList();
         List<Map<String,Object>> rows=new ArrayList<>();
         for(String row:jsonResults)rows.add(JSON.readValue(row,new TypeReference<>(){}));
+        FederatedSpillStore.cleanup(stagedFiles);
         long inputRows=tables.values().stream().mapToLong(List::size).sum();
         Map<String,Object> response = new LinkedHashMap<>();
         response.put("status","SUCCEEDED");
