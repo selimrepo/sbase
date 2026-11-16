@@ -34,6 +34,8 @@ public final class CalciteSqlEngine {
             Map<String, List<LinkedHashMap<String, Object>>> input =
                     JSON.readValue(tablesJson == null ? "{}" : tablesJson, TABLES);
             Properties properties = new Properties();
+            properties.setProperty("caseSensitive", "false");
+            properties.setProperty("unquotedCasing", "UNCHANGED");
             try (Connection connection = DriverManager.getConnection("jdbc:calcite:", properties)) {
                 CalciteConnection calcite = connection.unwrap(CalciteConnection.class);
                 SchemaPlus root = calcite.getRootSchema();
@@ -56,7 +58,7 @@ public final class CalciteSqlEngine {
                             Object value = rows.getObject(column);
                             if (value instanceof java.sql.Date || value instanceof java.sql.Timestamp
                                     || value instanceof java.sql.Time) value = value.toString();
-                            row.put(metadata.getColumnLabel(column), value);
+                            row.put(metadata.getColumnLabel(column).toLowerCase(Locale.ROOT), value);
                         }
                         result.add(row);
                     }
