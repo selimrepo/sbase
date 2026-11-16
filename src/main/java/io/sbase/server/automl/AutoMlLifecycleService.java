@@ -6,7 +6,6 @@ import org.apache.spark.ml.PipelineModel;
 import org.apache.spark.sql.*;
 import java.nio.file.*;
 import java.sql.*;
-import java.time.Instant;
 import java.util.*;
 
 /** Durable experiment lifecycle and versioned Spark PipelineModel registry backed by PostgreSQL. */
@@ -49,7 +48,7 @@ public final class AutoMlLifecycleService {
             response.put("durationMs",java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started));
             return response;
         }catch(Exception error){
-            updateStatus(experimentId,"FAILED",null,null,null,null);
+            updateFailure(experimentId,error.getClass().getSimpleName()+": "+String.valueOf(error.getMessage()));
             throw error;
         }
     }
@@ -85,7 +84,7 @@ public final class AutoMlLifecycleService {
         Path resolved=Path.of(path).toAbsolutePath().normalize();
         if(!resolved.startsWith(registryRoot)||!Files.exists(resolved))throw new IllegalStateException("Model artifact is missing or outside registry root");
         PipelineModel pipeline=PipelineModel.load(resolved.toString());
-        List<String> jsonRows=rows.stream().map(JSON::valueToTree).map(Object::toString).toList();
+        List<String> jsonRows=rows.stream().map(row->JSON.valueToTree(row).toString()).toList();
         Dataset<Row> input=spark.read().json(spark.createDataset(jsonRows,Encoders.STRING()));
         List<String> predictions=pipeline.transform(input).toJSON().collectAsList();
         return Map.of("modelId",modelId.toString(),"predictions",predictions,"rowCount",predictions.size());
@@ -154,6 +153,11 @@ public final class AutoMlLifecycleService {
         try(Connection c=connection();PreparedStatement p=c.prepareStatement("UPDATE automl_experiment SET status=?,best_algorithm=?,best_metric=?,best_score=?,model_uri=?,finished_at=CASE WHEN ? IN ('SUCCEEDED','FAILED','CANCELLED') THEN now() ELSE finished_at END WHERE id=?")){
             p.setString(1,status);p.setString(2,algorithm);p.setString(3,metric);if(score==null)p.setNull(4,Types.DOUBLE);else p.setDouble(4,score);
             p.setString(5,uri);p.setString(6,status);p.setObject(7,id);p.executeUpdate();
+        }
+    }
+    private void updateFailure(UUID id,String message)throws SQLException{
+        try(Connection c=connection();PreparedStatement p=c.prepareStatement("UPDATE automl_experiment SET status='FAILED',error_message=?,finished_at=now() WHERE id=?")){
+            p.setString(1,message==null?"Training failed":message.substring(0,Math.min(message.length(),4000)));p.setObject(2,id);p.executeUpdate();
         }
     }
     private void persistTrials(UUID id,List<Map<String,Object>> trials)throws SQLException{
