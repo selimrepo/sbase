@@ -3,6 +3,7 @@ package io.sbase.server.jobs
 import org.apache.pekko.actor.typed.{ActorRef,ActorSystem,Behavior}
 import org.apache.pekko.actor.typed.scaladsl.Behaviors
 import org.apache.pekko.actor.typed.Cancellable
+import org.apache.pekko.serialization.jackson.JacksonJsonSerializable
 import org.apache.pekko.cluster.sharding.typed.scaladsl.{ClusterSharding,Entity,EntityTypeKey}
 import io.sbase.server.engines.OperatorRegistry
 import scala.concurrent.Future
@@ -10,9 +11,9 @@ import scala.concurrent.duration._
 import scala.util.{Failure,Success}
 
 object WorkerSharding {
- sealed trait Command
+ sealed trait Command extends JacksonJsonSerializable
  final case class Process(lease:JobLease) extends Command
- private final case class Finished(lease:JobLease,result:Either[Throwable,String]) extends Command
+ private final case class Finished(lease:JobLease,result:Either[String,String]) extends Command
  val TypeKey:EntityTypeKey[Command]=EntityTypeKey[Command]("SBaseJobWorker")
 
  def start(system:ActorSystem[_],repo:JobRepository,operators:OperatorRegistry):ActorRef[Command] =
@@ -27,7 +28,7 @@ object WorkerSharding {
      heartbeat=context.system.scheduler.scheduleAtFixedRate(15.seconds,15.seconds)(() => Future(repo.heartbeat(lease))(ec))(ec)
      context.pipeToSelf(Future(operators.execute(lease.workflowDefinition).compactPrint)(ec)) {
       case Success(value)=>Finished(lease,Right(value))
-      case Failure(error)=>Finished(lease,Left(error))
+      case Failure(error)=>Finished(lease,Left(Option(error.getMessage).getOrElse(error.getClass.getName)))
      }
      Behaviors.same
     case Process(_)=>Behaviors.same
@@ -37,7 +38,7 @@ object WorkerSharding {
      Behaviors.same
     case Finished(lease,Left(error))=>
      if(heartbeat!=null) heartbeat.cancel()
-     Future(repo.fail(lease,error))(ec)
+     Future(repo.fail(lease,new RuntimeException(error)))(ec)
      Behaviors.same
    }
   }
