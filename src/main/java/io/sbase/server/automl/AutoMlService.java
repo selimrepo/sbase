@@ -6,6 +6,9 @@ import org.apache.spark.ml.classification.*;
 import org.apache.spark.ml.evaluation.*;
 import org.apache.spark.ml.feature.VectorAssembler;
 import org.apache.spark.ml.regression.*;
+import org.apache.spark.ml.tuning.CrossValidator;
+import org.apache.spark.ml.tuning.CrossValidatorModel;
+import org.apache.spark.ml.tuning.ParamGridBuilder;
 import org.apache.spark.sql.*;
 
 import java.util.*;
@@ -60,13 +63,24 @@ public final class AutoMlService {
         for(PipelineStage estimator:candidates.stream().limit(max).toList()){
             String algorithm=estimator.getClass().getSimpleName();long started=System.nanoTime();
             try{
-                PipelineModel model=new Pipeline().setStages(new PipelineStage[]{assembler,estimator}).fit(train);
+                Pipeline pipeline=new Pipeline().setStages(new PipelineStage[]{assembler,estimator});
+                int folds=Math.max(2,Math.min(5,((Number)request.getOrDefault("cvFolds",3)).intValue()));
+                CrossValidator validator=new CrossValidator().setEstimator(pipeline)
+                        .setEvaluator(classification
+                                ?new MulticlassClassificationEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName(metric)
+                                :new RegressionEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName(metric))
+                        .setEstimatorParamMaps(parameterGrid(estimator)).setNumFolds(folds)
+                        .setParallelism(Math.max(1,Math.min(4,((Number)request.getOrDefault("cvParallelism",2)).intValue())))
+                        .setSeed(42L);
+                CrossValidatorModel cvModel=validator.fit(train);
+                PipelineModel model=(PipelineModel)cvModel.bestModel();
                 Dataset<Row> predictions=model.transform(validation);
                 double score=classification
                         ?new MulticlassClassificationEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName(metric).evaluate(predictions)
                         :new RegressionEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName(metric).evaluate(predictions);
-                trials.add(Map.of("algorithm",algorithm,"metric",metric,"score",score,"status","SUCCEEDED",
-                        "durationMs",TimeUnitNanos.toMillis(System.nanoTime()-started)));
+                trials.add(Map.of("algorithm",algorithm,"metric",metric,"score",score,"cvFolds",folds,
+                        "cvAverageMetric",Arrays.stream(cvModel.avgMetrics()).average().orElse(score),
+                        "status","SUCCEEDED","durationMs",TimeUnitNanos.toMillis(System.nanoTime()-started)));
                 if(classification?score>bestScore:score<bestScore){best=model;bestScore=score;bestAlgorithm=algorithm;}
             }catch(Exception error){
                 trials.add(Map.of("algorithm",algorithm,"status","FAILED","durationMs",TimeUnitNanos.toMillis(System.nanoTime()-started),
@@ -85,6 +99,23 @@ public final class AutoMlService {
         result.put("validationRows",validation.count());result.put("features",features);result.put("trials",trials);
         result.put("modelFormat","Spark PipelineModel");if(modelUri!=null)result.put("modelUri",modelUri);
         return result;
+    }
+    private static org.apache.spark.ml.param.ParamMap[] parameterGrid(PipelineStage estimator) {
+        ParamGridBuilder grid=new ParamGridBuilder();
+        if(estimator instanceof LogisticRegression model)
+            grid.addGrid(model.regParam(),new double[]{0.001,0.01,0.1})
+                .addGrid(model.elasticNetParam(),new double[]{0.0,0.5});
+        else if(estimator instanceof LinearRegression model)
+            grid.addGrid(model.regParam(),new double[]{0.001,0.01,0.1});
+        else if(estimator instanceof RandomForestClassifier model)
+            grid.addGrid(model.numTrees(),new int[]{50,100}).addGrid(model.maxDepth(),new int[]{5,8});
+        else if(estimator instanceof RandomForestRegressor model)
+            grid.addGrid(model.numTrees(),new int[]{50,100}).addGrid(model.maxDepth(),new int[]{5,8});
+        else if(estimator instanceof DecisionTreeClassifier model)
+            grid.addGrid(model.maxDepth(),new int[]{4,8,12});
+        else if(estimator instanceof DecisionTreeRegressor model)
+            grid.addGrid(model.maxDepth(),new int[]{4,8,12});
+        return grid.build();
     }
     private static final class TimeUnitNanos{
         static long toMillis(long nanos){return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(nanos);}
