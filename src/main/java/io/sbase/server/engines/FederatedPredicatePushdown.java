@@ -52,11 +52,11 @@ public final class FederatedPredicatePushdown {
     private static String predicate(SqlNode node, String source) {
         if (!(node instanceof SqlCall call)) throw new IllegalArgumentException("Unsupported predicate");
         SqlKind kind = call.getKind();
-        if (kind == SqlKind.AND || kind == SqlKind.OR) {
+        if (kind == SqlKind.AND || kind == SqlKind.OR) {\n            if ("cassandra".equalsIgnoreCase(source) && kind == SqlKind.OR) throw new IllegalArgumentException("CQL does not support OR predicates");
             return "(" + predicate(call.operand(0), source) + (kind == SqlKind.AND ? " AND " : " OR ")
                     + predicate(call.operand(1), source) + ")";
         }
-        String operator = switch (kind) {
+        if ("cassandra".equalsIgnoreCase(source) && kind == SqlKind.NOT_EQUALS) throw new IllegalArgumentException("CQL does not support != predicates");\n        String operator = switch (kind) {
             case EQUALS -> "="; case NOT_EQUALS -> "!="; case GREATER_THAN -> ">";
             case GREATER_THAN_OR_EQUAL -> ">="; case LESS_THAN -> "<"; case LESS_THAN_OR_EQUAL -> "<=";
             default -> throw new IllegalArgumentException("Unsupported predicate operator");
@@ -83,14 +83,14 @@ public final class FederatedPredicatePushdown {
     }
 
     private static String literal(SqlLiteral literal) {
-        if (literal.getTypeName() == org.apache.calcite.sql.type.SqlTypeName.CHAR
-                || literal.getTypeName() == org.apache.calcite.sql.type.SqlTypeName.VARCHAR) {
-            String value = String.valueOf(literal.getValue());
-            return "'" + value.replace("'", "''") + "'";
-        }
         Object value = literal.getValue();
         if (value instanceof org.apache.calcite.util.NlsString nls) {
             return "'" + nls.getValue().replace("'", "''") + "'";
+        }
+        if (literal.getTypeName() == org.apache.calcite.sql.type.SqlTypeName.CHAR
+                || literal.getTypeName() == org.apache.calcite.sql.type.SqlTypeName.VARCHAR) {
+            String text = String.valueOf(value);
+            return "'" + text.replace("'", "''") + "'";
         }
         String text = literal.toValue();
         if (text == null || !text.matches("-?[0-9]+(\\.[0-9]+)?|TRUE|FALSE|NULL"))
