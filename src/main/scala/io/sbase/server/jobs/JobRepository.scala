@@ -100,7 +100,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
  }
 
- def status(id:UUID):Option[(String,Int,Option[String])] = {
+ def status(id:UUID):Option[(String,Int,Option[String],Option[String])] = {
   val c=dataSource.getConnection
   try {
    val p=c.prepareStatement("SELECT status,attempt,error_message,result::text FROM job_execution WHERE id=?")
