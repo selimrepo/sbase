@@ -14,6 +14,7 @@ import io.sbase.server.engines.{OperatorRegistry,FederatedQueryPlanner,CalciteSq
 import io.sbase.server.catalog.CatalogService
 import io.sbase.server.automl.AutoMlLifecycleService
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.core.type.TypeReference
 import scala.concurrent.{ExecutionContext,Future}
 import scala.util.{Failure,Success}
 import java.util.UUID
@@ -161,8 +162,8 @@ object Main {
       }} ~
       post{entity(as[JsObject]){request=>
        val rows=mapper.readValue(request.fields.getOrElse("rows",JsArray()).compactPrint,
-         mapper.getTypeFactory.constructCollectionType(classOf[java.util.List[_]],classOf[java.util.Map[_,_]]))
-       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.predict(modelId,rows.asInstanceOf[java.util.List[java.util.Map[String,Object]]].asScala.toList.asJava)).parseJson))){
+         new TypeReference[java.util.List[java.util.Map[String,Object]]]() {})
+       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.predict(modelId,rows)).parseJson))){
         case Success(value)=>complete(value)
         case Failure(error)=>system.log.error("Model prediction failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("prediction failed"))))
        }
