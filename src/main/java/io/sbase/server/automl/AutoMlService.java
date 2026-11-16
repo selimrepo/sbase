@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.spark.ml.*;
 import org.apache.spark.ml.classification.*;
 import org.apache.spark.ml.evaluation.*;
-import org.apache.spark.ml.feature.VectorAssembler;
+import org.apache.spark.ml.feature.*;
 import org.apache.spark.ml.regression.*;
 import org.apache.spark.ml.tuning.CrossValidator;
 import org.apache.spark.ml.tuning.CrossValidatorModel;
@@ -25,8 +25,8 @@ public final class AutoMlService {
         String task=String.valueOf(request.getOrDefault("task","classification")).toLowerCase(Locale.ROOT);
         String label=String.valueOf(request.getOrDefault("label","label"));
         List<String> features=((List<?>)request.getOrDefault("features",List.of())).stream().map(String::valueOf).toList();
-        List<?> input=(List<?>)request.getOrDefault("data",List.of());
-        if(!Set.of("classification","regression").contains(task))throw new IllegalArgumentException("task must be classification or regression");
+        List<?> input=(List<?>)request.getOrDefault("data",List.of());\n        boolean timeSeries=task.equals("time_series");\n        List<String> droppedFeatures=new ArrayList<>();\n        if(timeSeries){\n            String timeColumn=String.valueOf(request.getOrDefault("timeColumn",""));\n            int lags=Math.max(1,Math.min(24,((Number)request.getOrDefault("lags",3)).intValue()));\n            if(timeColumn.isBlank()||input.isEmpty())throw new IllegalArgumentException("time_series requires timeColumn and data");\n            List<Map<String,Object>> ordered=new ArrayList<>();\n            for(Object row:input){if(!(row instanceof Map<?,?> map)||!map.containsKey(timeColumn)||!(map.get(label) instanceof Number))throw new IllegalArgumentException("time_series rows require timeColumn and numeric label"); Map<String,Object> copy=new LinkedHashMap<>();map.forEach((k,v)->copy.put(String.valueOf(k),v));ordered.add(copy);}\n            ordered.sort(Comparator.comparing(row->String.valueOf(row.get(timeColumn))));\n            List<Map<String,Object>> lagged=new ArrayList<>();\n            List<String> expanded=new ArrayList<>(features);\n            for(int i=lags;i<ordered.size();i++){Map<String,Object> row=new LinkedHashMap<>(ordered.get(i));for(int lag=1;lag<=lags;lag++){String column=label+"__lag_"+lag;row.put(column,((Number)ordered.get(i-lag).get(label)).doubleValue());if(!expanded.contains(column))expanded.add(column);}lagged.add(row);}\n            features=expanded; input=lagged;\n        }
+        if(!Set.of("classification","regression","time_series").contains(task))throw new IllegalArgumentException("task must be classification, regression or time_series");
         if(features.isEmpty()||input.size()<50)throw new IllegalArgumentException("AutoML requires features and at least 50 rows");
         if(input.size()>100000)throw new IllegalArgumentException("AutoML inline data limit is 100000 rows");
         if(new HashSet<>(features).size()!=features.size()||features.contains(label))throw new IllegalArgumentException("Feature columns must be unique and cannot include label");
@@ -63,7 +63,7 @@ public final class AutoMlService {
         for(PipelineStage estimator:candidates.stream().limit(max).toList()){
             String algorithm=estimator.getClass().getSimpleName();long started=System.nanoTime();
             try{
-                Pipeline pipeline=new Pipeline().setStages(new PipelineStage[]{assembler,estimator});
+                List<PipelineStage> stages=new ArrayList<>(preprocessing);stages.add(estimator);\n                Pipeline pipeline=new Pipeline().setStages(stages.toArray(PipelineStage[]::new));
                 int folds=Math.max(2,Math.min(5,((Number)request.getOrDefault("cvFolds",3)).intValue()));
                 CrossValidator validator=new CrossValidator().setEstimator(pipeline)
                         .setEvaluator(classification
@@ -96,7 +96,7 @@ public final class AutoMlService {
         Map<String,Object> result=new LinkedHashMap<>();
         result.put("status","SUCCEEDED");result.put("task",task);result.put("algorithm",bestAlgorithm);
         result.put("metric",metric);result.put("score",bestScore);result.put("trainingRows",train.count());
-        result.put("validationRows",validation.count());result.put("features",features);result.put("trials",trials);
+        result.put("validationRows",validation.count());result.put("features",features);result.put("droppedConstantFeatures",droppedFeatures);result.put("categoricalEncoding","StringIndexer + OneHotEncoder");result.put("featureSelection","constant/near-constant column removal");result.put("timeSeriesLagFeatures",timeSeries);result.put("trials",trials);
         result.put("modelFormat","Spark PipelineModel");if(modelUri!=null)result.put("modelUri",modelUri);
         return result;
     }
