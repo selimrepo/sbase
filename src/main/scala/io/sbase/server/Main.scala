@@ -49,7 +49,11 @@ object Main {
    path("health"){get{complete(Health("UP","sbase-server"))}} ~
    pathPrefix("api"/"v1"){
     pathEndOrSingleSlash{get{complete(ApiInfo(ApiInfoName(),"0.2.0-SNAPSHOT","WORKFLOW_ENGINE"))}} ~
-    path("ready"){get{onComplete(Future(scala.concurrent.blocking(repository.isHealthy))){\n      case Success(true)=>complete(Health("UP","postgres-and-pekko-sharding"))\n      case Success(false)=>complete(StatusCodes.ServiceUnavailable->Health("NOT_READY","postgres"))\n      case Failure(error)=>system.log.error("Readiness check failed",error);complete(StatusCodes.ServiceUnavailable->Health("NOT_READY","postgres"))\n     }}} ~
+    path("ready"){get{onComplete(Future(scala.concurrent.blocking(repository.isHealthy))){
+      case Success(true)=>complete(Health("UP","postgres-and-pekko-sharding"))
+      case Success(false)=>complete(StatusCodes.ServiceUnavailable->Health("NOT_READY","postgres"))
+      case Failure(error)=>system.log.error("Readiness check failed",error);complete(StatusCodes.ServiceUnavailable->Health("NOT_READY","postgres"))
+     }}} ~
     path("workflows"){
      post{
       entity(as[WorkflowCreate]){request=>
