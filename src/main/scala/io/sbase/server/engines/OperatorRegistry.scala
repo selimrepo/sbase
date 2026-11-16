@@ -68,7 +68,7 @@ final class OperatorRegistry {
      val payload=JsObject(
       "entryClass"->config.fields.getOrElse("entryClass",JsString("")),
       "parallelism"->config.fields.getOrElse("parallelism",JsNumber(1)),
-      "programArgs"->config.fields.getOrElse("programArgs",JsString(""))
+      "programArgsList"->config.fields.getOrElse("programArgs",JsString(""))
      ).compactPrint
      val request=HttpRequest.newBuilder(URI.create(base.stripSuffix("/")+"/jars/"+jarId+"/run"))
       .timeout(Duration.ofSeconds(30)).header("Content-Type","application/json")
