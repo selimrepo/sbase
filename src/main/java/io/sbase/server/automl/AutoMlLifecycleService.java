@@ -80,6 +80,7 @@ public final class AutoMlLifecycleService {
     public Map<String,Object> predict(UUID modelId,List<Map<String,Object>> rows)throws Exception{
         if(rows==null||rows.isEmpty()||rows.size()>50000)throw new IllegalArgumentException("Prediction requires 1..50000 rows");
         Map<String,Object> metadata=model(modelId);
+        if(!"READY".equals(metadata.get("status")))throw new IllegalStateException("Only READY models can serve predictions");
         String path=String.valueOf(metadata.get("modelUri"));
         Path resolved=Path.of(path).toAbsolutePath().normalize();
         if(!resolved.startsWith(registryRoot)||!Files.exists(resolved))throw new IllegalStateException("Model artifact is missing or outside registry root");
