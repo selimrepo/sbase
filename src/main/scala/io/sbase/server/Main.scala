@@ -32,14 +32,14 @@ object Main {
   val bindHost=sys.env.getOrElse("SBASE_CLUSTER_BIND_HOST",clusterHost)
   val bindPort=sys.env.get("SBASE_CLUSTER_BIND_PORT").flatMap(_.toIntOption).getOrElse(clusterPort)
   val seedNodes=sys.env.get("SBASE_CLUSTER_SEEDS")
-    .map(_.split(",").map(_.trim).filter(_.nonEmpty).map(s=>"\\""+s+"\\"").mkString(","))
-    .getOrElse("\\"pekko://sbase@127.0.0.1:25520\\"")
+    .map(_.split(",").map(_.trim).filter(_.nonEmpty).map(s => "\"" + s + "\"").mkString(","))
+    .getOrElse("\"pekko://sbase@127.0.0.1:25520\"")
   val clusterConfigText =
-    "pekko.remote.artery.canonical.hostname=\\""+clusterHost+"\\"\n"+
-    "pekko.remote.artery.canonical.port="+clusterPort+"\n"+
-    "pekko.remote.artery.bind.hostname=\\""+bindHost+"\\"\n"+
-    "pekko.remote.artery.bind.port="+bindPort+"\n"+
-    "pekko.cluster.seed-nodes=["+seedNodes+"]\n"
+    "pekko.remote.artery.canonical.hostname=\"" + clusterHost + "\"\n" +
+    "pekko.remote.artery.canonical.port=" + clusterPort + "\n" +
+    "pekko.remote.artery.bind.hostname=\"" + bindHost + "\"\n" +
+    "pekko.remote.artery.bind.port=" + bindPort + "\n" +
+    "pekko.cluster.seed-nodes=[" + seedNodes + "]\n"
   val clusterConfig=ConfigFactory.parseString(clusterConfigText).withFallback(ConfigFactory.load())
   implicit val system:ActorSystem[Nothing]=ActorSystem(Behaviors.empty,"sbase",clusterConfig)
   implicit val ec:ExecutionContext=system.executionContext
