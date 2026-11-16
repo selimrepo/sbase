@@ -7,6 +7,8 @@ RUN gradle --no-daemon clean installDist
 FROM eclipse-temurin:17-jre
 WORKDIR /opt/sbase
 COPY --from=build /workspace/build/install/sbase-server/ ./
-EXPOSE 8080
+RUN mkdir -p /var/lib/sbase/models /var/lib/sbase/spark-tmp \
+    && chown -R 10001:10001 /var/lib/sbase
+EXPOSE 8080 25520
 USER 10001
 ENTRYPOINT ["bin/sbase-server"]
