@@ -188,20 +188,18 @@ Example:
 }
 ```
 
-This API returns an optimization proposal, not an executed federated SQL result. The
-current version does not yet perform adaptive runtime re-optimization, cross-source
-join execution, or Calcite JDBC/Cassandra/Solr adapter pushdown. Those require a
-runtime exchange layer and persistent statistics collection; the planner does not
-pretend that a generated plan is already executable.
+The plan endpoint is advisory. For actual cross-source joins, use the executable
+`/api/v1/query/execute` endpoint described below.
 
 ### AutoML
 
 `POST /api/v1/automl/train` accepts `task` (`classification` or `regression`),
-`label`, numeric `features`, inline `data` rows and optional `maxCandidates`
-(up to 3). It evaluates Spark ML Logistic Regression, Random Forest and Decision Tree
-candidates for classification, or Linear Regression, Random Forest and Decision Tree
-for regression, using a deterministic 80/20 holdout split. The response contains
-per-candidate metrics and the best candidate.
+`label`, numeric `features`, inline `data` rows and optional `maxCandidates`,
+`cvFolds` (2–5) and `cvParallelism`. It compares Logistic Regression, Random Forest
+and Decision Tree for classification, or Linear Regression, Random Forest and Decision
+Tree for regression. Each candidate receives a bounded Spark ML cross-validation and
+hyperparameter grid search; a deterministic 80/20 holdout split is used for final
+candidate selection.
 
 Training now runs a bounded cross-validation and hyperparameter grid for each selected
 Spark ML algorithm, scores candidates on a held-out validation split, persists the winning
@@ -223,6 +221,33 @@ broadcast/shuffle strategies and distribute joins to the configured Spark cluste
 This is an executable cross-source join path, not only a plan proposal. Connector
 pushdown is controlled by each source scan query supplied in the request; automatic
 SQL-to-CQL/Solr predicate decomposition and streaming spill-to-disk are not yet included.
+
+Example request:
+
+```json
+{
+  "sql": "SELECT c.customer_id, c.name, SUM(o.amount) AS revenue FROM customers c JOIN orders o ON c.customer_id = o.customer_id GROUP BY c.customer_id, c.name ORDER BY revenue DESC",
+  "limit": 1000,
+  "sources": {
+    "customers": {
+      "type": "postgresql",
+      "query": "SELECT customer_id, name FROM customer",
+      "parameters": [],
+      "limit": 1000
+    },
+    "orders": {
+      "type": "cassandra",
+      "query": "SELECT customer_id, amount FROM orders",
+      "limit": 5000
+    }
+  }
+}
+```
+
+For distributed execution, configure `SPARK_MASTER` to a reachable Spark master
+(e.g. `spark://spark-master:7077`) and enable the matching Compose profile. With
+`local[*]`, the same execution path runs on the server's local Spark workers.
+
 
 ## Durable execution design
 
