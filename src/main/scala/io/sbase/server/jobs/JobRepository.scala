@@ -17,7 +17,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
     | SELECT id FROM job_execution
     | WHERE ((status IN ('QUEUED','RETRY_WAIT') AND next_run_at<=now())
     | OR (status='RUNNING' AND lease_expires_at<now()))
-    | ORDER BY submitted_at FOR UPDATE SKIP LOCKED LIMIT ?
+    | ORDER BY submitted_at LIMIT ? FOR UPDATE SKIP LOCKED
     |) UPDATE job_execution j SET status='RUNNING',lease_owner=gen_random_uuid(),
     | lease_expires_at=now()+(? * interval '1 second'),heartbeat_at=now(),
     | started_at=COALESCE(started_at,now()),attempt=j.attempt+1,updated_at=now()
@@ -66,20 +66,27 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
  }
 
  def submit(workflowId:UUID,idempotencyKey:String,maxAttempts:Int):UUID = {
+  require(idempotencyKey!=null && idempotencyKey.nonEmpty && idempotencyKey.length<=200,"Invalid idempotency key")
   val c=dataSource.getConnection
   try {
    c.setAutoCommit(false)
-   val find=c.prepareStatement("SELECT id FROM job_execution WHERE idempotency_key=?")
-   find.setString(1,idempotencyKey);val existing=find.executeQuery()
-   if(existing.next()){val id=existing.getObject(1,classOf[UUID]);c.commit();id}
-   else {
-    val p=c.prepareStatement("INSERT INTO job_execution(id,workflow_id,workflow_version,status,idempotency_key,correlation_id,max_attempts) SELECT ?,id,active_version,'QUEUED',?,?,? FROM workflow WHERE id=? AND active_version IS NOT NULL")
-    val id=UUID.randomUUID()
-    p.setObject(1,id);p.setString(2,idempotencyKey);p.setObject(3,UUID.randomUUID());p.setInt(4,math.max(1,math.min(maxAttempts,20)));p.setObject(5,workflowId)
-    val count=p.executeUpdate();p.close()
-    if(count!=1) throw new IllegalArgumentException("Workflow not found or has no active version")
-    event(c,id,"QUEUED",0,"{}");c.commit();id
+   val id=UUID.randomUUID()
+   val p=c.prepareStatement("""INSERT INTO job_execution(id,workflow_id,workflow_version,status,idempotency_key,correlation_id,max_attempts)
+    |SELECT ?,id,active_version,'QUEUED',?,?,? FROM workflow WHERE id=? AND active_version IS NOT NULL
+    |ON CONFLICT (idempotency_key) DO NOTHING RETURNING id""".stripMargin)
+   p.setObject(1,id);p.setString(2,idempotencyKey);p.setObject(3,UUID.randomUUID())
+   p.setInt(4,math.max(1,math.min(maxAttempts,20)));p.setObject(5,workflowId)
+   val rs=p.executeQuery()
+   val created=rs.next()
+   val jobId=if(created)rs.getObject(1,classOf[UUID]) else {
+    val find=c.prepareStatement("SELECT id FROM job_execution WHERE idempotency_key=?")
+    find.setString(1,idempotencyKey);val existing=find.executeQuery()
+    if(!existing.next()) throw new IllegalStateException("Unable to resolve idempotent job submission")
+    val existingId=existing.getObject(1,classOf[UUID]);existing.close();find.close();existingId
    }
+   rs.close();p.close()
+   if(created) event(c,jobId,"QUEUED",0,"{}")
+   c.commit();jobId
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
  }
 
