@@ -42,11 +42,17 @@ class JobRepositoryPostgresTest {
             "{\"nodes\":[{\"id\":\"sum\",\"operator\":\"mahout-vector-sum\",\"config\":{\"values\":[1,2]}}]}");
         UUID jobId = repository.submit(workflow._2(), "recovery-" + UUID.randomUUID(), 3);
         var firstClaim = repository.claim(100);
-        JobLease first = null;\n        var firstIterator = firstClaim.iterator();\n        while (firstIterator.hasNext()) { var candidate = firstIterator.next(); if (candidate.id().equals(jobId)) first = candidate; }\n        assertNotNull(first);
+        JobLease first = null;
+        var firstIterator = firstClaim.iterator();
+        while (firstIterator.hasNext()) { var candidate = firstIterator.next(); if (candidate.id().equals(jobId)) first = candidate; }
+        assertNotNull(first);
 
         Thread.sleep(1300);
         var secondClaim = repository.claim(100);
-        JobLease second = null;\n        var secondIterator = secondClaim.iterator();\n        while (secondIterator.hasNext()) { var candidate = secondIterator.next(); if (candidate.id().equals(jobId)) second = candidate; }\n        assertNotNull(second);
+        JobLease second = null;
+        var secondIterator = secondClaim.iterator();
+        while (secondIterator.hasNext()) { var candidate = secondIterator.next(); if (candidate.id().equals(jobId)) second = candidate; }
+        assertNotNull(second);
 
         assertNotEquals(first.leaseOwner(), second.leaseOwner(), "lease fencing token must rotate");
         assertFalse(repository.complete(first, "{}"), "expired worker must not commit stale output");
