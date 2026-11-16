@@ -5,26 +5,19 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.PostgreSQLContainer;
 import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class JobRepositoryPostgresTest {
-    static final PostgreSQLContainer<?> POSTGRES =
-        new PostgreSQLContainer<>("postgres:17")
-            .withDatabaseName("sbase")
-            .withUsername("sbase")
-            .withPassword("sbase-test");
     static HikariDataSource dataSource;
     static JobRepository repository;
 
     @BeforeAll
     static void startDatabase() {
-        POSTGRES.start();
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(POSTGRES.getJdbcUrl());
-        config.setUsername(POSTGRES.getUsername());
-        config.setPassword(POSTGRES.getPassword());
+        config.setJdbcUrl(System.getenv().getOrDefault("SBASE_TEST_POSTGRES_URL", "jdbc:postgresql://localhost:5432/sbase"));
+        config.setUsername(System.getenv().getOrDefault("SBASE_TEST_POSTGRES_USER", "sbase"));
+        config.setPassword(System.getenv().getOrDefault("SBASE_TEST_POSTGRES_PASSWORD", "sbase-test"));
         dataSource = new HikariDataSource(config);
         repository = new JobRepository(dataSource, 1);
         repository.migrate();
@@ -33,7 +26,6 @@ class JobRepositoryPostgresTest {
     @AfterAll
     static void stopDatabase() {
         if (dataSource != null) dataSource.close();
-        POSTGRES.stop();
     }
 
     @Test
