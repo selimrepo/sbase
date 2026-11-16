@@ -9,7 +9,7 @@ import scala.collection.mutable.ArrayBuffer
 final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
  def migrate(): Unit = Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate()
 
- def claim(owner: UUID, limit: Int): Seq[JobLease] = {
+ def claim(limit: Int): Seq[JobLease] = {
   val c=dataSource.getConnection
   try {
    c.setAutoCommit(false)
@@ -18,23 +18,79 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
     | WHERE ((status IN ('QUEUED','RETRY_WAIT') AND next_run_at<=now())
     | OR (status='RUNNING' AND lease_expires_at<now()))
     | ORDER BY submitted_at FOR UPDATE SKIP LOCKED LIMIT ?
-    |) UPDATE job_execution j SET status='RUNNING',lease_owner=?,
+    |) UPDATE job_execution j SET status='RUNNING',lease_owner=gen_random_uuid(),
     | lease_expires_at=now()+(? * interval '1 second'),heartbeat_at=now(),
     | started_at=COALESCE(started_at,now()),attempt=j.attempt+1,updated_at=now()
     | FROM candidates x WHERE j.id=x.id
-    | RETURNING j.id,j.attempt,j.max_attempts,
+    | RETURNING j.id,j.lease_owner,j.attempt,j.max_attempts,
     | (SELECT v.definition::text FROM workflow_version v
     | WHERE v.workflow_id=j.workflow_id AND v.version=j.workflow_version) AS definition
     |""".stripMargin
-   val p=c.prepareStatement(sql); p.setInt(1,math.max(1,limit)); p.setObject(2,owner); p.setInt(3,leaseSeconds)
+   val p=c.prepareStatement(sql); p.setInt(1,math.max(1,limit)); p.setInt(2,leaseSeconds)
    val rs=p.executeQuery(); val result=ArrayBuffer.empty[JobLease]
    while(rs.next()) {
     val id=rs.getObject("id",classOf[UUID]); val attempt=rs.getInt("attempt")
-    result += JobLease(id,owner,attempt,rs.getInt("max_attempts"),rs.getString("definition"))
+    result += JobLease(id,rs.getObject("lease_owner",classOf[UUID]),attempt,rs.getInt("max_attempts"),rs.getString("definition"))
     event(c,id,"LEASE_ACQUIRED",attempt,"{}")
    }
    rs.close(); p.close(); c.commit(); result.toSeq
   } catch { case e:Throwable => c.rollback(); throw e } finally c.close()
+ }
+
+ def heartbeat(lease:JobLease):Boolean = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("UPDATE job_execution SET heartbeat_at=now(),lease_expires_at=now()+(? * interval '1 second'),updated_at=now() WHERE id=? AND status='RUNNING' AND lease_owner=?")
+   p.setInt(1,leaseSeconds);p.setObject(2,lease.id);p.setObject(3,lease.leaseOwner)
+   val n=p.executeUpdate();p.close();n==1
+  } finally c.close()
+ }
+
+ def createWorkflow(name:String,definition:String):(UUID,UUID) = {
+  val c=dataSource.getConnection
+  val workspaceId=UUID.randomUUID(); val workflowId=UUID.randomUUID()
+  try {
+   c.setAutoCommit(false)
+   val w=c.prepareStatement("INSERT INTO workspace(id,name) VALUES (?,?)")
+   w.setObject(1,workspaceId);w.setString(2,"Default workspace");w.executeUpdate();w.close()
+   val wf=c.prepareStatement("INSERT INTO workflow(id,workspace_id,name) VALUES (?,?,?)")
+   wf.setObject(1,workflowId);wf.setObject(2,workspaceId);wf.setString(3,name);wf.executeUpdate();wf.close()
+   val version=c.prepareStatement("INSERT INTO workflow_version(workflow_id,version,definition,checksum) VALUES (?,1,?::jsonb,?)")
+   version.setObject(1,workflowId);version.setString(2,definition)
+   version.setString(3,java.security.MessageDigest.getInstance("SHA-256").digest(definition.getBytes("UTF-8")).map(b=>f"${b & 0xff}%02x").mkString)
+   version.executeUpdate();version.close()
+   val activate=c.prepareStatement("UPDATE workflow SET active_version=1 WHERE id=?")
+   activate.setObject(1,workflowId);activate.executeUpdate();activate.close()
+   c.commit();(workspaceId,workflowId)
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ def submit(workflowId:UUID,idempotencyKey:String,maxAttempts:Int):UUID = {
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false)
+   val find=c.prepareStatement("SELECT id FROM job_execution WHERE idempotency_key=?")
+   find.setString(1,idempotencyKey);val existing=find.executeQuery()
+   if(existing.next()){val id=existing.getObject(1,classOf[UUID]);c.commit();id}
+   else {
+    val p=c.prepareStatement("INSERT INTO job_execution(id,workflow_id,workflow_version,status,idempotency_key,correlation_id,max_attempts) SELECT ?,id,active_version,'QUEUED',?,?,? FROM workflow WHERE id=? AND active_version IS NOT NULL")
+    val id=UUID.randomUUID()
+    p.setObject(1,id);p.setString(2,idempotencyKey);p.setObject(3,UUID.randomUUID());p.setInt(4,math.max(1,math.min(maxAttempts,20)));p.setObject(5,workflowId)
+    val count=p.executeUpdate();p.close()
+    if(count!=1) throw new IllegalArgumentException("Workflow not found or has no active version")
+    event(c,id,"QUEUED",0,"{}");c.commit();id
+   }
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ def status(id:UUID):Option[(String,Int,Option[String])] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("SELECT status,attempt,error_message FROM job_execution WHERE id=?")
+   p.setObject(1,id);val rs=p.executeQuery()
+   val result=if(rs.next())Some((rs.getString(1),rs.getInt(2),Option(rs.getString(3))))else None
+   rs.close();p.close();result
+  } finally c.close()
  }
 
  def complete(lease:JobLease,result:String):Boolean = {
