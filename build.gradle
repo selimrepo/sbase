@@ -34,9 +34,9 @@ dependencies {
 
     compileOnly "org.apache.spark:spark-sql_${scalaBinaryVersion}:${sparkVersion}"
     compileOnly "org.apache.spark:spark-mllib_${scalaBinaryVersion}:${sparkVersion}"
-    implementation "org.apache.mahout:mahout-math:14.1"
+    implementation "org.apache.mahout:mahout-math:0.13.0"
     compileOnly "org.apache.flink:flink-streaming-java:${flinkVersion}"
-    implementation "com.datastax.oss:java-driver-core:4.18.1"
+    implementation "com.datastax.oss:java-driver-core:4.17.0"
     implementation "org.apache.solr:solr-solrj:9.8.1"
     compileOnly "org.apache.geode:geode-core:1.15.2"
 
