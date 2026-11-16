@@ -26,7 +26,7 @@ public final class AutoMlLifecycleService {
         String label=String.valueOf(request.getOrDefault("label","label"));
         List<?> features=(List<?>)request.getOrDefault("features",List.of());
         if(name.length()>200)throw new IllegalArgumentException("Experiment name is limited to 200 characters");
-        if(!Set.of("CLASSIFICATION","REGRESSION").contains(task))throw new IllegalArgumentException("Unsupported AutoML task");
+        if(!Set.of("CLASSIFICATION","REGRESSION","TIME_SERIES").contains(task))throw new IllegalArgumentException("Unsupported AutoML task");
         String modelPath=registryRoot.resolve(experimentId.toString()).toString();
         insertExperiment(experimentId,name,task,label,JSON.writeValueAsString(features));
         updateStatus(experimentId,"RUNNING",null,null,null,null);
