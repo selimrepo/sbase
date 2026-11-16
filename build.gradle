@@ -45,8 +45,6 @@ dependencies {
     implementation "ch.qos.logback:logback-classic:1.5.18"
     testImplementation "org.junit.jupiter:junit-jupiter:5.12.2"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
-    testImplementation "org.testcontainers:junit-jupiter:1.21.3"
-    testImplementation "org.testcontainers:postgresql:1.21.3"
     testImplementation "org.apache.pekko:pekko-actor-testkit-typed_${scalaBinaryVersion}:${pekkoVersion}"
     testImplementation "org.apache.pekko:pekko-http-testkit_${scalaBinaryVersion}:${pekkoHttpVersion}"
 }
