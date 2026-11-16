@@ -69,6 +69,26 @@ class JobRepositoryPostgresTest {
     }
 
     @Test
+    void workflowVersionsCanBeCreatedAndActivated() {
+        var workflow = repository.createWorkflow("version-test", "{\"nodes\":[]}");
+        int second = repository.createWorkflowVersion(workflow._2(), "{\"nodes\":[]}", true);
+        assertEquals(2, second);
+        assertTrue(repository.activateWorkflowVersion(workflow._2(), 1));
+        assertEquals(2, repository.workflowVersions(workflow._2()).size());
+        assertFalse(repository.activateWorkflowVersion(workflow._2(), 99));
+    }
+
+    @Test
+    void dueScheduleCreatesDurableJobAndCanBePaused() {
+        var workflow = repository.createWorkflow("schedule-test", "{\"nodes\":[]}");
+        UUID scheduleId = repository.createSchedule(workflow._2(), 10, 2);
+        assertEquals(1, repository.dispatchDueSchedules(10));
+        assertEquals(1, repository.schedules(scala.Option.apply(workflow._2())).size());
+        assertTrue(repository.setScheduleEnabled(scheduleId, false));
+        assertFalse(repository.setScheduleEnabled(UUID.randomUUID(), false));
+    }
+
+    @Test
     void idempotencyKeyReturnsSameJob() {
         var workflow = repository.createWorkflow("idempotency-test", "{\"nodes\":[]}");
         String key = "same-key-" + UUID.randomUUID();
