@@ -20,7 +20,7 @@ public final class AutoMlService {
     private final SparkSession spark;
     public AutoMlService(SparkSession spark) { this.spark = Objects.requireNonNull(spark); }
 
-    public Map<String,Object> train(Map<String,Object> request) {
+    public Map<String,Object> train(Map<String,Object> request) { return train(request, null); }\n\n    public Map<String,Object> train(Map<String,Object> request, String modelPath) {
         String task=String.valueOf(request.getOrDefault("task","classification")).toLowerCase(Locale.ROOT);
         String label=String.valueOf(request.getOrDefault("label","label"));
         List<String> features=((List<?>)request.getOrDefault("features",List.of())).stream().map(String::valueOf).toList();
