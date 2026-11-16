@@ -18,7 +18,8 @@ final class OperatorRegistry {
  private val calcite=new CalciteSqlEngine()
  private val http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
 
- def sparkSession:SparkSession = spark\n def availableOperators:Vector[String] = supported.toVector.sorted
+ def sparkSession:SparkSession = spark
+ def availableOperators:Vector[String] = supported.toVector.sorted
  def validate(definition:String):Unit = orderedNodes(definition)
 
  private def orderedNodes(definition:String):Vector[JsValue] = {
