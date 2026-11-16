@@ -14,7 +14,7 @@ public final class FederatedPredicatePushdown {
 
     public static Optional<String> translate(String sql, String source, String table, int limit) {
         try {
-            SqlNode node = SqlParser.create(sql).parseQuery();
+            SqlNode node = SqlParser.create(sql, SqlParser.config().withCaseSensitive(false)).parseQuery();
             if (!(node instanceof SqlSelect select)) return Optional.empty();
             String where = select.getWhere() == null ? null : predicate(select.getWhere(), source);
             String dialect = source.toLowerCase(Locale.ROOT);
