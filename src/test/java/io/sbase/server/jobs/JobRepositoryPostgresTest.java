@@ -41,12 +41,12 @@ class JobRepositoryPostgresTest {
         var workflow = repository.createWorkflow("recovery-test",
             "{\"nodes\":[{\"id\":\"sum\",\"operator\":\"mahout-vector-sum\",\"config\":{\"values\":[1,2]}}]}");
         UUID jobId = repository.submit(workflow._2(), "recovery-" + UUID.randomUUID(), 3);
-        var firstClaim = repository.claim(1);
-        var first = firstClaim.stream().filter(job -> job.id().equals(jobId)).findFirst().orElseThrow();
+        var firstClaim = repository.claim(100);
+        JobLease first = null;\n        var firstIterator = firstClaim.iterator();\n        while (firstIterator.hasNext()) { var candidate = firstIterator.next(); if (candidate.id().equals(jobId)) first = candidate; }\n        assertNotNull(first);
 
         Thread.sleep(1300);
-        var secondClaim = repository.claim(1);
-        var second = secondClaim.stream().filter(job -> job.id().equals(jobId)).findFirst().orElseThrow();
+        var secondClaim = repository.claim(100);
+        JobLease second = null;\n        var secondIterator = secondClaim.iterator();\n        while (secondIterator.hasNext()) { var candidate = secondIterator.next(); if (candidate.id().equals(jobId)) second = candidate; }\n        assertNotNull(second);
 
         assertNotEquals(first.leaseOwner(), second.leaseOwner(), "lease fencing token must rotate");
         assertFalse(repository.complete(first, "{}"), "expired worker must not commit stale output");
