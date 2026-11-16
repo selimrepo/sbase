@@ -3,6 +3,10 @@ package io.sbase.server.catalog;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.CqlSessionBuilder;
 import com.datastax.oss.driver.api.core.cql.Row;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.client.solrj.request.QueryRequest;
@@ -66,11 +70,10 @@ public final class CatalogService implements AutoCloseable {
 
     /** Executes a bounded, read-only PostgreSQL SELECT with JDBC bind parameters. */
     public Map<String,Object> queryPostgres(String sql, List<Object> parameters, int limit) throws SQLException {
-        String normalized = sql == null ? "" : sql.stripLeading().toLowerCase(Locale.ROOT);
-        if (!normalized.startsWith("select ") && !normalized.startsWith("with "))
+        if(sql==null||sql.isBlank())throw new IllegalArgumentException("SQL query is required");
+        SqlNode parsed=SqlParser.create(sql).parseQuery();
+        if(parsed.getKind()!=SqlKind.SELECT&&parsed.getKind()!=SqlKind.WITH)
             throw new IllegalArgumentException("Only read-only SELECT queries are allowed");
-        if (sql.contains(";") || sql.contains("--") || sql.contains("/*"))
-            throw new IllegalArgumentException("Multiple statements and SQL comments are not allowed");
         int bounded = Math.max(1, Math.min(limit, 5000));
         try (Connection c = DriverManager.getConnection(pgUrl, pgUser, pgPassword)) {
             c.setReadOnly(true);
@@ -92,16 +95,19 @@ public final class CatalogService implements AutoCloseable {
     }
 
     public Map<String,Object> queryCassandra(String cql, int limit) {
-        String normalized=cql==null?"":cql.stripLeading().toLowerCase(Locale.ROOT);
-        if(!normalized.startsWith("select ")) throw new IllegalArgumentException("Only Cassandra SELECT is allowed");
-        if(cql.contains(";") || cql.contains("--")) throw new IllegalArgumentException("Only one CQL statement is allowed");
+        if(cql==null||!cql.stripLeading().toLowerCase(Locale.ROOT).startsWith("select "))
+            throw new IllegalArgumentException("Only Cassandra SELECT is allowed");
+        if(cql.contains(";")||cql.contains("--"))throw new IllegalArgumentException("Only one CQL statement is allowed");
         int bounded=Math.max(1,Math.min(limit,2000));
         List<Map<String,Object>> rows=new ArrayList<>();
-        for(Row row:cassandra().execute(cql).all().stream().limit(bounded).toList()) {
-            Map<String,Object> values=new LinkedHashMap<>();
-            row.getColumnDefinitions().forEach(def -> {
+        var statement=SimpleStatement.builder(cql).setPageSize(bounded).build();
+        var iterator=cassandra().execute(statement).iterator();
+        while(iterator.hasNext()&&rows.size()<bounded){
+            Row row=iterator.next();Map<String,Object> values=new LinkedHashMap<>();
+            row.getColumnDefinitions().forEach(def->{
                 Object value=row.getObject(def.getName());
-                if(value!=null) values.put(def.getName().asInternal(), value.toString());
+                if(value!=null)values.put(def.getName().asInternal(),
+                        value instanceof Number||value instanceof Boolean?value:value.toString());
             });
             rows.add(values);
         }
