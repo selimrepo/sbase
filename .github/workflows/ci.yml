@@ -50,3 +50,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build server image
         run: docker build -t sbase-server:ci .
+      - name: Build Workflow Studio image
+        run: docker build -t sbase-studio:ci ./web
