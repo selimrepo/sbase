@@ -12,7 +12,7 @@ import com.typesafe.config.ConfigFactory
 import io.sbase.server.jobs.{JobDispatcher,JobRepository,WorkerSharding}
 import io.sbase.server.engines.{OperatorRegistry,FederatedQueryPlanner,CalciteSqlEngine,FederatedQueryExecutor}
 import io.sbase.server.catalog.CatalogService
-import io.sbase.server.automl.AutoMlLifecycleService
+import io.sbase.server.automl.{AutoMlLifecycleService,AutoMlJobQueue}
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.core.type.TypeReference
 import scala.concurrent.{ExecutionContext,Future}
@@ -68,7 +68,7 @@ object Main {
   val catalogs=new CatalogService()
   val mapper=new ObjectMapper()
   val federated=new FederatedQueryExecutor(catalogs,operators.sparkSession,sys.env.get("SBASE_FEDERATED_SCAN_PARALLELISM").flatMap(_.toIntOption).getOrElse(8))
-  val autoMl=new AutoMlLifecycleService(operators.sparkSession)
+  val autoMl=new AutoMlLifecycleService(operators.sparkSession)\n  val autoMlJobs=new AutoMlJobQueue(autoMl,operators.sparkSession,sys.env.get("SBASE_AUTOML_WORKERS").flatMap(_.toIntOption).getOrElse(2),sys.env.get("SBASE_AUTOML_QUEUE_CAPACITY").flatMap(_.toIntOption).getOrElse(16))
   val workerRegion=WorkerSharding.start(system,repository,operators)
   new JobDispatcher(system,repository,workerRegion).start()
 
@@ -139,6 +139,25 @@ object Main {
        case Failure(error)=>system.log.error("Federated query execution failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query execution failed"))))
       }
     }}} ~
+    path("automl"/"jobs"){post{entity(as[JsObject]){request=>
+      try {
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       complete(StatusCodes.Accepted->mapper.writeValueAsString(autoMlJobs.submit(input)).parseJson)
+      } catch {
+       case error:IllegalStateException=>complete(StatusCodes.ServiceUnavailable->JsObject("error"->JsString(Option(error.getMessage).getOrElse("training queue unavailable"))))
+       case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid request"))))
+      }
+    }}} ~
+    path("automl"/"jobs"/JavaUUID){jobId=>
+      get{
+       try complete(mapper.writeValueAsString(autoMlJobs.status(jobId)).parseJson)
+       catch { case _:NoSuchElementException=>complete(StatusCodes.NotFound) }
+      } ~
+      post {
+       try complete(mapper.writeValueAsString(autoMlJobs.cancel(jobId)).parseJson)
+       catch { case _:NoSuchElementException=>complete(StatusCodes.NotFound) }
+      }
+    } ~
     path("automl"/"train"){post{entity(as[JsObject]){request=>
       onComplete(Future(scala.concurrent.blocking{
        val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
