@@ -30,11 +30,11 @@ final class OperatorRegistry {
   val byId=nodes.map(n=>n.asJsObject.fields("id").convertTo[String]->n).toMap
   val edges=root.fields.get("edges").map(_.convertTo[Vector[JsValue]]).getOrElse(Vector.empty)
   val outgoing=mutable.Map(ids.map(_->Vector.empty[String]):_*)
-  val degree=mutable.Map(ids.map(_->_):_*)
+  val degree=mutable.Map(ids.map(id=>id->0):_*)
   edges.foreach { edge =>
    val fields=edge.asJsObject.fields
    val source=fields("source").convertTo[String]; val target=fields("target").convertTo[String]
-   if(!byId.contains(source)||!byId.contains(target)) throw new IllegalArgumentException("Workflow edge references an unknown node")
+   if(!byId.contains(source)|| !byId.contains(target)) throw new IllegalArgumentException("Workflow edge references an unknown node")
    outgoing(source)=outgoing(source):+target
    degree(target)=degree(target)+1
   }
