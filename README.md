@@ -7,7 +7,8 @@ SBase is a KNIME-inspired distributed data science and mining server. The curren
 - Scala 2.13 + Gradle
 - Apache Pekko Typed, Cluster and Cluster Sharding
 - PostgreSQL + Flyway for OLTP, immutable workflow versions, durable jobs, leases and execution events
-- Apache Spark SQL for batch operators
+- Apache Calcite embedded SQL planner/executor for workflow-local relational queries
+- Apache Spark SQL for distributed batch operators
 - Apache Mahout math for mining operators
 - Apache Flink REST for submitting pre-uploaded JARs and inspecting running jobs
 - React + React Flow for visual workflow authoring
@@ -100,11 +101,35 @@ Available operators:
 - `mahout-vector-sum`: runs a Mahout DenseVector reduction.
 - `mahout-cosine-similarity`: calculates cosine similarity between two dense vectors.
 - `mahout-euclidean-distance`: calculates Euclidean distance between two dense vectors.
-- `spark-sql`: executes a Spark SQL statement. Set `SPARK_MASTER` to the cluster master URL for distributed execution; defaults to local mode for development.
+- `calcite-sql`: executes SQL in-process over workflow-local JSON datasets registered as temporary tables. Configure `query` and optional `tables` (an object mapping table names to arrays of row objects). Calcite plans and executes relational projections, filters, joins and aggregations.
+- `spark-sql`: executes Spark SQL for distributed batch processing. Set `SPARK_MASTER` to the cluster master URL for distributed execution; defaults to local mode for development.
 - `flink-submit`: submits a previously uploaded Flink JAR by `jarId`; optional `entryClass`, `parallelism` and `programArgs` can be supplied.
 - `flink-jobs-overview`: reads Flink's jobs overview endpoint.
 
 For Flink, set `FLINK_REST_URL` (Compose profile default is `http://flink-jobmanager:8081`). The Flink JAR upload step is an external artifact publication operation; this adapter invokes the Flink REST run endpoint.
+
+### Calcite SQL operator example
+
+A workflow node can run Calcite SQL over in-memory workflow-local tables:
+
+```json
+{
+  "id": "query",
+  "operator": "calcite-sql",
+  "config": {
+    "query": "SELECT customer, SUM(amount) AS revenue FROM orders GROUP BY customer ORDER BY revenue DESC",
+    "tables": {
+      "orders": [
+        { "customer": "Ada", "amount": 120.5 },
+        { "customer": "Linus", "amount": 90.0 },
+        { "customer": "Ada", "amount": 30.0 }
+      ]
+    }
+  }
+}
+```
+
+Calcite is embedded in the SBase process and requires no separate service. This first adapter materializes node-configured JSON tables. Persistent catalog-backed tables, JDBC pushdown, query resource limits and streaming SQL are follow-up integration work. Use Spark SQL for distributed processing; Calcite's enumerable runtime is an in-process query engine.
 
 ## Durable execution design
 
