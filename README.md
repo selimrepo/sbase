@@ -47,6 +47,27 @@ npm install
 npm run build
 ```
 
+
+### Complete Docker Compose deployment
+
+The default Compose stack starts the SBase API/worker, React Workflow Studio and PostgreSQL:
+
+```bash
+cp .env.example .env
+docker compose up --build -d
+docker compose ps
+```
+
+Open the Studio at http://localhost:3000 and the API at http://localhost:8080. Check readiness with `curl http://localhost:8080/health`. Follow logs with `docker compose logs -f app web postgres` and stop the stack with `docker compose down`.
+
+To start every bundled engine and connector (Cassandra, Solr, Spark master/worker and Flink JobManager/TaskManager) as well, use the full overlay:
+
+```docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d
+docker compose -f compose.yaml -f compose.full.yaml --profile full ps
+```
+
+The full profile configures Spark and Flink endpoints for the in-network services. First startup may take several minutes while the database and engine images initialize. Persistent database, model, connector and Spark scratch data are stored in Compose volumes or the configured model host path. The full profile is intended for local evaluation; it is not a production HA topology.
+
 ## Executable Fat JAR
 
 The Gradle Shadow plugin produces a self-contained executable archive at `build/libs/sbase-server-0.1.0-SNAPSHOT-all.jar`. It includes runtime dependencies and merges `META-INF/services` descriptors for JDBC drivers, logging providers and libraries that use Java service loading. Build it with:
