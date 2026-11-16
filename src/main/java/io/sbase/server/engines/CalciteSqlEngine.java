@@ -11,6 +11,7 @@ import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.impl.AbstractTable;
+import org.apache.calcite.schema.impl.AbstractSchema;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 import java.math.BigDecimal;
@@ -36,12 +37,14 @@ public final class CalciteSqlEngine {
             try (Connection connection = DriverManager.getConnection("jdbc:calcite:", properties)) {
                 CalciteConnection calcite = connection.unwrap(CalciteConnection.class);
                 SchemaPlus root = calcite.getRootSchema();
+                SchemaPlus workflow = root.add("WORKFLOW", new AbstractSchema());
+                calcite.setSchema("WORKFLOW");
                 for (Map.Entry<String, List<LinkedHashMap<String, Object>>> entry : input.entrySet()) {
                     validateIdentifier(entry.getKey(), "table");
                     if (entry.getValue() == null || entry.getValue().isEmpty()) {
                         throw new IllegalArgumentException("Calcite input table must contain at least one row: " + entry.getKey());
                     }
-                    root.add(entry.getKey(), new JsonRowsTable(entry.getValue()));
+                    workflow.add(entry.getKey(), new JsonRowsTable(entry.getValue()));
                 }
                 List<LinkedHashMap<String, Object>> result = new ArrayList<>();
                 try (Statement statement = connection.createStatement();
