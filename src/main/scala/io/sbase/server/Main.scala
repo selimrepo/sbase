@@ -12,7 +12,7 @@ import com.typesafe.config.ConfigFactory
 import io.sbase.server.jobs.{JobDispatcher,JobRepository,WorkerSharding}
 import io.sbase.server.engines.{OperatorRegistry,FederatedQueryPlanner,CalciteSqlEngine,FederatedQueryExecutor}
 import io.sbase.server.catalog.CatalogService
-import io.sbase.server.automl.{AutoMlLifecycleService,AutoMlJobQueue}
+import io.sbase.server.automl.{AutoMlLifecycleService,AutoMlJobQueue,AutoMlScienceService,AutoMlMonitoringService}
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.core.`type`.TypeReference
 import scala.concurrent.{ExecutionContext,Future}
@@ -70,6 +70,8 @@ object Main {
   val federated=new FederatedQueryExecutor(catalogs,operators.sparkSession,sys.env.get("SBASE_FEDERATED_SCAN_PARALLELISM").flatMap(_.toIntOption).getOrElse(8))
   val autoMl=new AutoMlLifecycleService(operators.sparkSession)
   val autoMlJobs=new AutoMlJobQueue(autoMl,operators.sparkSession,sys.env.get("SBASE_AUTOML_WORKERS").flatMap(_.toIntOption).getOrElse(2),sys.env.get("SBASE_AUTOML_QUEUE_CAPACITY").flatMap(_.toIntOption).getOrElse(16))
+  val autoMlScience=new AutoMlScienceService(operators.sparkSession)
+  val autoMlStatisticalDrift=new AutoMlMonitoringService()
   val workerRegion=WorkerSharding.start(system,repository,operators)
   new JobDispatcher(system,repository,workerRegion).start()
 
@@ -140,6 +142,38 @@ object Main {
        case Failure(error)=>system.log.error("Federated query execution failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query execution failed"))))
       }
     }}} ~
+    path("automl"/"data"/"profile"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(autoMlScience.profile(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("AutoML data profiling failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("profiling failed"))))
+      }
+    }}} ~
+    path("automl"/"monitoring"/"statistical-drift"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(autoMlStatisticalDrift.analyze(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Statistical feature drift analysis failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("drift analysis failed"))))
+      }
+    }}} ~
+    path("automl"/"monitoring"/"statistical-runs"){get{
+      parameter("limit".as[Int].withDefault(50)){limit=>
+       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMlStatisticalDrift.runs(null,limit)).parseJson))){
+        case Success(value)=>complete(value)
+        case Failure(error)=>system.log.error("Statistical drift history failed",error);complete(StatusCodes.InternalServerError)
+       }
+      }
+    }} ~
+    path("models"/JavaUUID/"statistical-drift"){modelId=>get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMlStatisticalDrift.runs(modelId,100)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Model statistical drift history failed",error);complete(StatusCodes.InternalServerError)
+      }
+    }} ~
     path("automl"/"jobs"){post{entity(as[JsObject]){request=>
       try {
        val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
