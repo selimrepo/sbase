@@ -1,5 +1,7 @@
 package io.sbase.server.catalog;
 
+import io.sbase.server.engines.CalciteSqlCompatibility;
+
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.CqlSessionBuilder;
 import com.datastax.oss.driver.api.core.cql.Row;
@@ -15,7 +17,7 @@ import org.apache.solr.client.solrj.SolrQuery;
 
 import java.net.InetSocketAddress;
 import java.sql.*;
-import java.util.*;\nimport io.sbase.server.engines.CalciteSqlCompatibility;
+import java.util.*;
 
 /** Read-only federation facade for the PostgreSQL, Cassandra and Solr catalogs. */
 public final class CatalogService implements AutoCloseable {
