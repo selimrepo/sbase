@@ -156,6 +156,8 @@ Calcite is embedded in the SBase process and requires no separate service. This 
 
 All platform capabilities are exposed under `/api/v1`:
 
+The complete route inventory, request examples, editor discovery contract and engine APIs are documented in [docs/API_REFERENCE.md](docs/API_REFERENCE.md). Clients should query the component and operator catalogs to discover available node types instead of hard-coding them.
+
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/v1/capabilities` | Discover engines and exposed API groups |

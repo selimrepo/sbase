@@ -22,6 +22,48 @@ final class OperatorRegistry {
  def availableOperators:Vector[String] = supported.toVector.sorted
  def validate(definition:String):Unit = orderedNodes(definition)
 
+ def operatorCatalog:java.util.List[java.util.Map[String,Object]] = {
+  import scala.jdk.CollectionConverters._
+  val definitions=Vector(
+   descriptor("dataset-values","data","Inline numeric dataset source","values",Seq("values"),Seq.empty,"Emits a numeric values array"),
+   descriptor("mahout-vector-sum","mining","Mahout vector reduction","sum",Seq.empty,Seq("values"),"Computes vector sum and element count"),
+   descriptor("mahout-cosine-similarity","mining","Mahout cosine similarity","cosineSimilarity",Seq("left","right"),Seq.empty,"Compares two equal-length numeric vectors"),
+   descriptor("mahout-euclidean-distance","mining","Mahout Euclidean distance","euclideanDistance",Seq("left","right"),Seq.empty,"Computes L2 distance between numeric vectors"),
+   descriptor("calcite-sql","query","Embedded Calcite SQL over workflow-local JSON tables","rows",Seq("query","tables"),Seq.empty,"Executes relational SQL against configured tables"),
+   descriptor("spark-sql","compute","Spark SQL execution","rows",Seq("query"),Seq.empty,"Executes Spark SQL using the configured Spark session"),
+   descriptor("flink-submit","streaming","Submit an uploaded Flink JAR","jobId",Seq("jarId"),Seq("entryClass","parallelism","programArgs"),"Submits a Flink application through the Flink REST API"),
+   descriptor("flink-jobs-overview","streaming","Inspect Flink jobs","jobs",Seq.empty,Seq.empty,"Returns Flink job overview")
+  )
+  definitions.map(_.asJava).asJava
+ }
+
+ def operatorDefinition(name:String):java.util.Optional[java.util.Map[String,Object]] =
+  operatorCatalog.stream().filter(value=>value.get("name")==name).findFirst()
+
+ def validateDetailed(definition:String):java.util.Map[String,Object] = {
+  import scala.jdk.CollectionConverters._
+  val root=definition.parseJson.asJsObject
+  val nodes=root.fields.getOrElse("nodes",throw new IllegalArgumentException("Workflow must contain a nodes array")).convertTo[Vector[JsValue]]
+  val edges=root.fields.get("edges").map(_.convertTo[Vector[JsValue]]).getOrElse(Vector.empty)
+  val order=orderedNodes(definition).map(_.asJsObject.fields("id").convertTo[String])
+  Map[String,Object](
+   "valid"->java.lang.Boolean.TRUE,
+   "nodeCount"->Int.box(nodes.size),
+   "edgeCount"->Int.box(edges.size),
+   "executionOrder"->order.asJava,
+   "operators"->nodes.map(_.asJsObject.fields("operator").convertTo[String]).distinct.sorted.asJava
+  ).asJava
+ }
+
+ private def descriptor(name:String,category:String,description:String,output:String,
+                        required:Seq[String],optional:Seq[String],details:String):Map[String,Object] = {
+  import scala.jdk.CollectionConverters._
+  Map[String,Object](
+   "name"->name,"category"->category,"description"->description,"output"->output,
+   "requiredConfig"->required.asJava,"optionalConfig"->optional.asJava,"details"->details
+  )
+ }
+
  private def orderedNodes(definition:String):Vector[JsValue] = {
   val root=definition.parseJson.asJsObject
   val nodes=root.fields.getOrElse("nodes",throw new IllegalArgumentException("Workflow must contain a nodes array")).convertTo[Vector[JsValue]]

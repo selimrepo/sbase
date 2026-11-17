@@ -13,6 +13,7 @@ import io.sbase.server.jobs.{JobDispatcher,JobRepository,WorkerSharding}
 import io.sbase.server.engines.{OperatorRegistry,FederatedQueryPlanner,CalciteSqlEngine,FederatedQueryExecutor}
 import io.sbase.server.catalog.CatalogService
 import io.sbase.server.automl.{AutoMlLifecycleService,AutoMlJobQueue,AutoMlScienceService,AutoMlMonitoringService}
+import io.sbase.server.runtime.PlatformRuntimeService
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.core.`type`.TypeReference
 import scala.concurrent.{ExecutionContext,Future}
@@ -72,6 +73,7 @@ object Main {
   val autoMlJobs=new AutoMlJobQueue(autoMl,operators.sparkSession,sys.env.get("SBASE_AUTOML_WORKERS").flatMap(_.toIntOption).getOrElse(2),sys.env.get("SBASE_AUTOML_QUEUE_CAPACITY").flatMap(_.toIntOption).getOrElse(16))
   val autoMlScience=new AutoMlScienceService(operators.sparkSession)
   val autoMlStatisticalDrift=new AutoMlMonitoringService()
+  val runtime=new PlatformRuntimeService(operators.sparkSession)
   val workerRegion=WorkerSharding.start(system,repository,operators)
   new JobDispatcher(system,repository,workerRegion).start()
 
@@ -88,7 +90,69 @@ object Main {
       "scientificAutoMl"->JsArray(JsString("dataset-profiling"),JsString("cross-validation"),JsString("model-cards"),JsString("fairness-diagnostics"),JsString("psi-drift"),JsString("kolmogorov-smirnov")),
       "apiVersion"->JsString("v1")
     ))}} ~
+    path("components"){get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.components()).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Component discovery failed",error);complete(StatusCodes.InternalServerError)
+      }
+    }} ~
     path("operators"){get{complete(JsArray(operators.availableOperators.map(JsString(_))))}} ~
+    path("operators"/"catalog"){get{complete(mapper.writeValueAsString(operators.operatorCatalog).parseJson)}} ~
+    path("operators"/Segment){name=>get{
+      val definition=operators.operatorDefinition(name)
+      if(definition.isPresent) complete(mapper.writeValueAsString(definition.get()).parseJson)
+      else complete(StatusCodes.NotFound->JsObject("error"->JsString("Unknown workflow operator")))
+    }} ~
+    path("engines"){get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.engines()).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Engine status inspection failed",error);complete(StatusCodes.InternalServerError)
+      }
+    }} ~
+    path("engines"/"spark"/"sql"){post{entity(as[JsObject]){request=>
+      val sql=request.fields.get("sql").map(_.convertTo[String]).getOrElse("")
+      val limit=request.fields.get("limit").map(_.convertTo[Int]).getOrElse(1000)
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.sparkSql(sql,limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Spark SQL request rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark SQL failed"))))
+      }
+    }}} ~
+    path("engines"/"flink"/Segment){resource=>get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.flinkGet(resource)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Flink resource request failed: {}",error.getMessage);complete(StatusCodes.BadGateway->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Flink unavailable"))))
+      }
+    }} ~
+    path("engines"/"flink"/"jobs"/Segment){jobId=>get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.flinkJob(jobId)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Flink job lookup failed: {}",error.getMessage);complete(StatusCodes.BadGateway->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Flink job lookup failed"))))
+      }
+    }} ~
+    path("engines"/"flink"/"jars"/Segment/"run"){jarId=>post{entity(as[JsObject]){request=>
+      val config=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.flinkSubmit(jarId,config)).parseJson))){
+       case Success(value)=>complete(StatusCodes.Accepted->value)
+       case Failure(error)=>system.log.warn("Flink JAR submission failed: {}",error.getMessage);complete(StatusCodes.BadGateway->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Flink submission failed"))))
+      }
+    }}} ~
+    path("catalogs"/"postgresql"/"columns"){get{
+      parameter("schema".as[String].withDefault("public")){schema=>
+       parameter("table".as[String]){table=>
+        onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.postgresColumns(schema,table)).parseJson))){
+         case Success(value)=>complete(value)
+         case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+         case Failure(error)=>system.log.warn("PostgreSQL schema inspection failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("schema inspection failed"))))
+        }
+       }
+      }
+    }} ~
+    path("automl"/"metrics"){get{complete(JsObject(
+      "classification"->JsArray(JsString("accuracy"),JsString("f1"),JsString("weightedPrecision"),JsString("weightedRecall")),
+      "regression"->JsArray(JsString("rmse"),JsString("mae"),JsString("mse"),JsString("r2"),JsString("var")),
+      "time_series"->JsArray(JsString("rmse"),JsString("mae"),JsString("mse"),JsString("r2")),
+      "selectionNote"->JsString("Metric direction is handled by the AutoML trainer; compare metrics only within the same task and validation protocol.")
+    ))}} ~
     path("catalogs"){get{
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.catalogs()).parseJson))){
        case Success(value)=>complete(value)
@@ -222,7 +286,18 @@ object Main {
        case Failure(error)=>system.log.error("Model registry listing failed",error);complete(StatusCodes.InternalServerError)
       }
     }} ~
+    path("models"/"aliases"){get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.aliases()).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Model alias listing failed",error);complete(StatusCodes.InternalServerError)
+      }
+    }} ~
     path("models"/"aliases"/Segment){alias=>
+      get{onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.alias(alias)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>system.log.error("Model alias lookup failed",error);complete(StatusCodes.InternalServerError)
+      }} ~
       put{entity(as[JsObject]){request=>
        val modelId=UUID.fromString(request.fields.getOrElse("modelId",JsString("")).convertTo[String])
        onComplete(Future(scala.concurrent.blocking{autoMl.promote(alias,modelId);JsObject("alias"->JsString(alias),"modelId"->JsString(modelId.toString))})){
@@ -301,6 +376,41 @@ object Main {
       case Success(false)=>complete(StatusCodes.ServiceUnavailable->Health("NOT_READY","postgres"))
       case Failure(error)=>system.log.error("Readiness check failed",error);complete(StatusCodes.ServiceUnavailable->Health("NOT_READY","postgres"))
      }}} ~
+    path("workflows"){get{
+     parameter("limit".as[Int].withDefault(100)){limit=>
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.workflows(limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Workflow listing failed",error);complete(StatusCodes.InternalServerError)
+      }
+     }
+    }} ~
+    path("workflows"/"validate"){post{entity(as[JsObject]){request=>
+     val definition=request.fields.get("definition").map(_.compactPrint).getOrElse(request.compactPrint)
+     try complete(mapper.writeValueAsString(operators.validateDetailed(definition)).parseJson)
+     catch {case error:IllegalArgumentException=>complete(StatusCodes.BadRequest->JsObject("valid"->JsBoolean(false),"error"->JsString(Option(error.getMessage).getOrElse("invalid workflow"))))}
+    }}} ~
+    path("workflows"/JavaUUID){workflowId=>get{
+     onComplete(Future(scala.concurrent.blocking(repository.workflow(workflowId)))){
+      case Success(Some(value))=>complete(mapper.writeValueAsString(value).parseJson)
+      case Success(None)=>complete(StatusCodes.NotFound)
+      case Failure(error)=>system.log.error("Workflow lookup failed",error);complete(StatusCodes.InternalServerError)
+     }
+    }} ~
+    path("workflows"/JavaUUID/"versions"/IntNumber){(workflowId,version)=>get{
+     onComplete(Future(scala.concurrent.blocking(repository.workflowVersion(workflowId,version)))){
+      case Success(Some(value))=>complete(mapper.writeValueAsString(value).parseJson)
+      case Success(None)=>complete(StatusCodes.NotFound)
+      case Failure(error)=>system.log.error("Workflow version lookup failed",error);complete(StatusCodes.InternalServerError)
+     }
+    }} ~
+    path("jobs"){get{
+     parameter("limit".as[Int].withDefault(100)){limit=>
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.jobs(limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Job listing failed",error);complete(StatusCodes.InternalServerError)
+      }
+     }
+    }} ~
     path("workflows"){
      post{
       entity(as[WorkflowCreate]){request=>

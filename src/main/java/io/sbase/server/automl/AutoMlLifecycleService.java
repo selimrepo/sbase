@@ -511,6 +511,54 @@ public final class AutoMlLifecycleService {
         }
     }
 
+    public List<Map<String, Object>> aliases() throws SQLException {
+        try (Connection c = connection(); PreparedStatement p = c.prepareStatement(
+                "SELECT a.alias,a.model_id,m.name,m.algorithm,m.task_type,m.metric,m.best_score,m.status,a.updated_at "
+                        + "FROM model_alias a JOIN model_registry m ON m.id=a.model_id ORDER BY a.alias")) {
+            try (ResultSet r = p.executeQuery()) {
+                List<Map<String, Object>> result = new ArrayList<>();
+                while (r.next()) {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("alias", r.getString("alias"));
+                    row.put("modelId", r.getObject("model_id").toString());
+                    row.put("name", r.getString("name"));
+                    row.put("algorithm", r.getString("algorithm"));
+                    row.put("task", r.getString("task_type"));
+                    row.put("metric", r.getString("metric"));
+                    row.put("score", r.getObject("best_score"));
+                    row.put("modelStatus", r.getString("status"));
+                    row.put("updatedAt", r.getTimestamp("updated_at").toInstant().toString());
+                    result.add(row);
+                }
+                return result;
+            }
+        }
+    }
+
+    public Map<String, Object> alias(String alias) throws SQLException {
+        if (alias == null || !alias.matches("[A-Za-z][A-Za-z0-9_.-]{0,63}"))
+            throw new IllegalArgumentException("Invalid model alias");
+        try (Connection c = connection(); PreparedStatement p = c.prepareStatement(
+                "SELECT a.alias,a.model_id,m.name,m.algorithm,m.task_type,m.metric,m.best_score,m.status,a.updated_at "
+                        + "FROM model_alias a JOIN model_registry m ON m.id=a.model_id WHERE a.alias=?")) {
+            p.setString(1, alias);
+            try (ResultSet r = p.executeQuery()) {
+                if (!r.next()) throw new NoSuchElementException("Model alias not found");
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("alias", r.getString("alias"));
+                result.put("modelId", r.getObject("model_id").toString());
+                result.put("name", r.getString("name"));
+                result.put("algorithm", r.getString("algorithm"));
+                result.put("task", r.getString("task_type"));
+                result.put("metric", r.getString("metric"));
+                result.put("score", r.getObject("best_score"));
+                result.put("modelStatus", r.getString("status"));
+                result.put("updatedAt", r.getTimestamp("updated_at").toInstant().toString());
+                return result;
+            }
+        }
+    }
+
     public void archive(UUID id) throws SQLException {
         try (Connection c = connection()) {
             c.setAutoCommit(false);
