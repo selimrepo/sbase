@@ -66,12 +66,12 @@ public final class AutoMlLifecycleService {
     }
 
     public Map<String,Object> model(UUID id)throws SQLException{
-        try(Connection c=connection();PreparedStatement p=c.prepareStatement("SELECT id,experiment_id,name,algorithm,task_type,metric,best_score,model_uri,version,status,created_at FROM model_registry WHERE id=?")){
+        try(Connection c=connection();PreparedStatement p=c.prepareStatement("SELECT id,experiment_id,name,algorithm,task_type,metric,best_score,model_uri,version,status,evaluation_report,reproducibility,training_config,created_at FROM model_registry WHERE id=?")){
             p.setObject(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())throw new NoSuchElementException("Model not found");
                 Map<String,Object> m=new LinkedHashMap<>();m.put("id",r.getObject("id").toString());m.put("experimentId",r.getObject("experiment_id").toString());
                 m.put("name",r.getString("name"));m.put("algorithm",r.getString("algorithm"));m.put("task",r.getString("task_type"));
                 m.put("metric",r.getString("metric"));m.put("score",r.getDouble("best_score"));m.put("modelUri",r.getString("model_uri"));
-                m.put("version",r.getInt("version"));m.put("status",r.getString("status"));m.put("createdAt",r.getTimestamp("created_at").toInstant().toString());return m;}
+                m.put("version",r.getInt("version"));m.put("status",r.getString("status"));m.put("evaluationReport",r.getString("evaluation_report"));m.put("reproducibility",r.getString("reproducibility"));m.put("trainingConfig",r.getString("training_config"));m.put("createdAt",r.getTimestamp("created_at").toInstant().toString());return m;}
         }
     }
 
