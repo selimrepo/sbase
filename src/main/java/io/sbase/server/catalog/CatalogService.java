@@ -76,7 +76,7 @@ public final class CatalogService implements AutoCloseable {
         SqlNode parsed;
         try{parsed=SqlParser.create(CalciteSqlCompatibility.forParsing(sql)).parseQuery();}
         catch(Exception invalid){throw new IllegalArgumentException("Invalid or non-read-only SQL query",invalid);}
-        if(parsed.getKind()!=SqlKind.SELECT&&parsed.getKind()!=SqlKind.WITH)
+        if(!CalciteSqlCompatibility.isReadOnlyQuery(parsed))
             throw new IllegalArgumentException("Only read-only SELECT queries are allowed");
         int bounded = Math.max(1, Math.min(limit, 5000));
         try (Connection c = DriverManager.getConnection(pgUrl, pgUser, pgPassword)) {
