@@ -15,7 +15,7 @@ import org.apache.solr.client.solrj.SolrQuery;
 
 import java.net.InetSocketAddress;
 import java.sql.*;
-import java.util.*;
+import java.util.*;\nimport io.sbase.server.engines.CalciteSqlCompatibility;
 
 /** Read-only federation facade for the PostgreSQL, Cassandra and Solr catalogs. */
 public final class CatalogService implements AutoCloseable {
@@ -72,7 +72,7 @@ public final class CatalogService implements AutoCloseable {
     public Map<String,Object> queryPostgres(String sql, List<Object> parameters, int limit) throws SQLException {
         if(sql==null||sql.isBlank())throw new IllegalArgumentException("SQL query is required");
         SqlNode parsed;
-        try{parsed=SqlParser.create(sql).parseQuery();}
+        try{parsed=SqlParser.create(CalciteSqlCompatibility.forParsing(sql)).parseQuery();}
         catch(Exception invalid){throw new IllegalArgumentException("Invalid or non-read-only SQL query",invalid);}
         if(parsed.getKind()!=SqlKind.SELECT&&parsed.getKind()!=SqlKind.WITH)
             throw new IllegalArgumentException("Only read-only SELECT queries are allowed");
