@@ -99,6 +99,7 @@ public final class AutoMlService {
             train=split[0]; validation=split[1];
         }
         if(train.limit(2).count()<2||validation.limit(2).count()<2)throw new IllegalArgumentException("Not enough rows after validation split");
+        boolean classification=task.equals("classification");
         List<PipelineStage> candidates=new ArrayList<>();
         if(task.equals("classification")){
             candidates.add(new LogisticRegression().setLabelCol(label).setFeaturesCol("features").setMaxIter(100).setRegParam(0.01));
@@ -108,11 +109,10 @@ public final class AutoMlService {
         }else{
             candidates.add(new LinearRegression().setLabelCol(label).setFeaturesCol("features").setMaxIter(100).setRegParam(0.01));
             candidates.add(new RandomForestRegressor().setLabelCol(label).setFeaturesCol("features").setNumTrees(100).setMaxDepth(8).setSeed(seed));
-            candidates.add(new DecisionTreeRegressor().setLabelCol(label).setFeaturesCol("features").setMaxDepth(8).setSeed(42));
+            candidates.add(new DecisionTreeRegressor().setLabelCol(label).setFeaturesCol("features").setMaxDepth(8).setSeed(seed));
             if(timeSeries)candidates.add(new GBTRegressor().setLabelCol(label).setFeaturesCol("features").setMaxIter(80).setMaxDepth(5).setSeed(42));
         }
         int max=Math.max(1,Math.min(4,((Number)request.getOrDefault("maxCandidates",timeSeries||classification?4:3)).intValue()));
-        boolean classification=task.equals("classification");
         String requestedMetric=String.valueOf(request.getOrDefault("optimizationMetric",classification?"f1":"rmse")).toLowerCase(Locale.ROOT);
         Set<String> allowedMetrics=classification?Set.of("accuracy","f1","weightedprecision","weightedrecall"):Set.of("rmse","mse","mae","r2");
         if(!allowedMetrics.contains(requestedMetric))throw new IllegalArgumentException("Unsupported optimizationMetric: "+requestedMetric);
