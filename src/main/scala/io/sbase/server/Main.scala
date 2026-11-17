@@ -85,6 +85,7 @@ object Main {
       "catalogs"->JsArray(JsString("postgresql"),JsString("cassandra"),JsString("solr")),
       "queryEngines"->JsArray(JsString("calcite-sql"),JsString("federated-calcite"),JsString("spark-sql")),
       "compute"->JsArray(JsString("mahout"),JsString("spark-ml-automl"),JsString("flink")),
+      "scientificAutoMl"->JsArray(JsString("dataset-profiling"),JsString("cross-validation"),JsString("model-cards"),JsString("fairness-diagnostics"),JsString("psi-drift"),JsString("kolmogorov-smirnov")),
       "apiVersion"->JsString("v1")
     ))}} ~
     path("operators"){get{complete(JsArray(operators.availableOperators.map(JsString(_))))}} ~
