@@ -103,14 +103,15 @@ public final class AutoMlService {
         if(task.equals("classification")){
             candidates.add(new LogisticRegression().setLabelCol(label).setFeaturesCol("features").setMaxIter(100).setRegParam(0.01));
             candidates.add(new RandomForestClassifier().setLabelCol(label).setFeaturesCol("features").setNumTrees(100).setMaxDepth(8).setSeed(seed));
-            candidates.add(new DecisionTreeClassifier().setLabelCol(label).setFeaturesCol("features").setMaxDepth(8).setSeed(42));
+            candidates.add(new DecisionTreeClassifier().setLabelCol(label).setFeaturesCol("features").setMaxDepth(8).setSeed(seed));
+            candidates.add(new GBTClassifier().setLabelCol(label).setFeaturesCol("features").setMaxIter(80).setMaxDepth(5).setSeed(seed));
         }else{
             candidates.add(new LinearRegression().setLabelCol(label).setFeaturesCol("features").setMaxIter(100).setRegParam(0.01));
-            candidates.add(new RandomForestRegressor().setLabelCol(label).setFeaturesCol("features").setNumTrees(100).setMaxDepth(8).setSeed(42));
+            candidates.add(new RandomForestRegressor().setLabelCol(label).setFeaturesCol("features").setNumTrees(100).setMaxDepth(8).setSeed(seed));
             candidates.add(new DecisionTreeRegressor().setLabelCol(label).setFeaturesCol("features").setMaxDepth(8).setSeed(42));
             if(timeSeries)candidates.add(new GBTRegressor().setLabelCol(label).setFeaturesCol("features").setMaxIter(80).setMaxDepth(5).setSeed(42));
         }
-        int max=Math.max(1,Math.min(4,((Number)request.getOrDefault("maxCandidates",timeSeries?4:3)).intValue()));
+        int max=Math.max(1,Math.min(4,((Number)request.getOrDefault("maxCandidates",timeSeries||classification?4:3)).intValue()));
         boolean classification=task.equals("classification");
         String requestedMetric=String.valueOf(request.getOrDefault("optimizationMetric",classification?"f1":"rmse")).toLowerCase(Locale.ROOT);
         Set<String> allowedMetrics=classification?Set.of("accuracy","f1","weightedprecision","weightedrecall"):Set.of("rmse","mse","mae","r2");
@@ -252,6 +253,8 @@ public final class AutoMlService {
         else if(estimator instanceof DecisionTreeRegressor model)
             grid.addGrid(model.maxDepth(),new int[]{4,8,12});
         else if(estimator instanceof GBTRegressor model)
+            grid.addGrid(model.maxIter(),new int[]{40,80}).addGrid(model.maxDepth(),new int[]{3,5});
+        else if(estimator instanceof GBTClassifier model)
             grid.addGrid(model.maxIter(),new int[]{40,80}).addGrid(model.maxDepth(),new int[]{3,5});
         return grid.build();
     }
