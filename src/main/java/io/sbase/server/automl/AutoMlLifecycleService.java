@@ -38,7 +38,7 @@ public final class AutoMlLifecycleService {
             double score=((Number)result.get("score")).doubleValue();
             List<Map<String,Object>> trials=(List<Map<String,Object>>)result.get("trials");
             UUID modelId=UUID.randomUUID();
-            completeTraining(experimentId,modelId,name,algorithm,task,metric,score,modelPath,features,trials);
+            completeTraining(experimentId,modelId,name,algorithm,task,metric,score,modelPath,features,trials,result,request);
             Map<String,Object> response=new LinkedHashMap<>(result);
             response.put("experimentId",experimentId.toString());
             response.put("modelId",modelId.toString());
@@ -91,12 +91,12 @@ public final class AutoMlLifecycleService {
 
 
     public Map<String,Object> experiment(UUID id)throws SQLException{
-        try(Connection c=connection();PreparedStatement p=c.prepareStatement("SELECT id,name,task_type,label_column,feature_columns,status,best_algorithm,best_metric,best_score,model_uri,error_message,created_at,finished_at FROM automl_experiment WHERE id=?")){
+        try(Connection c=connection();PreparedStatement p=c.prepareStatement("SELECT id,name,task_type,label_column,feature_columns,status,best_algorithm,best_metric,best_score,model_uri,error_message,evaluation_report,reproducibility,training_config,created_at,finished_at FROM automl_experiment WHERE id=?")){
             p.setObject(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())throw new NoSuchElementException("Experiment not found");
                 Map<String,Object> result=new LinkedHashMap<>();result.put("id",id.toString());result.put("name",r.getString("name"));
                 result.put("task",r.getString("task_type"));result.put("label",r.getString("label_column"));result.put("features",r.getString("feature_columns"));
                 result.put("status",r.getString("status"));result.put("algorithm",r.getString("best_algorithm"));result.put("metric",r.getString("best_metric"));
-                result.put("score",r.getObject("best_score"));result.put("modelUri",r.getString("model_uri"));result.put("error",r.getString("error_message"));
+                result.put("score",r.getObject("best_score"));result.put("modelUri",r.getString("model_uri"));result.put("error",r.getString("error_message"));result.put("evaluationReport",r.getString("evaluation_report"));result.put("reproducibility",r.getString("reproducibility"));result.put("trainingConfig",r.getString("training_config"));
                 result.put("createdAt",r.getTimestamp("created_at").toInstant().toString());
                 Timestamp finished=r.getTimestamp("finished_at");result.put("finishedAt",finished==null?null:finished.toInstant().toString());
                 List<Map<String,Object>> trials=new ArrayList<>();
@@ -152,7 +152,8 @@ public final class AutoMlLifecycleService {
 
     private void completeTraining(UUID experimentId,UUID modelId,String name,String algorithm,String task,
                                   String metric,double score,String modelPath,List<?> features,
-                                  List<Map<String,Object>> trials)throws SQLException{
+                                  List<Map<String,Object>> trials,Map<String,Object> result,
+                                  Map<String,Object> request)throws SQLException{
         try(Connection c=connection()){
             c.setAutoCommit(false);
             try(PreparedStatement p=c.prepareStatement("INSERT INTO automl_trial(experiment_id,trial_number,algorithm,parameters,metrics,status,duration_ms,error_message) VALUES(?,?,?,?::jsonb,?::jsonb,?,?,?)")){
@@ -165,17 +166,32 @@ public final class AutoMlLifecycleService {
                 }
                 p.executeBatch();
             }
-            try(PreparedStatement p=c.prepareStatement("INSERT INTO model_registry(id,experiment_id,name,algorithm,task_type,metric,best_score,model_uri,version,status,feature_columns) VALUES(?,?,?,?,?,?,?,?,1,'READY',?::jsonb)")){
+            Map<String,Object> evaluation=(Map<String,Object>)result.getOrDefault("evaluationMetrics",Map.of());
+            Map<String,Object> reproducibility=(Map<String,Object>)result.getOrDefault("reproducibility",Map.of());
+            Map<String,Object> trainingConfig=trainingConfig(request);
+            try(PreparedStatement p=c.prepareStatement("INSERT INTO model_registry(id,experiment_id,name,algorithm,task_type,metric,best_score,model_uri,version,status,feature_columns,evaluation_report,reproducibility,training_config) VALUES(?,?,?,?,?,?,?,?,1,'READY',?::jsonb,?::jsonb,?::jsonb,?::jsonb)")){
                 p.setObject(1,modelId);p.setObject(2,experimentId);p.setString(3,name);p.setString(4,algorithm);
                 p.setString(5,task);p.setString(6,metric);p.setDouble(7,score);p.setString(8,modelPath);
-                p.setString(9,JSONString(features));p.executeUpdate();
+                p.setString(9,JSONString(features));p.setString(10,JSONString(evaluation));
+                p.setString(11,JSONString(reproducibility));p.setString(12,JSONString(trainingConfig));p.executeUpdate();
             }
-            try(PreparedStatement p=c.prepareStatement("UPDATE automl_experiment SET status='SUCCEEDED',best_algorithm=?,best_metric=?,best_score=?,model_uri=?,finished_at=now() WHERE id=? AND status='RUNNING'")){
-                p.setString(1,algorithm);p.setString(2,metric);p.setDouble(3,score);p.setString(4,modelPath);p.setObject(5,experimentId);
+            try(PreparedStatement p=c.prepareStatement("UPDATE automl_experiment SET status='SUCCEEDED',best_algorithm=?,best_metric=?,best_score=?,model_uri=?,evaluation_report=?::jsonb,reproducibility=?::jsonb,training_config=?::jsonb,finished_at=now() WHERE id=? AND status='RUNNING'")){
+                p.setString(1,algorithm);p.setString(2,metric);p.setDouble(3,score);p.setString(4,modelPath);
+                p.setString(5,JSONString(evaluation));p.setString(6,JSONString(reproducibility));
+                p.setString(7,JSONString(trainingConfig));p.setObject(8,experimentId);
                 if(p.executeUpdate()!=1)throw new SQLException("Experiment was not RUNNING at completion");
             }
             c.commit();
         }
+    }
+
+    private static Map<String,Object> trainingConfig(Map<String,Object> request) {
+        Map<String,Object> config=new LinkedHashMap<>();
+        for(String key:List.of("task","label","features","maxCandidates","cvFolds","cvParallelism",
+                "seed","validationFraction","optimizationMetric","varianceThreshold","timeColumn","lags")) {
+            if(request.containsKey(key))config.put(key,request.get(key));
+        }
+        return config;
     }
 
     private void insertExperiment(UUID id,String name,String task,String label,String features)throws SQLException{
