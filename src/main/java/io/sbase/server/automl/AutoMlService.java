@@ -11,6 +11,7 @@ import org.apache.spark.ml.tuning.CrossValidatorModel;
 import org.apache.spark.ml.tuning.ParamGridBuilder;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.expressions.Window;
+import org.apache.spark.sql.expressions.WindowSpec;
 import org.apache.spark.sql.types.DataType;
 
 import java.nio.charset.StandardCharsets;
@@ -102,7 +103,7 @@ public final class AutoMlService {
             if (raw.groupBy(col(timeColumn)).count().filter(col("count").gt(1)).limit(1).count() > 0)
                 throw new IllegalArgumentException("timeColumn values must be unique to prevent temporal leakage");
 
-            Window order = Window.orderBy(col(timeColumn).asc());
+            WindowSpec order = Window.orderBy(col(timeColumn).asc());
             for (int lag = 1; lag <= lags; lag++) {
                 String lagColumn = label + "__lag_" + lag;
                 raw = raw.withColumn(lagColumn, lag(col(label), lag).over(order));
