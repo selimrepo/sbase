@@ -85,3 +85,39 @@ Rollback is conditional: it succeeds only if the alias still points to the model
 - A drift threshold is a trigger, not proof of model degradation. Retraining and promotion are separate decisions.
 - Promotion evaluation is a common holdout comparison, not a statistical significance test. For high-impact models, add repeated temporal holdouts and domain-specific acceptance thresholds.
 - For time-series models, provide a chronologically representative labeled evaluation holdout with all lag features required by the model.
+
+
+## Dataset profiling and statistical drift tests
+
+### Dataset profile
+
+`POST /api/v1/automl/data/profile`
+
+Provide `data`, optional `features`, and optional `label`. The Spark profiler returns schema types, exact null/blank counts, distinct cardinality, duplicate-row count, label frequencies, numeric min/max/mean/standard deviation, approximate quartiles and Tukey 1.5×IQR outlier rates. It also computes a deterministic SHA-256 fingerprint independent of input row order and reports warnings for high missingness, constant columns, high-cardinality categoricals and outlier-heavy numeric features.
+
+Inline profile input is capped at 100,000 rows. Use the catalog/ingestion plane for larger datasets. Profiling is descriptive: it does not impute, delete or mutate source records.
+
+### Statistical feature drift
+
+`POST /api/v1/automl/monitoring/statistical-drift`
+
+Example:
+
+```json
+{
+  "modelId": "optional-model-uuid",
+  "features": ["age", "region"],
+  "reference": [{"age": 35, "region": "west"}],
+  "current": [{"age": 51, "region": "east"}],
+  "psiThreshold": 0.2,
+  "ksAlpha": 0.05,
+  "missingRateDeltaThreshold": 0.1
+}
+```
+
+Numeric features are compared with reference-derived quantile-bin PSI and the two-sample Kolmogorov–Smirnov statistic/p-value approximation. Categorical features use category-frequency PSI. Both paths report missing-rate changes. Each result is stored independently in `model_statistical_drift_run`, so statistical tests do not overwrite the existing operational drift history used by retraining policies.
+
+- `GET /api/v1/automl/monitoring/statistical-runs` lists recent statistical drift reports.
+- `GET /api/v1/models/{modelId}/statistical-drift` lists reports associated with a registered model.
+
+PSI and KS are covariate-shift indicators, not evidence of causal change or a substitute for labeled performance monitoring. KS p-values use the asymptotic two-sample approximation. Operational retraining/promotion policies remain separately governed by the model-monitoring API described above.
