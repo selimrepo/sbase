@@ -315,3 +315,52 @@ The Compose file includes optional development profiles for Cassandra, Solr, Spa
 ## License
 
 Apache License 2.0. See `LICENSE`.
+
+
+## Scientific AutoML and model governance
+
+The AutoML service supports classification, regression and lag-based time-series regression. Candidate search uses Spark ML pipelines, categorical StringIndexer/OneHotEncoder preprocessing, constant-feature filtering, seeded holdout validation and configurable cross-validation. Classification adds a gradient-boosted tree candidate; the candidate limit remains bounded to control cluster cost.
+
+Training requests can set:
+- `optimizationMetric`: classification `accuracy`, `f1`, `weightedPrecision` or `weightedRecall`; regression/time-series `rmse`, `mse`, `mae` or `r2`.
+- `seed` and `validationFraction` (0.1–0.4) for repeatable holdout splits.
+- `cvFolds`, `cvParallelism` and `maxCandidates` for bounded search.
+
+Evaluation reports include weighted classification metrics, per-class precision/recall/F1, balanced accuracy and a confusion matrix. Binary classifiers also report ROC-AUC and PR-AUC when the estimator exposes compatible raw scores. Regression reports RMSE, MSE, MAE, R² and MAPE (zero-valued targets are excluded from MAPE). Experiment and model registry records persist the evaluation report, selected training configuration and reproducibility metadata.
+
+### Dataset profiling
+
+`POST /api/v1/automl/data/profile`
+
+```json
+{
+  "label": "churn",
+  "features": ["age", "monthly_spend", "region"],
+  "data": [
+    {"age": 42, "monthly_spend": 120.5, "region": "west", "churn": 0},
+    {"age": 29, "monthly_spend": 85.0, "region": "east", "churn": 1}
+  ]
+}
+```
+
+The profiling API reports schema types, missingness, cardinality, duplicate rows, label distribution, numeric summary statistics, approximate quartiles and Tukey 1.5×IQR outlier rates. It returns a deterministic SHA-256 dataset fingerprint for the supplied rows and warnings for high missingness, constant features, high cardinality and outlier-heavy numeric features. The endpoint accepts up to 100,000 inline rows; use catalog-backed ingestion for larger datasets.
+
+### Production feature-drift monitoring
+
+`POST /api/v1/automl/monitoring/drift`
+
+```json
+{
+  "modelId": "optional-registered-model-uuid",
+  "features": ["age", "region"],
+  "reference": [{"age": 35, "region": "west"}],
+  "current": [{"age": 51, "region": "east"}],
+  "psiThreshold": 0.2,
+  "ksAlpha": 0.05,
+  "missingRateDeltaThreshold": 0.1
+}
+```
+
+The service compares reference and current feature distributions using Population Stability Index (PSI), the two-sample Kolmogorov–Smirnov statistic and an asymptotic KS p-value for numeric features, plus missing-rate deltas. Results are persisted in PostgreSQL. History is available at `GET /api/v1/automl/monitoring/runs` and model-specific history at `GET /api/v1/models/{modelId}/monitoring`.
+
+PSI and KS detect covariate distribution changes; they do not establish causality or prove that predictive performance has degraded. Validate alerts against labeled outcomes and domain context. Monitoring requests currently accept up to 100,000 inline rows per reference/current dataset.
