@@ -142,7 +142,7 @@ public final class AutoMlLifecycleService {
             p.setObject(2, modelId);
             p.setInt(3, rows.size());
             p.setString(4, String.valueOf(report.get("driftLevel")));
-            p.setString(5, JSON.writeValueAsString(report));
+            p.setString(5, jsonString(report));
             p.executeUpdate();
         }
         Map<String, Object> result = new LinkedHashMap<>(report);
@@ -368,6 +368,14 @@ public final class AutoMlLifecycleService {
 
     private Connection connection() throws SQLException {
         return DriverManager.getConnection(jdbcUrl, user, password);
+    }
+
+    private static String jsonString(Object value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (Exception error) {
+            throw new IllegalArgumentException("Could not encode model metadata", error);
+        }
     }
 
     private static Map<String, Object> parseJson(String value) throws SQLException {

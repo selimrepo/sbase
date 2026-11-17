@@ -115,6 +115,14 @@ public final class AutoMlService {
         Dataset<Row> profileData = raw;
         long rowCount = profileData.count();
         if (rowCount < 50) throw new IllegalArgumentException("At least 50 usable rows are required after preprocessing");
+        if (classification && profileData.select(col(label)).distinct().limit(2).count() < 2)
+            throw new IllegalArgumentException("Classification requires at least two target classes");
+        if (!classification) {
+            Row targetVariance = profileData.agg(variance(col(label))).first();
+            if (targetVariance.isNullAt(0) || !Double.isFinite(targetVariance.getDouble(0))
+                    || targetVariance.getDouble(0) <= 0.0)
+                throw new IllegalArgumentException("Regression target must have non-zero variance");
+        }
 
         List<String> selectedFeatures = new ArrayList<>();
         List<String> droppedFeatures = new ArrayList<>();
@@ -287,8 +295,8 @@ public final class AutoMlService {
         Dataset<Row> bestPredictions = best.transform(validation);
         Map<String, Object> baseline = baselineMetrics(train, validation, label, classification);
         Map<String, Object> fairness = fairnessReport(bestPredictions, label, sensitiveColumn, classification, request);
-        Map<String, Object> quality = dataQuality(profileData, features);
-        Map<String, Object> profile = featureProfile(profileData, features);
+        Map<String, Object> quality = dataQuality(train, features);
+        Map<String, Object> profile = featureProfile(train, features);
         Map<String, Object> reproducibility = new LinkedHashMap<>();
         reproducibility.put("datasetFingerprintSha256", fingerprint);
         reproducibility.put("seed", seed);
@@ -371,7 +379,7 @@ public final class AutoMlService {
             for (String metric : List.of("accuracy", "f1", "weightedPrecision", "weightedRecall")) {
                 double value = new MulticlassClassificationEvaluator().setLabelCol(label)
                         .setPredictionCol("prediction").setMetricName(metric).evaluate(predictions);
-                result.put(metric, value);
+                if (Double.isFinite(value)) result.put(metric, value);
             }
             if (predictions.select(col(label)).distinct().limit(3).count() == 2) {
                 try {
@@ -440,7 +448,7 @@ public final class AutoMlService {
         double minSelection = Double.POSITIVE_INFINITY, maxSelection = Double.NEGATIVE_INFINITY;
         double minTpr = Double.POSITIVE_INFINITY, maxTpr = Double.NEGATIVE_INFINITY;
         for (Row row : grouped.collectAsList()) {
-            long count = row.getAs("rows");
+            long count = ((Number) row.getAs("rows")).longValue();
             if (count < minimumGroupSize) continue;
             double selection = ((Number) row.getAs("selectionRate")).doubleValue();
             double tpr = ((Number) row.getAs("truePositiveRate")).doubleValue();
@@ -472,7 +480,11 @@ public final class AutoMlService {
         Map<String, Object> result = new LinkedHashMap<>();
         Map<String, Object> missing = new LinkedHashMap<>();
         for (String feature : features) {
-            long count = data.filter(col(feature).isNull()).count();
+            String type = data.schema().apply(feature).dataType().typeName().toLowerCase(Locale.ROOT);
+            Column missingCondition = col(feature).isNull();
+            if (NUMERIC_TYPES.contains(type))
+                missingCondition = missingCondition.or(isnan(col(feature).cast("double")));
+            long count = data.filter(missingCondition).count();
             missing.put(feature, Map.of("missingCount", count,
                     "missingRate", rows == 0 ? 0.0 : (double) count / rows));
         }
@@ -487,10 +499,15 @@ public final class AutoMlService {
         for (String feature : features) {
             String type = data.schema().apply(feature).dataType().typeName().toLowerCase(Locale.ROOT);
             Map<String, Object> stats = new LinkedHashMap<>();
-            long missing = data.filter(col(feature).isNull()).count();
+            Column missingCondition = col(feature).isNull();
+            if (NUMERIC_TYPES.contains(type))
+                missingCondition = missingCondition.or(isnan(col(feature).cast("double")));
+            long missing = data.filter(missingCondition).count();
             stats.put("missingRate", rows == 0 ? 0.0 : (double) missing / rows);
             if (NUMERIC_TYPES.contains(type)) {
-                Row values = data.agg(avg(col(feature)), stddev(col(feature)), min(col(feature)), max(col(feature))).first();
+                Column clean = when(missingCondition, lit(null).cast(data.schema().apply(feature).dataType()))
+                        .otherwise(col(feature));
+                Row values = data.agg(avg(clean), stddev(clean), min(clean), max(clean)).first();
                 stats.put("numeric", true);
                 stats.put("mean", values.isNullAt(0) ? 0.0 : ((Number) values.get(0)).doubleValue());
                 stats.put("stddev", values.isNullAt(1) ? 0.0 : ((Number) values.get(1)).doubleValue());
