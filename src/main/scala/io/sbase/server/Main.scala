@@ -196,6 +196,34 @@ object Main {
        }
       }}
     } ~
+    path("models"/JavaUUID/"card"){modelId=>
+      get{onComplete(Future(scala.concurrent.blocking(autoMl.model(modelId).getOrElse("modelCard",Map.empty[String,Object])))){
+       case Success(value)=>complete(mapper.writeValueAsString(value).parseJson)
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>system.log.error("Model card lookup failed",error);complete(StatusCodes.InternalServerError)
+      }}
+    } ~
+    path("models"/JavaUUID/"monitoring"){modelId=>
+      get{parameter("limit".as[Int].withDefault(50)){limit=>
+       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.monitoringHistory(modelId,limit)).parseJson))){
+        case Success(value)=>complete(value)
+        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+        case Failure(error)=>system.log.error("Model monitoring history failed",error);complete(StatusCodes.InternalServerError)
+       }
+      }} ~
+      post{entity(as[JsObject]){request=>
+       try {
+        val rows=mapper.readValue(request.fields.getOrElse("rows",JsArray()).compactPrint,
+          new TypeReference[java.util.List[java.util.Map[String,Object]]]() {})
+        val data=rows.asScala.map(row=>row.asScala.toMap.asJava).asJava
+        onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.monitor(modelId,data)).parseJson))){
+         case Success(value)=>complete(value)
+         case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+         case Failure(error)=>system.log.error("Model drift monitoring failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("monitoring failed"))))
+        }
+       } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid monitoring request"))))}
+      }}
+    } ~
     path("models"/JavaUUID/"archive"){modelId=>
       post{onComplete(Future(scala.concurrent.blocking{autoMl.archive(modelId);JsObject("status"->JsString("ARCHIVED"))})){
        case Success(value)=>complete(value)
