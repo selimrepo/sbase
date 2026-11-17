@@ -1,5 +1,9 @@
 package io.sbase.server.engines;
 
+import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlOrderBy;
+
 /**
  * Normalizes identifiers that are reserved by Calcite but valid as ordinary
  * PostgreSQL/Spark column names before Calcite-only parsing. The original SQL
@@ -10,6 +14,16 @@ package io.sbase.server.engines;
  */
 public final class CalciteSqlCompatibility {
     private CalciteSqlCompatibility() {}
+
+    /**
+     * Calcite wraps a SELECT containing ORDER BY in SqlOrderBy. Unwrap that
+     * node before checking the statement kind so read-only ordered queries
+     * are not incorrectly rejected.
+     */
+    public static boolean isReadOnlyQuery(SqlNode node) {
+        if (node instanceof SqlOrderBy orderBy) node = orderBy.query;
+        return node != null && (node.getKind() == SqlKind.SELECT || node.getKind() == SqlKind.WITH);
+    }
 
     public static String forParsing(String sql) {
         if (sql == null || sql.isEmpty()) return sql;
