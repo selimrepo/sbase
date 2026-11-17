@@ -14,7 +14,7 @@ public final class FederatedPredicatePushdown {
 
     public static Optional<String> translate(String sql, String source, String table, int limit) {
         try {
-            SqlNode node = SqlParser.create(sql, SqlParser.config().withCaseSensitive(false)).parseQuery();
+            SqlNode node = SqlParser.create(CalciteSqlCompatibility.forParsing(sql), SqlParser.config().withCaseSensitive(false)).parseQuery();
             if (!(node instanceof SqlSelect select)) return Optional.empty();
             if (!(select.getFrom() instanceof SqlIdentifier from) || from.names.size() != 1) return Optional.empty();
             if (select.getGroup() != null || select.getHaving() != null
