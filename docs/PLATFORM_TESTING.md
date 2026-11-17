@@ -1,36 +1,36 @@
 # SBase platform verification and load testing
 
-The repository includes a dependency-free Python runner at \`scripts/platform_test.py\`.
+The repository includes a dependency-free Python runner at `scripts/platform_test.py`.
 It checks the running API and platform contracts, exercises the safe read paths, and
 can generate concurrent load or run a long soak test. It uses only the Python standard
-library; no \`pip install\` step is required.
+library; no `pip install` step is required.
 
 ## Start SBase
 
 For the normal local stack:
 
-\`\`\`bash
+```bash
 cp .env.example .env
 docker compose up --build -d
 docker compose ps
-\`\`\`
+```
 
 For the complete stack including Cassandra, Solr, Spark and Flink:
 
-\`\`\`bash
+```bash
 docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d
-\`\`\`
+```
 
-The runner defaults to \`http://localhost:8080\`. It reads a simple \`.env\` file if
-present and honors \`SBASE_BASE_URL\` and \`SBASE_HTTP_PORT\`.
+The runner defaults to `http://localhost:8080`. It reads a simple `.env` file if
+present and honors `SBASE_BASE_URL` and `SBASE_HTTP_PORT`.
 
 ## Quick checks
 
-\`\`\`bash
+```bash
 python3 scripts/platform_test.py --self-test
 python3 scripts/platform_test.py --scenario smoke --requests 30 --workers 3
 python3 scripts/platform_test.py --scenario balanced --requests 300 --workers 12
-\`\`\`
+```
 
 The default balanced run validates API readiness, component inventory, every
 advertised operator descriptor, engine discovery, PostgreSQL read-only SQL, Spark SQL,
@@ -39,12 +39,12 @@ AutoML metrics/experiments, model registry and drift history.
 
 Optional connectors can be probed with:
 
-\`\`\`bash
+```bash
 python3 scripts/platform_test.py --include-optional --scenario balanced --requests 300
-\`\`\`
+```
 
 This adds catalog discovery, Cassandra system-table access and Flink REST checks.
-Set \`SBASE_SOLR_TEST_COLLECTION\` to a real Solr collection name to enable the Solr
+Set `SBASE_SOLR_TEST_COLLECTION` to a real Solr collection name to enable the Solr
 query probe. Optional integrations that are not running are reported as warnings,
 not as failures. A pre-uploaded Flink JAR is required to test actual Flink submission;
 the runner deliberately does not submit an arbitrary job.
@@ -54,9 +54,9 @@ the runner deliberately does not submit an arbitrary job.
 The default run is read-only apart from ordinary query execution. Workflow creation,
 job submission, dataset profiling and statistical drift analysis are opt-in:
 
-\`\`\`bash
+```bash
 python3 scripts/platform_test.py --write-tests --requests 100 --workers 8
-\`\`\`
+```
 
 This validates workflow creation and immutable version reads, submits a workflow,
 checks idempotent run submission, polls the distributed job to a terminal state,
@@ -69,9 +69,9 @@ development/test database, not a production database.
 
 To additionally run a small Spark ML classification training job:
 
-\`\`\`bash
+```bash
 python3 scripts/platform_test.py --write-tests --automl-training --requests 20 --workers 2
-\`\`\`
+```
 
 AutoML training is intentionally separate because Spark model fitting and
 cross-validation are substantially more expensive than API contract checks. It may
@@ -83,7 +83,7 @@ The runner supports fixed request counts or duration-based runs. Each worker sen
 requests concurrently; there are no automatic retries that would conceal failures or
 inflate throughput.
 
-\`\`\`bash
+```bash
 # 2,000 requests, 24 concurrent workers
 python3 scripts/platform_test.py --scenario balanced --requests 2000 --workers 24
 
@@ -95,24 +95,24 @@ python3 scripts/platform_test.py --scenario balanced --duration-seconds 86400 --
 
 # Up to one week, if explicitly intended
 python3 scripts/platform_test.py --scenario balanced --duration-seconds 604800 --workers 12
-\`\`\`
+```
 
 Scenarios:
 
 | Scenario | Workload |
 |---|---|
-| \`smoke\` | Liveness, readiness, capabilities, components, operators and low-cost reads |
-| \`balanced\` | Smoke coverage plus workflow/job/model/schedule/experiment and descriptor reads |
-| \`compute\` | Balanced reads plus Spark SQL, PostgreSQL SELECT, workflow validation and query planning |
+| `smoke` | Liveness, readiness, capabilities, components, operators and low-cost reads |
+| `balanced` | Smoke coverage plus workflow/job/model/schedule/experiment and descriptor reads |
+| `compute` | Balanced reads plus Spark SQL, PostgreSQL SELECT, workflow validation and query planning |
 
 The load mix is read-only. It does not create workflows, train models, submit Flink JARs,
-or run arbitrary SQL. PostgreSQL and Spark probes use constant \`SELECT 1\` statements.
+or run arbitrary SQL. PostgreSQL and Spark probes use constant `SELECT 1` statements.
 The runner reports request count, HTTP status distribution, errors, bytes received,
 throughput, mean latency and p50/p95/p99 latency globally and per route.
 
 ## Options
 
-\`\`\`text
+```text
 --base-url URL             API base URL (default: SBASE_BASE_URL or localhost)
 --studio-url URL           Also check the React Studio HTTP endpoint
 --env-file PATH            Read KEY=VALUE values (default: .env)
@@ -127,14 +127,14 @@ throughput, mean latency and p50/p95/p99 latency globally and per route.
 --automl-training          Also fit one small Spark ML model; requires --write-tests
 --report PATH              JSON report path (default: artifacts/platform-test-report.json)
 --allow-high-load          Required when workers exceed 100
-\`\`\`
+```
 
 Examples with custom ports:
 
-\`\`\`bash
+```bash
 SBASE_BASE_URL=http://127.0.0.1:8085 \
 python3 scripts/platform_test.py --scenario compute --requests 500 --workers 10
-\`\`\`
+```
 
 The JSON report contains each check, elapsed time, pass/warning/failure counts,
 per-route load statistics and a sample of failed requests. A non-zero exit code means
@@ -146,8 +146,8 @@ ratio exceeded the configured objective.
 - Start with a small smoke run and increase workers gradually.
 - Do not run stress/soak tests against production or shared environments without an
   explicit capacity window and approval.
-- More than 100 concurrent workers requires \`--allow-high-load\`.
-- Use \`--write-tests\` only with a disposable database. It intentionally leaves
+- More than 100 concurrent workers requires `--allow-high-load`.
+- Use `--write-tests` only with a disposable database. It intentionally leaves
   timestamped records for later inspection.
 - Long soak runs should use persistent logs/metrics and monitor PostgreSQL, Spark
   local scratch space, JVM heap, container restarts and host disk capacity separately.
