@@ -202,9 +202,7 @@ object Main {
        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
        case Failure(error)=>system.log.error("Model alias rollback failed",error);complete(StatusCodes.Conflict->JsObject("error"->JsString(Option(error.getMessage).getOrElse("rollback failed"))))
       }}
-    } ~
-
-    path("models"/JavaUUID/"card"){modelId=>
+    } ~ path("models"/JavaUUID/"card"){modelId=>
       get{onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.model(modelId).get("modelCard")).parseJson))){
        case Success(value)=>complete(value)
        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
