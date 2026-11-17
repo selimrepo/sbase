@@ -75,6 +75,82 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
  }
 
+
+ def workflows(limit:Int):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("""SELECT w.id,w.workspace_id,w.name,w.description,w.active_version,w.created_at,w.updated_at,
+    | (SELECT COUNT(*) FROM workflow_version v WHERE v.workflow_id=w.id) AS version_count,
+    | (SELECT COUNT(*) FROM job_execution j WHERE j.workflow_id=w.id) AS run_count
+    | FROM workflow w ORDER BY w.updated_at DESC LIMIT ?""".stripMargin)
+   p.setInt(1,math.max(1,math.min(limit,500)))
+   val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next()) out += Map[String,Object](
+    "id"->rs.getObject("id"),"workspaceId"->rs.getObject("workspace_id"),
+    "name"->rs.getString("name"),"description"->Option(rs.getString("description")).orNull,
+    "activeVersion"->(if(rs.getObject("active_version")==null)null else Int.box(rs.getInt("active_version"))),
+    "versionCount"->Int.box(rs.getInt("version_count")),"runCount"->Int.box(rs.getInt("run_count")),
+    "createdAt"->rs.getObject("created_at").toString,"updatedAt"->rs.getObject("updated_at").toString)
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
+ def workflow(id:UUID):Option[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("""SELECT w.id,w.workspace_id,w.name,w.description,w.active_version,w.created_at,w.updated_at,
+    | v.checksum,v.definition::text AS definition,
+    | (SELECT COUNT(*) FROM workflow_version x WHERE x.workflow_id=w.id) AS version_count,
+    | (SELECT COUNT(*) FROM job_execution j WHERE j.workflow_id=w.id) AS run_count
+    | FROM workflow w LEFT JOIN workflow_version v ON v.workflow_id=w.id AND v.version=w.active_version
+    | WHERE w.id=?""".stripMargin)
+   p.setObject(1,id);val rs=p.executeQuery()
+   val result=if(rs.next())Some(Map[String,Object](
+    "id"->rs.getObject("id"),"workspaceId"->rs.getObject("workspace_id"),
+    "name"->rs.getString("name"),"description"->Option(rs.getString("description")).orNull,
+    "activeVersion"->(if(rs.getObject("active_version")==null)null else Int.box(rs.getInt("active_version"))),
+    "checksum"->Option(rs.getString("checksum")).orNull,"definition"->Option(rs.getString("definition")).orNull,
+    "versionCount"->Int.box(rs.getInt("version_count")),"runCount"->Int.box(rs.getInt("run_count")),
+    "createdAt"->rs.getObject("created_at").toString,"updatedAt"->rs.getObject("updated_at").toString)) else None
+   rs.close();p.close();result
+  } finally c.close()
+ }
+
+ def workflowVersion(id:UUID,version:Int):Option[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("SELECT version,checksum,definition::text,created_at FROM workflow_version WHERE workflow_id=? AND version=?")
+   p.setObject(1,id);p.setInt(2,version);val rs=p.executeQuery()
+   val result=if(rs.next())Some(Map[String,Object](
+    "workflowId"->id.toString,"version"->Int.box(rs.getInt(1)),
+    "checksum"->rs.getString(2),"definition"->rs.getString(3),
+    "createdAt"->rs.getObject(4).toString))else None
+   rs.close();p.close();result
+  } finally c.close()
+ }
+
+ def jobs(limit:Int):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("""SELECT j.id,j.workflow_id,w.name AS workflow_name,j.workflow_version,j.status,
+    | j.attempt,j.max_attempts,j.error_code,j.error_message,j.submitted_at,j.started_at,j.finished_at,j.result::text
+    | FROM job_execution j JOIN workflow w ON w.id=j.workflow_id
+    | ORDER BY j.submitted_at DESC LIMIT ?""".stripMargin)
+   p.setInt(1,math.max(1,math.min(limit,500)));val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next()) out += Map[String,Object](
+    "id"->rs.getObject("id"),"workflowId"->rs.getObject("workflow_id"),
+    "workflowName"->rs.getString("workflow_name"),"workflowVersion"->Int.box(rs.getInt("workflow_version")),
+    "status"->rs.getString("status"),"attempt"->Int.box(rs.getInt("attempt")),
+    "maxAttempts"->Int.box(rs.getInt("max_attempts")),"errorCode"->Option(rs.getString("error_code")).orNull,
+    "errorMessage"->Option(rs.getString("error_message")).orNull,
+    "submittedAt"->rs.getObject("submitted_at").toString,
+    "startedAt"->Option(rs.getString("started_at")).orNull,
+    "finishedAt"->Option(rs.getString("finished_at")).orNull,
+    "result"->Option(rs.getString("result")).orNull)
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
  def submit(workflowId:UUID,idempotencyKey:String,maxAttempts:Int):UUID = {
   require(idempotencyKey!=null && idempotencyKey.nonEmpty && idempotencyKey.length<=200,"Invalid idempotency key")
   val c=dataSource.getConnection

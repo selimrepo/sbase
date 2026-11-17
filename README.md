@@ -156,6 +156,8 @@ Calcite is embedded in the SBase process and requires no separate service. This 
 
 All platform capabilities are exposed under `/api/v1`:
 
+The complete route inventory, request examples, editor discovery contract and engine APIs are documented in [docs/API_REFERENCE.md](docs/API_REFERENCE.md). Clients should query the component and operator catalogs to discover available node types instead of hard-coding them.
+
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/v1/capabilities` | Discover engines and exposed API groups |
@@ -168,6 +170,8 @@ All platform capabilities are exposed under `/api/v1`:
 | `POST /api/v1/automl/train` | Synchronous cross-validated AutoML training |\n| `POST /api/v1/automl/jobs` | Submit asynchronous AutoML training |\n| `GET /api/v1/automl/jobs/{id}` and `POST /api/v1/automl/jobs/{id}` | Read or cancel an AutoML job |
 | `GET /api/v1/automl/experiments` and `GET /api/v1/automl/experiments/{id}` | Experiment history and trial metrics |
 | `GET /api/v1/models` and `GET /api/v1/models/{id}` | Model registry |
+| `GET /api/v1/models/{id}/card` | Scientific model card, evaluation, baseline and reproducibility metadata |
+| `POST /api/v1/models/{id}/monitoring` and `GET /api/v1/models/{id}/monitoring` | Production feature-drift checks and durable monitoring history |
 | `POST /api/v1/models/{id}` | Batch prediction using a registered model |
 | `POST /api/v1/models/{id}/archive` | Archive a model |
 | `PUT /api/v1/models/aliases/{alias}` | Promote/rollback a deployment alias to a ready model |
@@ -212,9 +216,38 @@ Example:
 The plan endpoint is advisory. For actual cross-source joins, use the executable
 `/api/v1/query/execute` endpoint described below.
 
-### AutoML
+### Scientific and enterprise AutoML
 
-`POST /api/v1/automl/train` supports `classification`, `regression` and `time_series` tasks. Numeric features are assembled directly; string/categorical features are automatically processed with Spark ML `StringIndexer` and `OneHotEncoder`. Constant features are removed before fitting. For time-series tasks, supply `timeColumn` and optional `lags` (1–24); the service builds lagged target features and uses a chronological train/validation split. Candidate models include linear, tree and ensemble regressors/classifiers, including GBT for time-series regression. Cross-validation and bounded parameter grids are used for candidate comparison.
+`POST /api/v1/automl/train` supports `classification`, `regression` and `time_series`. The AutoML pipeline now includes:
+
+- Numeric median imputation fitted inside each training fold; categorical `StringIndexer` + `OneHotEncoder`; constant/empty feature filtering.
+- Bounded Spark ML candidate search with parameter grids and configurable cross-validation for classification/regression.
+- Configurable selection metrics: classification `accuracy`, `f1`, `weightedPrecision`, `weightedRecall`; regression `rmse`, `mae`, `mse`, `r2`, `var`.
+- Independent holdout evaluation with multiple metrics and a majority-class or training-mean baseline.
+- Deterministic seed, canonical SHA-256 dataset fingerprint, schema snapshot, Spark version and validation protocol in a persisted model card.
+- Feature missingness and training distribution profiles. Optional binary-classification fairness diagnostics are available through `sensitiveColumn`; the sensitive attribute must not be included in `features`. The report includes demographic-parity and equal-opportunity differences for groups meeting `fairnessMinGroupSize`.
+- Time-series target lags (1–24) generated in Spark using the typed time column, unique timestamps, and a chronological 80/20 holdout. Random-fold CrossValidator is deliberately disabled for time series to avoid temporal leakage.
+- Production drift checks against the persisted training profile: numeric mean shift/out-of-range rates, missingness and unseen categorical values, with LOW/MEDIUM/HIGH operational severity.
+
+Example request:
+
+```json
+{
+  "name": "Customer churn research",
+  "task": "classification",
+  "label": "churn",
+  "features": ["tenure", "monthly_spend", "segment"],
+  "sensitiveColumn": "region",
+  "fairnessMinGroupSize": 20,
+  "optimizationMetric": "f1",
+  "seed": 2026,
+  "cvFolds": 5
+}
+```
+
+Supply `data` as an array of at least 50 row objects (time-series requests need at least 50 usable rows after lag generation).
+
+Model cards are returned with training results and are available through `GET /api/v1/models/{id}/card`. Monitor a new labelled or unlabelled feature batch with `POST /api/v1/models/{id}/monitoring` and body `{"rows":[...]}`; retrieve durable history with `GET /api/v1/models/{id}/monitoring?limit=50`. Monitoring thresholds are heuristics, not statistical proof of drift or fairness compliance. This first implementation records batch drift reports; it does not automatically retrain or switch production aliases.
 
 The synchronous endpoint remains available. For non-blocking execution:
 
@@ -222,7 +255,7 @@ The synchronous endpoint remains available. For non-blocking execution:
 - `GET /api/v1/automl/jobs/{id}` returns queue/training status and result.
 - `POST /api/v1/automl/jobs/{id}` requests cancellation; the queue interrupts the worker and cancels the associated Spark job group.
 
-Queue capacity and workers are controlled by `SBASE_AUTOML_WORKERS` and `SBASE_AUTOML_QUEUE_CAPACITY`. Experiment, trial and model metadata remain in PostgreSQL. Artifacts are written under `SBASE_MODEL_REGISTRY_PATH`. For multiple application servers, replace the `model_registry_data` named volume with the same shared NFS/POSIX mount on every host; the default named volume is local to one Docker host.
+Queue capacity and workers are controlled by `SBASE_AUTOML_WORKERS` and `SBASE_AUTOML_QUEUE_CAPACITY`. Experiment, trial, model-card and monitoring metadata remain in PostgreSQL. Artifacts are written under `SBASE_MODEL_REGISTRY_PATH`. For multiple application servers, replace the `model_registry_data` named volume with the same shared NFS/POSIX mount on every host; the default named volume is local to one Docker host.
 
 ### Federated execution
 
@@ -315,3 +348,8 @@ The Compose file includes optional development profiles for Cassandra, Solr, Spa
 ## License
 
 Apache License 2.0. See `LICENSE`.
+
+
+### Temporal validation, drift automation and rollback
+
+See [AutoML operations](docs/AUTOML_OPERATIONS.md) for expanding-window rolling-origin validation, drift-triggered labeled retraining, common-holdout promotion gates, cooldowns and safe model-alias rollback.

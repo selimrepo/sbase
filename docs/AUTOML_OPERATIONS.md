@@ -1,0 +1,123 @@
+# AutoML temporal validation and drift automation
+
+## Rolling-origin cross-validation
+
+For `task=time_series`, AutoML now performs expanding-window walk-forward validation inside the chronological 80/20 training/holdout split:
+
+- `rollingFolds` controls the number of folds (2–5, default 3).
+- Each fold trains only on observations earlier than its validation window.
+- The training window expands after every fold; validation windows do not overlap.
+- Preprocessing estimators (median imputation, categorical indexing/encoding and vector assembly) are fitted independently inside each fold.
+- Numeric/categorical constant-feature selection is based on the chronological training window, not the future holdout.
+- Candidate selection uses the mean configured metric across rolling folds. The final model is refitted on the complete training window and reported once against the untouched chronological holdout.
+- Lagged features use walk-forward one-step semantics: later rows may use already observed earlier target values. This is not a multi-horizon forecast benchmark.
+
+Example training request:
+
+```json
+{
+  "task": "time_series",
+  "timeColumn": "observedAt",
+  "label": "demand",
+  "features": ["price", "promotion"],
+  "lags": 6,
+  "rollingFolds": 4,
+  "optimizationMetric": "rmse",
+  "data": []
+}
+```
+
+Replace `data` with the labeled observations; at least 50 usable rows are required after lag generation.
+
+## Drift-triggered retraining
+
+`POST /api/v1/models/{modelId}/monitoring` continues to accept `rows` for feature drift analysis. Optional automation is configured in `policy`. Retraining requires a separate, labeled `retrainingRequest`; unlabeled drift batches are never silently treated as training data.
+
+```json
+{
+  "rows": [],
+  "policy": {
+    "autoRetrain": true,
+    "triggerLevel": "HIGH",
+    "cooldownHours": 24,
+    "autoPromote": true,
+    "promotionAlias": "production",
+    "minimumImprovement": 0.02,
+    "promotionEvaluationData": []
+  },
+  "retrainingRequest": {
+    "name": "drift-retrain-2026-11",
+    "task": "regression",
+    "label": "target",
+    "features": ["featureA", "featureB"],
+    "optimizationMetric": "rmse",
+    "data": []
+  }
+}
+```
+
+Replace all empty arrays with actual rows. `rows` may be unlabeled and is used for drift detection. `retrainingRequest.data` must contain at least 50 labeled rows and match the monitored model's task. `promotionEvaluationData` must be a separate, labeled holdout (2–50,000 rows) with the same label and feature schema; it is used to score incumbent and candidate on exactly the same observations. Do not reuse training rows as the promotion holdout.
+
+Policy fields:
+
+- `autoRetrain`: defaults to false.
+- `triggerLevel`: `MEDIUM` or `HIGH` threshold; defaults to `HIGH`.
+- `cooldownHours`: prevents repeated successful retraining for the same source model (0–720, default 24).
+- `autoPromote`: defaults to false. If enabled, `promotionAlias` is required.
+- `minimumImprovement`: minimum absolute metric improvement on the common evaluation set; defaults to 0.0. The metric direction is read from the model card.
+- `promotionEvaluationData`: required for automatic promotion. Candidate and incumbent feature schemas and optimization metrics must match.
+
+An automatic promotion occurs only if the requested alias currently points to the monitored model, the candidate is READY, both models can be scored on the common labeled holdout, and the candidate improves by at least the configured margin. A changed alias, mismatched schema/metric, missing evaluation set, or insufficient improvement blocks promotion. Retraining may succeed while promotion is blocked; the candidate remains in the registry for review.
+
+## Rollback
+
+Successful automatic promotions are recorded in `model_promotion_event`. Restore the previous model with:
+
+```http
+POST /api/v1/models/aliases/production/rollback
+```
+
+Rollback is conditional: it succeeds only if the alias still points to the model from the latest recorded promotion and the previous model remains READY. This prevents an old rollback event from overwriting a newer manual deployment.
+
+## Operational notes
+
+- Monitoring history stores both the drift report and the automation decision.
+- A drift threshold is a trigger, not proof of model degradation. Retraining and promotion are separate decisions.
+- Promotion evaluation is a common holdout comparison, not a statistical significance test. For high-impact models, add repeated temporal holdouts and domain-specific acceptance thresholds.
+- For time-series models, provide a chronologically representative labeled evaluation holdout with all lag features required by the model.
+
+
+## Dataset profiling and statistical drift tests
+
+### Dataset profile
+
+`POST /api/v1/automl/data/profile`
+
+Provide `data`, optional `features`, and optional `label`. The Spark profiler returns schema types, exact null/blank counts, distinct cardinality, duplicate-row count, label frequencies, numeric min/max/mean/standard deviation, approximate quartiles and Tukey 1.5×IQR outlier rates. It also computes a deterministic SHA-256 fingerprint independent of input row order and reports warnings for high missingness, constant columns, high-cardinality categoricals and outlier-heavy numeric features.
+
+Inline profile input is capped at 100,000 rows. Use the catalog/ingestion plane for larger datasets. Profiling is descriptive: it does not impute, delete or mutate source records.
+
+### Statistical feature drift
+
+`POST /api/v1/automl/monitoring/statistical-drift`
+
+Example:
+
+```json
+{
+  "modelId": "optional-model-uuid",
+  "features": ["age", "region"],
+  "reference": [{"age": 35, "region": "west"}],
+  "current": [{"age": 51, "region": "east"}],
+  "psiThreshold": 0.2,
+  "ksAlpha": 0.05,
+  "missingRateDeltaThreshold": 0.1
+}
+```
+
+Numeric features are compared with reference-derived quantile-bin PSI and the two-sample Kolmogorov–Smirnov statistic/p-value approximation. Categorical features use category-frequency PSI. Both paths report missing-rate changes. Each result is stored independently in `model_statistical_drift_run`, so statistical tests do not overwrite the existing operational drift history used by retraining policies.
+
+- `GET /api/v1/automl/monitoring/statistical-runs` lists recent statistical drift reports.
+- `GET /api/v1/models/{modelId}/statistical-drift` lists reports associated with a registered model.
+
+PSI and KS are covariate-shift indicators, not evidence of causal change or a substitute for labeled performance monitoring. KS p-values use the asymptotic two-sample approximation. Operational retraining/promotion policies remain separately governed by the model-monitoring API described above.

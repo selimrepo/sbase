@@ -125,6 +125,32 @@ public final class CatalogService implements AutoCloseable {
         return Map.of("documents",response.getResults(),"numFound",response.getResults().getNumFound());
     }
 
+    /** Returns column metadata for a single PostgreSQL table without executing user SQL. */
+    public Map<String,Object> postgresColumns(String schema, String table) throws SQLException {
+        if (schema == null || !schema.matches("[A-Za-z_][A-Za-z0-9_]{0,62}")
+                || table == null || !table.matches("[A-Za-z_][A-Za-z0-9_]{0,62}"))
+            throw new IllegalArgumentException("Invalid PostgreSQL schema or table name");
+        try (Connection c = DriverManager.getConnection(pgUrl, pgUser, pgPassword)) {
+            DatabaseMetaData metadata = c.getMetaData();
+            List<Map<String,Object>> columns = new ArrayList<>();
+            try (ResultSet rs = metadata.getColumns(null, schema, table, "%")) {
+                while (rs.next()) {
+                    Map<String,Object> column = new LinkedHashMap<>();
+                    column.put("name", rs.getString("COLUMN_NAME"));
+                    column.put("type", rs.getString("TYPE_NAME"));
+                    column.put("jdbcType", rs.getInt("DATA_TYPE"));
+                    column.put("size", rs.getInt("COLUMN_SIZE"));
+                    column.put("nullable", rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls);
+                    column.put("ordinal", rs.getInt("ORDINAL_POSITION"));
+                    column.put("default", rs.getString("COLUMN_DEF"));
+                    columns.add(column);
+                }
+            }
+            if (columns.isEmpty()) throw new NoSuchElementException("PostgreSQL table not found: " + schema + "." + table);
+            return Map.of("source", "postgresql", "schema", schema, "table", table, "columns", columns);
+        }
+    }
+
     private CqlSession cassandra() {
         if(cassandra==null) synchronized(this) {
             if(cassandra==null) cassandra=CqlSession.builder()
