@@ -30,7 +30,7 @@ public final class FederatedQueryExecutor implements AutoCloseable {
 
     public Map<String,Object> execute(String sql,Map<String,Map<String,Object>> sources,int maxRows)throws Exception{
         if(sql==null||sql.isBlank())throw new IllegalArgumentException("sql is required");
-        SqlNode parsed=SqlParser.create(sql).parseQuery();
+        SqlNode parsed=SqlParser.create(CalciteSqlCompatibility.forParsing(sql)).parseQuery();
         if(parsed.getKind()!=SqlKind.SELECT&&parsed.getKind()!=SqlKind.WITH)
             throw new IllegalArgumentException("Only read-only SELECT queries are supported");
         int rowLimit=Math.max(1,Math.min(maxRows,5000));
