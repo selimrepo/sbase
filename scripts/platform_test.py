@@ -12,6 +12,7 @@ import concurrent.futures
 import json
 import math
 import os
+import random
 import statistics
 import sys
 import threading
@@ -598,9 +599,33 @@ class PlatformRunner:
             start + self.args.duration_seconds if self.args.duration_seconds > 0 else None
         )
 
-        def worker(worker_id: int) -> list[dict[str, Any]]:
+        max_global_samples = 2000
+        max_route_samples = 200
+
+        def worker(worker_id: int) -> dict[str, Any]:
             nonlocal counter
-            local: list[dict[str, Any]] = []
+            rng = random.Random(worker_id)
+            local: dict[str, Any] = {
+                "requests": 0,
+                "errors": 0,
+                "bytes_received": 0,
+                "statuses": Counter(),
+                "latencies": [],
+                "latency_seen": 0,
+                "routes": {},
+                "sample_errors": [],
+            }
+
+            def sample(values: list[float], seen: int, value: float, capacity: int) -> int:
+                seen += 1
+                if len(values) < capacity:
+                    values.append(value)
+                else:
+                    slot = rng.randrange(seen)
+                    if slot < capacity:
+                        values[slot] = value
+                return seen
+
             while True:
                 with counter_lock:
                     if duration_deadline is not None:
@@ -614,68 +639,107 @@ class PlatformRunner:
                 result = self.client.request(
                     operation.method, operation.path, operation.payload
                 )
-                local.append({
-                    "method": operation.method,
-                    "path": operation.path,
-                    "status": result.status,
-                    "elapsed_ms": result.elapsed_ms,
-                    "bytes_received": result.bytes_received,
-                    "error": result.error,
+                route_name = f"{operation.method} {operation.path}"
+                route = local["routes"].setdefault(route_name, {
+                    "requests": 0, "errors": 0, "statuses": Counter(),
+                    "latencies": [], "latency_seen": 0,
                 })
+                successful = 200 <= result.status < 300
+                local["requests"] += 1
+                local["errors"] += 0 if successful else 1
+                local["bytes_received"] += result.bytes_received
+                local["statuses"][str(result.status)] += 1
+                local["latency_seen"] = sample(
+                    local["latencies"], local["latency_seen"],
+                    result.elapsed_ms, max_global_samples,
+                )
+                route["requests"] += 1
+                route["errors"] += 0 if successful else 1
+                route["statuses"][str(result.status)] += 1
+                route["latency_seen"] = sample(
+                    route["latencies"], route["latency_seen"],
+                    result.elapsed_ms, max_route_samples,
+                )
+                if not successful and len(local["sample_errors"]) < 10:
+                    local["sample_errors"].append({
+                        "method": operation.method,
+                        "path": operation.path,
+                        "status": result.status,
+                        "elapsed_ms": result.elapsed_ms,
+                        "error": result.error,
+                    })
+            local["statuses"] = dict(local["statuses"])
+            for route in local["routes"].values():
+                route["statuses"] = dict(route["statuses"])
             return local
 
-        results: list[dict[str, Any]] = []
+        worker_summaries: list[dict[str, Any]] = []
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.args.workers, thread_name_prefix="sbase-load"
         ) as pool:
             futures = [pool.submit(worker, index) for index in range(self.args.workers)]
             for future in concurrent.futures.as_completed(futures):
-                results.extend(future.result())
+                worker_summaries.append(future.result())
 
         elapsed = max(time.monotonic() - start, 0.000001)
-        latencies = [float(item["elapsed_ms"]) for item in results]
-        failures = [
-            item for item in results
-            if not 200 <= int(item["status"]) < 300
+        total_requests = sum(item["requests"] for item in worker_summaries)
+        total_errors = sum(item["errors"] for item in worker_summaries)
+        latencies = [
+            value for item in worker_summaries for value in item["latencies"]
         ]
-        statuses = Counter(str(item["status"]) for item in results)
-        by_route: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for item in results:
-            by_route[f'{item["method"]} {item["path"]}'].append(item)
+        statuses: Counter[str] = Counter()
+        merged_routes: dict[str, dict[str, Any]] = {}
+        sample_errors: list[dict[str, Any]] = []
+        total_bytes = 0
+        for item in worker_summaries:
+            statuses.update(item["statuses"])
+            total_bytes += item["bytes_received"]
+            sample_errors.extend(item["sample_errors"])
+            for route_name, route in item["routes"].items():
+                merged = merged_routes.setdefault(route_name, {
+                    "requests": 0, "errors": 0, "statuses": Counter(), "latencies": [],
+                })
+                merged["requests"] += route["requests"]
+                merged["errors"] += route["errors"]
+                merged["statuses"].update(route["statuses"])
+                merged["latencies"].extend(route["latencies"])
 
         route_stats: dict[str, Any] = {}
-        for route, items in sorted(by_route.items()):
-            route_latencies = [float(item["elapsed_ms"]) for item in items]
-            route_stats[route] = {
-                "requests": len(items),
-                "errors": sum(not 200 <= int(item["status"]) < 300 for item in items),
+        for route_name, route in sorted(merged_routes.items()):
+            route_latencies = route["latencies"]
+            route_stats[route_name] = {
+                "requests": route["requests"],
+                "errors": route["errors"],
+                "http_statuses": dict(route["statuses"]),
                 "p50_ms": round(percentile(route_latencies, 0.50), 3),
                 "p95_ms": round(percentile(route_latencies, 0.95), 3),
                 "p99_ms": round(percentile(route_latencies, 0.99), 3),
-                "mean_ms": round(statistics.fmean(route_latencies), 3) if route_latencies else 0,
+                "mean_sample_ms": round(statistics.fmean(route_latencies), 3) if route_latencies else 0,
             }
 
-        error_rate = len(failures) / len(results) if results else 1.0
+        error_rate = total_errors / total_requests if total_requests else 1.0
         summary = {
             "scenario": self.args.scenario,
             "workers": self.args.workers,
-            "requests": len(results),
-            "errors": len(failures),
+            "requests": total_requests,
+            "errors": total_errors,
             "error_rate": round(error_rate, 6),
             "duration_seconds": round(elapsed, 3),
-            "throughput_rps": round(len(results) / elapsed, 3),
+            "throughput_rps": round(total_requests / elapsed, 3),
             "latency_ms": {
+                "sample_count": len(latencies),
                 "min": round(min(latencies), 3) if latencies else 0,
-                "mean": round(statistics.fmean(latencies), 3) if latencies else 0,
+                "mean_sample": round(statistics.fmean(latencies), 3) if latencies else 0,
                 "p50": round(percentile(latencies, 0.50), 3),
                 "p95": round(percentile(latencies, 0.95), 3),
                 "p99": round(percentile(latencies, 0.99), 3),
                 "max": round(max(latencies), 3) if latencies else 0,
             },
             "http_statuses": dict(statuses),
-            "bytes_received": sum(int(item["bytes_received"]) for item in results),
+            "bytes_received": total_bytes,
+            "latency_sampling": "reservoir sampling; bounded memory for long soak runs",
             "routes": route_stats,
-            "sample_errors": failures[:20],
+            "sample_errors": sample_errors[:20],
         }
         print(
             f"requests={summary['requests']} errors={summary['errors']} "
@@ -687,7 +751,7 @@ class PlatformRunner:
             f"p95={summary['latency_ms']['p95']:.1f}, "
             f"p99={summary['latency_ms']['p99']:.1f}"
         )
-        passed = bool(results) and error_rate <= self.args.max_error_rate
+        passed = total_requests > 0 and error_rate <= self.args.max_error_rate
         self.record(
             "Load-test error-rate objective",
             passed,
