@@ -27,6 +27,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+TOOL_VERSION = "1.0.1"
+
+
 @dataclass
 class HttpResult:
     status: int
@@ -132,7 +135,7 @@ class PlatformRunner:
         self.args = args
         self.client = ApiClient(
             args.base_url, args.timeout,
-            f"SBase-Platform-Test/{args.version}",
+            f"SBase-Platform-Test/{TOOL_VERSION}",
         )
         self.checks: list[Check] = []
         self.failures = 0
@@ -771,7 +774,7 @@ class PlatformRunner:
         ended = datetime.now(timezone.utc)
         payload = {
             "tool": "SBase Platform Test",
-            "version": self.args.version,
+            "version": self.TOOL_VERSION,
             "run_id": self.run_id,
             "base_url": self.args.base_url,
             "started_at": self.started_at.isoformat(),
@@ -841,7 +844,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--poll-interval", type=float, default=1.0, help="Workflow job polling interval")
     parser.add_argument("--allow-high-load", action="store_true", help="Acknowledge load above 100 concurrent workers")
     parser.add_argument("--report", default="artifacts/platform-test-report.json", help="JSON report output path")
-    parser.add_argument("--version", action="version", version="SBase Platform Test 1.0.0")
+    parser.add_argument("--version", action="version", version=f"SBase Platform Test {TOOL_VERSION}")
     parser.add_argument("--self-test", action="store_true", help="Run local test-runner self-tests and exit")
     args = parser.parse_args()
 
