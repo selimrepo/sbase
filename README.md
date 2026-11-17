@@ -353,3 +353,22 @@ Apache License 2.0. See `LICENSE`.
 ### Temporal validation, drift automation and rollback
 
 See [AutoML operations](docs/AUTOML_OPERATIONS.md) for expanding-window rolling-origin validation, drift-triggered labeled retraining, common-holdout promotion gates, cooldowns and safe model-alias rollback.
+
+
+## Platform verification and load testing
+
+A standard-library Python runner checks API contracts, all advertised operator descriptors,
+workflow execution and idempotency (opt-in), dataset profiling, statistical drift,
+optional connectors, and concurrent load/soak behavior.
+
+See [docs/PLATFORM_TESTING.md](docs/PLATFORM_TESTING.md) for setup, safe test modes,
+duration-based endurance runs, latency/error reporting and example commands.
+
+Quick run:
+
+```bash
+python3 scripts/platform_test.py --scenario balanced --requests 300 --workers 12
+```
+
+Persistent workflow/AutoML integration checks require the explicit `--write-tests` flag
+and should use a disposable test database.

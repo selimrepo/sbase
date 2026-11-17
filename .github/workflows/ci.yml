@@ -61,9 +61,23 @@ jobs:
       - name: Build React Workflow Studio
         run: npm run build
 
+  python-test-tool:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile platform test runner
+        run: python -m py_compile scripts/platform_test.py
+      - name: Run platform test runner self-tests
+        run: python scripts/platform_test.py --self-test
+      - name: Validate CLI help
+        run: python scripts/platform_test.py --help
+
   container:
     runs-on: ubuntu-latest
-    needs: [backend, workflow-studio]
+    needs: [backend, workflow-studio, python-test-tool]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
