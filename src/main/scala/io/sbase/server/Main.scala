@@ -197,8 +197,8 @@ object Main {
       }}
     } ~
     path("models"/JavaUUID/"card"){modelId=>
-      get{onComplete(Future(scala.concurrent.blocking(autoMl.model(modelId).getOrElse("modelCard",Map.empty[String,Object])))){
-       case Success(value)=>complete(mapper.writeValueAsString(value).parseJson)
+      get{onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.model(modelId).get("modelCard")).parseJson))){
+       case Success(value)=>complete(value)
        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
        case Failure(error)=>system.log.error("Model card lookup failed",error);complete(StatusCodes.InternalServerError)
       }}
