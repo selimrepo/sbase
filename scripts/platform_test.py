@@ -12,7 +12,6 @@ import concurrent.futures
 import json
 import math
 import os
-import random
 import statistics
 import sys
 import threading
@@ -181,7 +180,12 @@ class PlatformRunner:
                 result.error = f"response validation: {error}"
         detail = ""
         if not valid:
-            detail = result.error or f"expected HTTP {expected}, received {result.status}"
+            if result.error:
+                detail = result.error
+            elif result.status not in expected:
+                detail = f"expected HTTP {expected}, received {result.status}"
+            else:
+                detail = "response contract validation failed"
         self.record(name, valid, required, result, detail)
         return result
 
@@ -275,6 +279,24 @@ class PlatformRunner:
                     }
                 },
             },
+        )
+        self.call(
+            "Federated PostgreSQL-to-Spark execution", "POST", "/api/v1/query/execute",
+            {
+                "sql": "SELECT value FROM probe",
+                "limit": 5,
+                "sources": {
+                    "probe": {
+                        "type": "postgresql",
+                        "query": "SELECT 1 AS value",
+                        "parameters": [],
+                        "limit": 5,
+                    }
+                },
+            },
+            validator=lambda body: isinstance(body, dict)
+            and body.get("status") == "SUCCEEDED"
+            and body.get("rowCount") == 1,
         )
         definition = self.workflow_definition()
         self.call(
@@ -413,7 +435,8 @@ class PlatformRunner:
         )
         self.call("Read job execution events", "GET", f"/api/v1/jobs/{job_id}/events")
 
-    def sample_rows(self, count: int = 80, shift: float = 0.0) -> list[dict[str, Any]]:
+    @staticmethod
+    def sample_rows(count: int = 80, shift: float = 0.0) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for index in range(count):
             value = float(index) + shift
@@ -532,6 +555,21 @@ class PlatformRunner:
                             "customers": {
                                 "source": "postgresql", "rows": 1000,
                                 "bytes": 4096, "partitions": 2,
+                            }
+                        },
+                    },
+                ),
+                Operation(
+                    "POST", "/api/v1/query/execute",
+                    {
+                        "sql": "SELECT value FROM probe",
+                        "limit": 5,
+                        "sources": {
+                            "probe": {
+                                "type": "postgresql",
+                                "query": "SELECT 1 AS value",
+                                "parameters": [],
+                                "limit": 5,
                             }
                         },
                     },
@@ -711,8 +749,8 @@ def run_self_tests() -> int:
     assert percentile([1.0, 2.0, 3.0, 4.0], 0.50) == 2.5
     assert percentile([10.0], 0.99) == 10.0
     assert percentile([], 0.95) == 0.0
-    rows = PlatformRunner.sample_rows  # Ensure deterministic fixture generator exists.
-    assert callable(rows)
+    rows = PlatformRunner.sample_rows(2)
+    assert len(rows) == 2 and rows[0]["target"] == 1
     definition = PlatformRunner.workflow_definition()
     assert len(definition["nodes"]) == 2 and len(definition["edges"]) == 1
     print("Python test runner self-tests passed.")
@@ -744,6 +782,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     load_env_file(args.env_file)
+    if not args.studio_url:
+        args.studio_url = os.getenv("SBASE_STUDIO_URL", "")
     port = os.getenv("SBASE_HTTP_PORT", "8080")
     if args.base_url is None:
         args.base_url = os.getenv("SBASE_BASE_URL", f"http://localhost:{port}")
