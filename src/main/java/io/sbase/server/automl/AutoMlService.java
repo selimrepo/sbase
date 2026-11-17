@@ -112,9 +112,11 @@ public final class AutoMlService {
         }
         int max=Math.max(1,Math.min(4,((Number)request.getOrDefault("maxCandidates",timeSeries?4:3)).intValue()));
         boolean classification=task.equals("classification");
-        String metric=String.valueOf(request.getOrDefault("optimizationMetric",classification?"f1":"rmse")).toLowerCase(Locale.ROOT);
+        String requestedMetric=String.valueOf(request.getOrDefault("optimizationMetric",classification?"f1":"rmse")).toLowerCase(Locale.ROOT);
         Set<String> allowedMetrics=classification?Set.of("accuracy","f1","weightedprecision","weightedrecall"):Set.of("rmse","mse","mae","r2");
-        if(!allowedMetrics.contains(metric))throw new IllegalArgumentException("Unsupported optimizationMetric: "+metric);
+        if(!allowedMetrics.contains(requestedMetric))throw new IllegalArgumentException("Unsupported optimizationMetric: "+requestedMetric);
+        String metric=requestedMetric.equals("weightedprecision")?"weightedPrecision":
+                requestedMetric.equals("weightedrecall")?"weightedRecall":requestedMetric;
         boolean maximize=classification||metric.equals("r2");
         double bestScore=maximize?Double.NEGATIVE_INFINITY:Double.POSITIVE_INFINITY;
         PipelineModel best=null;String bestAlgorithm="";
