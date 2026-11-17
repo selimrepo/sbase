@@ -256,6 +256,7 @@ public final class AutoMlMonitoringService {
         if (n1 == 0 || n2 == 0) return 1.0;
         double effective = Math.sqrt((double) n1 * n2 / (n1 + n2));
         double lambda = (effective + 0.12 + 0.11 / effective) * statistic;
+        if (lambda < 1.0e-8) return 1.0;
         double sum = 0.0;
         for (int k = 1; k <= 100; k++) {
             double term = Math.exp(-2.0 * k * k * lambda * lambda);
