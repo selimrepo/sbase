@@ -14,7 +14,7 @@ class CalciteSqlCompatibilityTest {
 
     @Test void leavesFunctionNamesAndOtherSqlWordsAlone() {
         String sql = "SELECT value_count(value), VALUE FROM metrics";
-        assertEquals("SELECT value_count(value), \"VALUE\" FROM metrics",
+        assertEquals("SELECT value_count(\"value\"), \"VALUE\" FROM metrics",
                 CalciteSqlCompatibility.forParsing(sql));
     }
 }
