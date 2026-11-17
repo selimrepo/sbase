@@ -33,7 +33,10 @@ jobs:
     env:
       SBASE_TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/sbase
       SBASE_TEST_POSTGRES_USER: sbase
-      SBASE_TEST_POSTGRES_PASSWORD: sbase-test\n      SBASE_POSTGRES_URL: jdbc:postgresql://localhost:5432/sbase\n      SBASE_POSTGRES_USER: sbase\n      SBASE_POSTGRES_PASSWORD: sbase-test
+      SBASE_TEST_POSTGRES_PASSWORD: sbase-test
+      SBASE_POSTGRES_URL: jdbc:postgresql://localhost:5432/sbase
+      SBASE_POSTGRES_USER: sbase
+      SBASE_POSTGRES_PASSWORD: sbase-test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
