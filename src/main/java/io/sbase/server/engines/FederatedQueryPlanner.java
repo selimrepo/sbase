@@ -10,7 +10,7 @@ import java.util.*;
 public final class FederatedQueryPlanner {
     public Map<String,Object> plan(String sql, Map<String,Map<String,Object>> catalog) throws Exception {
         if(sql==null || sql.isBlank()) throw new IllegalArgumentException("query is required");
-        SqlNode parsed=SqlParser.create(sql).parseQuery();
+        SqlNode parsed=SqlParser.create(CalciteSqlCompatibility.forParsing(sql)).parseQuery();
         if(parsed.getKind()!=SqlKind.SELECT && parsed.getKind()!=SqlKind.WITH)
             throw new IllegalArgumentException("Federated planner accepts read-only SELECT queries only");
         Set<String> identifiers=new LinkedHashSet<>();
