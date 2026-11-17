@@ -50,7 +50,7 @@ public final class CalciteSqlEngine {
                 }
                 List<LinkedHashMap<String, Object>> result = new ArrayList<>();
                 try (Statement statement = connection.createStatement();
-                     ResultSet rows = statement.executeQuery(sql)) {
+                     ResultSet rows = statement.executeQuery(CalciteSqlCompatibility.forParsing(sql))) {
                     ResultSetMetaData metadata = rows.getMetaData();
                     while (rows.next()) {
                         LinkedHashMap<String, Object> row = new LinkedHashMap<>();
