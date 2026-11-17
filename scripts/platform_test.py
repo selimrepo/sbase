@@ -774,7 +774,7 @@ class PlatformRunner:
         ended = datetime.now(timezone.utc)
         payload = {
             "tool": "SBase Platform Test",
-            "version": self.TOOL_VERSION,
+            "version": TOOL_VERSION,
             "run_id": self.run_id,
             "base_url": self.args.base_url,
             "started_at": self.started_at.isoformat(),
