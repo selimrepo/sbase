@@ -5,10 +5,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class CalciteSqlCompatibilityTest {
     @Test void quotesCalciteReservedColumnWithoutChangingStringsCommentsOrQuotedIdentifiers() {
-        String sql = "SELECT value, 'value', \"value\", `value`, [value] -- value\\n"
+        String sql = "SELECT value, 'value', \"value\", `value`, [value] -- value\n"
                 + "FROM records /* value */ WHERE value = 'it''s value' AND note = $$value$$";
         String normalized = CalciteSqlCompatibility.forParsing(sql);
-        assertEquals("SELECT \"value\", 'value', \"value\", `value`, [value] -- value\\n"
+        assertEquals("SELECT \"value\", 'value', \"value\", `value`, [value] -- value\n"
                 + "FROM records /* value */ WHERE \"value\" = 'it''s value' AND note = $$value$$", normalized);
     }
 
