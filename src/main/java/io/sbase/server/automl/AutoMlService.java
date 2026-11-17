@@ -110,7 +110,7 @@ public final class AutoMlService {
             candidates.add(new LinearRegression().setLabelCol(label).setFeaturesCol("features").setMaxIter(100).setRegParam(0.01));
             candidates.add(new RandomForestRegressor().setLabelCol(label).setFeaturesCol("features").setNumTrees(100).setMaxDepth(8).setSeed(seed));
             candidates.add(new DecisionTreeRegressor().setLabelCol(label).setFeaturesCol("features").setMaxDepth(8).setSeed(seed));
-            if(timeSeries)candidates.add(new GBTRegressor().setLabelCol(label).setFeaturesCol("features").setMaxIter(80).setMaxDepth(5).setSeed(42));
+            if(timeSeries)candidates.add(new GBTRegressor().setLabelCol(label).setFeaturesCol("features").setMaxIter(80).setMaxDepth(5).setSeed(seed));
         }
         int max=Math.max(1,Math.min(4,((Number)request.getOrDefault("maxCandidates",timeSeries||classification?4:3)).intValue()));
         String requestedMetric=String.valueOf(request.getOrDefault("optimizationMetric",classification?"f1":"rmse")).toLowerCase(Locale.ROOT);
