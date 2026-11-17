@@ -129,19 +129,121 @@ public final class AutoMlLifecycleService {
     }
 
     public Map<String, Object> monitor(UUID modelId, List<Map<String, Object>> rows) throws SQLException {
+        return monitor(modelId, rows, Map.of(), null);
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> monitor(UUID modelId, List<Map<String, Object>> rows,
+                                       Map<String, Object> policy,
+                                       Map<String, Object> retrainingRequest) throws SQLException {
         Map<String, Object> metadata = model(modelId);
         if (!"READY".equals(metadata.get("status")))
             throw new IllegalStateException("Only READY models can be monitored");
-        @SuppressWarnings("unchecked")
         Map<String, Object> card = (Map<String, Object>) metadata.get("modelCard");
         Map<String, Object> report = ModelDriftMonitor.evaluate(card, rows);
+        Map<String, Object> automation = new LinkedHashMap<>();
+        String driftLevel = String.valueOf(report.get("driftLevel"));
+        boolean autoRetrain = Boolean.TRUE.equals(policy.get("autoRetrain"));
+        String triggerLevel = String.valueOf(policy.getOrDefault("triggerLevel", "HIGH")).toUpperCase(Locale.ROOT);
+        if (!Set.of("LOW", "MEDIUM", "HIGH").contains(triggerLevel))
+            throw new IllegalArgumentException("triggerLevel must be LOW, MEDIUM or HIGH");
+
+        if (!autoRetrain) {
+            automation.put("status", "DISABLED");
+        } else if (!ModelPromotionPolicy.shouldTrigger(driftLevel, triggerLevel)) {
+            automation.put("status", "NOT_TRIGGERED");
+            automation.put("triggerLevel", triggerLevel);
+        } else if (retrainingRequest == null || !hasLabeledTrainingData(retrainingRequest)) {
+            automation.put("status", "SKIPPED_MISSING_LABELED_TRAINING_DATA");
+            automation.put("reason", "Drift is not a substitute for labels; supply a complete retrainingRequest with labeled rows.");
+        } else {
+            int cooldownHours = Math.max(0, Math.min(720,
+                    ((Number) policy.getOrDefault("cooldownHours", 24)).intValue()));
+            if (cooldownHours > 0 && retrainingRecentlySucceeded(modelId, cooldownHours)) {
+                automation.put("status", "SKIPPED_COOLDOWN");
+                automation.put("cooldownHours", cooldownHours);
+            } else {
+                try {
+                    String sourceTask = String.valueOf(metadata.get("task")).toUpperCase(Locale.ROOT);
+                    String requestedTask = String.valueOf(retrainingRequest.getOrDefault("task", "classification"))
+                            .toUpperCase(Locale.ROOT);
+                    if (!sourceTask.equals(requestedTask))
+                        throw new IllegalArgumentException("Retraining task must match the monitored model task");
+                    Map<String, Object> candidate = train(new LinkedHashMap<>(retrainingRequest));
+                    UUID candidateId = UUID.fromString(String.valueOf(candidate.get("modelId")));
+                    automation.put("status", "RETRAINED");
+                    automation.put("candidateModelId", candidateId.toString());
+                    automation.put("candidateScore", candidate.get("score"));
+                    automation.put("candidateMetric", candidate.get("metric"));
+
+                    if (Boolean.TRUE.equals(policy.get("autoPromote"))) {
+                        String alias = String.valueOf(policy.getOrDefault("promotionAlias", "")).trim();
+                        if (alias.isEmpty())
+                            throw new IllegalArgumentException("promotionAlias is required when autoPromote is true");
+                        String sourceMetric = String.valueOf(metadata.get("metric"));
+                        String candidateMetric = String.valueOf(candidate.get("metric"));
+                        if (!sourceMetric.equals(candidateMetric)) {
+                            automation.put("promotionStatus", "BLOCKED_METRIC_MISMATCH");
+                        } else if (!(policy.get("promotionEvaluationData") instanceof List<?> evaluationRows)
+                                || evaluationRows.size() < 2 || evaluationRows.size() > 50000) {
+                            automation.put("promotionStatus", "BLOCKED_MISSING_COMMON_EVALUATION_DATA");
+                            automation.put("reason", "Supply 2..50000 labeled promotionEvaluationData rows so incumbent and candidate are scored on the same holdout.");
+                        } else {
+                            Map<String, Object> candidateCard = (Map<String, Object>) candidate.get("modelCard");
+                            if (!sameFeatureSchema(card, candidateCard)) {
+                                automation.put("promotionStatus", "BLOCKED_FEATURE_SCHEMA_MISMATCH");
+                            } else {
+                                List<Map<String, Object>> commonRows = (List<Map<String, Object>>) evaluationRows;
+                                double incumbentScore = evaluateModelOnRows(metadata, card, commonRows, sourceMetric);
+                                double candidateScore = evaluateModelOnRows(
+                                        Map.of("modelUri", candidate.get("modelUri"), "task", candidate.get("task")),
+                                        candidateCard, commonRows, sourceMetric);
+                                boolean higherIsBetter = "maximize".equalsIgnoreCase(
+                                        String.valueOf(card.getOrDefault("optimizationDirection", "minimize")));
+                                double improvement = ModelPromotionPolicy.improvement(
+                                        candidateScore, incumbentScore, higherIsBetter);
+                                double minimumImprovement = Math.max(0.0,
+                                        ((Number) policy.getOrDefault("minimumImprovement", 0.0)).doubleValue());
+                                automation.put("evaluationProtocol", "same_labeled_holdout_for_incumbent_and_candidate");
+                                automation.put("incumbentEvaluationScore", incumbentScore);
+                                automation.put("candidateEvaluationScore", candidateScore);
+                                automation.put("improvement", improvement);
+                                automation.put("minimumImprovement", minimumImprovement);
+                                if (!ModelPromotionPolicy.shouldPromote(improvement, minimumImprovement)) {
+                                    automation.put("promotionStatus", "BLOCKED_INSUFFICIENT_IMPROVEMENT");
+                                } else if (promoteIfCurrent(alias, modelId, candidateId, sourceMetric,
+                                        incumbentScore, candidateScore, improvement)) {
+                                    automation.put("promotionStatus", "PROMOTED");
+                                    automation.put("alias", alias);
+                                } else {
+                                    automation.put("promotionStatus", "SKIPPED_ALIAS_CHANGED");
+                                    automation.put("reason", "The alias no longer points to the model that was monitored.");
+                                }
+                            }
+                        }
+                    } else {
+                        automation.put("promotionStatus", "DISABLED");
+                    }
+                } catch (Exception error) {
+                    String message = error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage());
+                    if ("RETRAINED".equals(automation.get("status"))) {
+                        automation.put("promotionStatus", "FAILED");
+                        automation.put("promotionError", message);
+                    } else {
+                        automation.put("status", "FAILED");
+                        automation.put("error", message);
+                    }
+                }
+            }
+        }
+        report.put("automation", automation);
         UUID runId = UUID.randomUUID();
         try (Connection c = connection(); PreparedStatement p = c.prepareStatement(
                 "INSERT INTO model_monitoring_run(id,model_id,row_count,drift_level,report) VALUES(?,?,?,?,?::jsonb)")) {
             p.setObject(1, runId);
             p.setObject(2, modelId);
             p.setInt(3, rows.size());
-            p.setString(4, String.valueOf(report.get("driftLevel")));
+            p.setString(4, driftLevel);
             p.setString(5, jsonString(report));
             p.executeUpdate();
         }
@@ -149,6 +251,171 @@ public final class AutoMlLifecycleService {
         result.put("runId", runId.toString());
         result.put("modelId", modelId.toString());
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private double evaluateModelOnRows(Map<String, Object> metadata, Map<String, Object> card,
+                                       List<Map<String, Object>> rows, String metric) throws Exception {
+        String label = String.valueOf(card.get("label"));
+        List<String> features = (List<String>) card.get("features");
+        if (features == null || features.isEmpty())
+            throw new IllegalStateException("Model card has no feature schema");
+        List<String> jsonRows = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            if (!row.containsKey(label) || row.get(label) == null)
+                throw new IllegalArgumentException("promotionEvaluationData must include non-null label: " + label);
+            for (String feature : features) {
+                if (!row.containsKey(feature))
+                    throw new IllegalArgumentException("promotionEvaluationData is missing feature: " + feature);
+            }
+            jsonRows.add(JSON.valueToTree(row).toString());
+        }
+        String path = String.valueOf(metadata.get("modelUri"));
+        Path resolved = Path.of(path).toAbsolutePath().normalize();
+        if (!resolved.startsWith(registryRoot) || !Files.exists(resolved))
+            throw new IllegalStateException("Model artifact is missing or outside registry root");
+        Dataset<Row> input = spark.read().json(spark.createDataset(jsonRows, Encoders.STRING()));
+        PipelineModel pipeline = PipelineModel.load(resolved.toString());
+        Dataset<Row> predictions = pipeline.transform(input);
+        boolean classification = "CLASSIFICATION".equalsIgnoreCase(String.valueOf(metadata.get("task")));
+        Map<String, Object> metrics = AutoMlService.evaluate(predictions, label, classification);
+        Object score = metrics.get(metric);
+        if (!(score instanceof Number number) || !Double.isFinite(number.doubleValue()))
+            throw new IllegalStateException("Common evaluation data did not produce metric " + metric);
+        return number.doubleValue();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean sameFeatureSchema(Map<String, Object> left, Map<String, Object> right) {
+        List<String> leftFeatures = (List<String>) left.get("features");
+        List<String> rightFeatures = (List<String>) right.get("features");
+        return leftFeatures != null && rightFeatures != null
+                && new HashSet<>(leftFeatures).equals(new HashSet<>(rightFeatures))
+                && Objects.equals(left.get("label"), right.get("label"));
+    }
+
+    private static boolean hasLabeledTrainingData(Map<String, Object> request) {
+        Object label = request.get("label");
+        Object features = request.get("features");
+        Object data = request.get("data");
+        if (label == null || !(features instanceof List<?> featureList) || featureList.isEmpty()
+                || !(data instanceof List<?> rows) || rows.size() < 50 || rows.size() > 100000)
+            return false;
+        String labelName = String.valueOf(label);
+        for (Object row : rows) {
+            if (!(row instanceof Map<?, ?> values) || !values.containsKey(labelName)
+                    || values.get(labelName) == null) return false;
+        }
+        return true;
+    }
+
+    private boolean retrainingRecentlySucceeded(UUID modelId, int cooldownHours) throws SQLException {
+        try (Connection c = connection(); PreparedStatement p = c.prepareStatement(
+                "SELECT 1 FROM model_monitoring_run WHERE model_id=? AND created_at >= now() - (? * interval '1 hour') "
+                        + "AND report->'automation'->>'status'='RETRAINED' LIMIT 1")) {
+            p.setObject(1, modelId);
+            p.setInt(2, cooldownHours);
+            try (ResultSet r = p.executeQuery()) { return r.next(); }
+        }
+    }
+
+    private boolean promoteIfCurrent(String alias, UUID expectedModelId, UUID candidateModelId,
+                                     String metric, double previousScore, double candidateScore,
+                                     double improvement) throws SQLException {
+        if (!alias.matches("[A-Za-z][A-Za-z0-9_.-]{0,63}"))
+            throw new IllegalArgumentException("Invalid promotion alias");
+        try (Connection c = connection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement current = c.prepareStatement(
+                    "SELECT model_id FROM model_alias WHERE alias=? FOR UPDATE")) {
+                current.setString(1, alias);
+                try (ResultSet r = current.executeQuery()) {
+                    if (!r.next() || !expectedModelId.equals(r.getObject(1, UUID.class))) {
+                        c.rollback();
+                        return false;
+                    }
+                }
+            }
+            try (PreparedStatement ready = c.prepareStatement(
+                    "SELECT 1 FROM model_registry WHERE id=? AND status='READY' AND metric=?")) {
+                ready.setObject(1, candidateModelId);
+                ready.setString(2, metric);
+                try (ResultSet r = ready.executeQuery()) {
+                    if (!r.next()) throw new IllegalStateException("Candidate model is not READY with the expected metric");
+                }
+            }
+            try (PreparedStatement update = c.prepareStatement(
+                    "UPDATE model_alias SET model_id=?,updated_at=now() WHERE alias=?")) {
+                update.setObject(1, candidateModelId);
+                update.setString(2, alias);
+                update.executeUpdate();
+            }
+            try (PreparedStatement event = c.prepareStatement(
+                    "INSERT INTO model_promotion_event(id,alias,previous_model_id,promoted_model_id,metric,previous_score,candidate_score,improvement,reason,status) "
+                            + "VALUES(?,?,?,?,?,?,?,?,?,'PROMOTED')")) {
+                event.setObject(1, UUID.randomUUID());
+                event.setString(2, alias);
+                event.setObject(3, expectedModelId);
+                event.setObject(4, candidateModelId);
+                event.setString(5, metric);
+                event.setDouble(6, previousScore);
+                event.setDouble(7, candidateScore);
+                event.setDouble(8, improvement);
+                event.setString(9, "DRIFT_TRIGGERED_AUTO_RETRAIN");
+                event.executeUpdate();
+            }
+            c.commit();
+            return true;
+        }
+    }
+
+    public Map<String, Object> rollbackAlias(String alias) throws SQLException {
+        try (Connection c = connection()) {
+            c.setAutoCommit(false);
+            UUID eventId;
+            UUID previousModelId;
+            UUID promotedModelId;
+            try (PreparedStatement event = c.prepareStatement(
+                    "SELECT id,previous_model_id,promoted_model_id FROM model_promotion_event "
+                            + "WHERE alias=? AND status='PROMOTED' ORDER BY created_at DESC LIMIT 1 FOR UPDATE")) {
+                event.setString(1, alias);
+                try (ResultSet r = event.executeQuery()) {
+                    if (!r.next()) throw new NoSuchElementException("No promotion is available to roll back");
+                    eventId = r.getObject(1, UUID.class);
+                    previousModelId = r.getObject(2, UUID.class);
+                    promotedModelId = r.getObject(3, UUID.class);
+                }
+            }
+            try (PreparedStatement current = c.prepareStatement(
+                    "SELECT model_id FROM model_alias WHERE alias=? FOR UPDATE")) {
+                current.setString(1, alias);
+                try (ResultSet r = current.executeQuery()) {
+                    if (!r.next() || !promotedModelId.equals(r.getObject(1, UUID.class)))
+                        throw new IllegalStateException("Alias has changed since the recorded promotion");
+                }
+            }
+            try (PreparedStatement ready = c.prepareStatement(
+                    "SELECT 1 FROM model_registry WHERE id=? AND status='READY'")) {
+                ready.setObject(1, previousModelId);
+                try (ResultSet r = ready.executeQuery()) {
+                    if (!r.next()) throw new IllegalStateException("Previous model is not READY; rollback is unsafe");
+                }
+            }
+            try (PreparedStatement update = c.prepareStatement(
+                    "UPDATE model_alias SET model_id=?,updated_at=now() WHERE alias=?")) {
+                update.setObject(1, previousModelId);
+                update.setString(2, alias);
+                update.executeUpdate();
+            }
+            try (PreparedStatement mark = c.prepareStatement(
+                    "UPDATE model_promotion_event SET status='ROLLED_BACK',rolled_back_at=now() WHERE id=?")) {
+                mark.setObject(1, eventId);
+                mark.executeUpdate();
+            }
+            c.commit();
+            return Map.of("alias", alias, "restoredModelId", previousModelId.toString(),
+                    "rolledBackModelId", promotedModelId.toString(), "status", "ROLLED_BACK");
+        }
     }
 
     public List<Map<String, Object>> monitoringHistory(UUID modelId, int limit) throws SQLException {

@@ -42,3 +42,10 @@ Each completed experiment stores a model card in PostgreSQL with a SHA-256 train
 Time-series runs generate lagged targets with a Spark window ordered by the declared time column. They require unique timestamps and use a chronological holdout; random-fold cross-validation is disabled for this task because it would leak temporal information. Rolling-origin cross-validation is a future extension.
 
 Batch monitoring compares new feature batches with the training profile and persists numeric mean-shift/range, missingness and categorical unseen-value diagnostics. Severity bands are operational heuristics. Monitoring does not automatically retrain, promote or roll back a model, and fairness reports are diagnostics rather than legal compliance certifications.
+
+
+## Temporal validation and closed-loop model operations
+
+Time-series AutoML uses expanding-window rolling-origin folds on the chronological training partition. Each fold fits its own preprocessing pipeline, candidate selection uses the mean fold metric, and the final candidate is refitted before independent chronological holdout evaluation. The walk-forward protocol is one-step-ahead, not a multi-horizon benchmark.
+
+Drift monitoring can optionally trigger retraining, but only when the request supplies a separate labeled training dataset. Promotion is a distinct opt-in action. Incumbent and candidate are evaluated on the same caller-supplied labeled holdout, with matching metric and feature schema, and a configurable absolute improvement margin. The production alias must still point to the monitored incumbent when the promotion transaction commits. A cooldown prevents repeated retraining storms. Successful promotions are audited and can be conditionally rolled back to the prior READY model. See [AutoML operations](AUTOML_OPERATIONS.md) for request examples and operational constraints.

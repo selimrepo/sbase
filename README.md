@@ -346,3 +346,8 @@ The Compose file includes optional development profiles for Cassandra, Solr, Spa
 ## License
 
 Apache License 2.0. See `LICENSE`.
+
+
+### Temporal validation, drift automation and rollback
+
+See [AutoML operations](docs/AUTOML_OPERATIONS.md) for expanding-window rolling-origin validation, drift-triggered labeled retraining, common-holdout promotion gates, cooldowns and safe model-alias rollback.

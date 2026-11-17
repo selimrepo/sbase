@@ -196,6 +196,14 @@ object Main {
        }
       }}
     } ~
+    path("models"/"aliases"/Segment/"rollback"){alias=>
+      post{onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.rollbackAlias(alias)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>system.log.error("Model alias rollback failed",error);complete(StatusCodes.Conflict->JsObject("error"->JsString(Option(error.getMessage).getOrElse("rollback failed"))))
+      }}
+    } ~
+
     path("models"/JavaUUID/"card"){modelId=>
       get{onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.model(modelId).get("modelCard")).parseJson))){
        case Success(value)=>complete(value)
@@ -216,7 +224,13 @@ object Main {
         val rows=mapper.readValue(request.fields.getOrElse("rows",JsArray()).compactPrint,
           new TypeReference[java.util.List[java.util.Map[String,Object]]]() {})
         val data=rows.asScala.map(row=>row.asScala.toMap.asJava).asJava
-        onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(autoMl.monitor(modelId,data)).parseJson))){
+        val policy=mapper.readValue(request.fields.getOrElse("policy",JsObject()).compactPrint,
+          new TypeReference[java.util.Map[String,Object]]() {})
+        val retrainingRequest=request.fields.get("retrainingRequest").map(value=>
+          mapper.readValue(value.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})).orNull
+        onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(
+          autoMl.monitor(modelId,data,policy.asScala.toMap.asJava,
+            Option(retrainingRequest).map(_.asScala.toMap.asJava).orNull)).parseJson))){
          case Success(value)=>complete(value)
          case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
          case Failure(error)=>system.log.error("Model drift monitoring failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("monitoring failed"))))

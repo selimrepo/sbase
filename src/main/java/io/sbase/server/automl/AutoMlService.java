@@ -124,19 +124,27 @@ public final class AutoMlService {
                 throw new IllegalArgumentException("Regression target must have non-zero variance");
         }
 
+        Dataset<Row> selectionData;
+        if (timeSeries) {
+            long initialTrainCount = Math.max(2L, Math.min(rowCount - 2, (long) Math.floor(rowCount * 0.8)));
+            selectionData = profileData.orderBy(col(timeColumn).asc()).limit((int) initialTrainCount);
+        } else {
+            selectionData = profileData.randomSplit(new double[]{0.8, 0.2}, seed)[0];
+        }
+
         List<String> selectedFeatures = new ArrayList<>();
         List<String> droppedFeatures = new ArrayList<>();
         double varianceThreshold = Math.max(0.0,
                 ((Number) request.getOrDefault("varianceThreshold", 1.0e-12)).doubleValue());
         for (String feature : features) {
-            String type = profileData.schema().apply(feature).dataType().typeName().toLowerCase(Locale.ROOT);
+            String type = selectionData.schema().apply(feature).dataType().typeName().toLowerCase(Locale.ROOT);
             boolean useful;
             if (NUMERIC_TYPES.contains(type)) {
-                Row stats = profileData.agg(variance(col(feature))).first();
+                Row stats = selectionData.agg(variance(col(feature))).first();
                 useful = !stats.isNullAt(0) && Double.isFinite(stats.getDouble(0))
                         && stats.getDouble(0) > varianceThreshold;
             } else {
-                useful = profileData.select(col(feature)).where(col(feature).isNotNull()).distinct().limit(2).count() > 1;
+                useful = selectionData.select(col(feature)).where(col(feature).isNotNull()).distinct().limit(2).count() > 1;
             }
             if (useful) selectedFeatures.add(feature);
             else droppedFeatures.add(feature);
@@ -195,7 +203,7 @@ public final class AutoMlService {
             train = raw.orderBy(col(timeColumn).asc()).limit((int) trainingCount);
             validation = raw.orderBy(col(timeColumn).desc()).limit((int) (rowCount - trainingCount))
                     .orderBy(col(timeColumn).asc());
-            splitStrategy = "chronological_holdout_80_20";
+            splitStrategy = "rolling_origin_cv_then_chronological_holdout_80_20";
         } else {
             Dataset<Row>[] split = raw.randomSplit(new double[]{0.8, 0.2}, seed);
             train = split[0];
@@ -230,11 +238,12 @@ public final class AutoMlService {
 
         int maxCandidates = Math.max(1, Math.min(4,
                 ((Number) request.getOrDefault("maxCandidates", timeSeries ? 4 : 3)).intValue()));
-        int folds = timeSeries ? 0 : Math.max(2, Math.min(5,
-                ((Number) request.getOrDefault("cvFolds", 3)).intValue()));
+        int folds = Math.max(2, Math.min(5,
+                ((Number) request.getOrDefault(timeSeries ? "rollingFolds" : "cvFolds", 3)).intValue()));
         int cvParallelism = Math.max(1, Math.min(4,
                 ((Number) request.getOrDefault("cvParallelism", 2)).intValue()));
         double bestScore = higherIsBetter ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+        double bestSelectionScore = higherIsBetter ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
         PipelineModel best = null;
         String bestAlgorithm = "";
         Map<String, Object> bestMetrics = Map.of();
@@ -249,10 +258,16 @@ public final class AutoMlService {
                 Pipeline pipeline = new Pipeline().setStages(stages.toArray(PipelineStage[]::new));
                 PipelineModel model;
                 double cvAverage;
+                List<Map<String, Object>> foldMetrics = List.of();
                 if (timeSeries) {
-                    // Spark CrossValidator uses random folds; never use it for ordered temporal observations.
+                    Map<String, Object> rolling = rollingOriginEvaluate(
+                            pipeline, train, timeColumn, label, classification, metric, folds);
+                    cvAverage = ((Number) rolling.get("averageMetric")).doubleValue();
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> evaluatedFolds = (List<Map<String, Object>>) rolling.get("folds");
+                    foldMetrics = evaluatedFolds;
+                    // Refit on the complete chronological training window after rolling-origin selection.
                     model = pipeline.fit(train);
-                    cvAverage = Double.NaN;
                 } else {
                     CrossValidator validator = new CrossValidator().setEstimator(pipeline)
                             .setEvaluator(evaluator(label, classification, metric))
@@ -265,19 +280,24 @@ public final class AutoMlService {
                 Dataset<Row> predictions = model.transform(validation);
                 Map<String, Object> metrics = evaluate(predictions, label, classification);
                 double score = ((Number) metrics.get(metric)).doubleValue();
+                double selectionScore = Double.isFinite(cvAverage) ? cvAverage : score;
                 Map<String, Object> trial = new LinkedHashMap<>();
                 trial.put("algorithm", algorithm);
                 trial.put("metric", metric);
                 trial.put("score", score);
+                trial.put("selectionScore", selectionScore);
                 trial.put("metrics", metrics);
                 trial.put("cvFolds", folds);
                 if (Double.isFinite(cvAverage)) trial.put("cvAverageMetric", cvAverage);
+                if (!foldMetrics.isEmpty()) trial.put("rollingOriginFolds", foldMetrics);
                 trial.put("status", "SUCCEEDED");
                 trial.put("durationMs", nanosToMillis(System.nanoTime() - started));
                 trials.add(trial);
-                if (best == null || (higherIsBetter ? score > bestScore : score < bestScore)) {
+                if (best == null || (higherIsBetter
+                        ? selectionScore > bestSelectionScore : selectionScore < bestSelectionScore)) {
                     best = model;
                     bestScore = score;
+                    bestSelectionScore = selectionScore;
                     bestAlgorithm = algorithm;
                     bestMetrics = metrics;
                 }
@@ -302,6 +322,7 @@ public final class AutoMlService {
         reproducibility.put("seed", seed);
         reproducibility.put("splitStrategy", splitStrategy);
         reproducibility.put("crossValidationFolds", folds);
+        if (timeSeries) reproducibility.put("rollingOriginProtocol", "expanding_window_walk_forward_one_step");
         reproducibility.put("sparkVersion", spark.version());
         reproducibility.put("createdAt", Instant.now().toString());
         reproducibility.put("inputRows", suppliedRows.size());
@@ -321,8 +342,11 @@ public final class AutoMlService {
         modelCard.put("fairness", fairness);
         modelCard.put("reproducibility", reproducibility);
         modelCard.put("validationProtocol", splitStrategy);
+        if (timeSeries) modelCard.put("rollingOriginCrossValidation", Map.of(
+                "enabled", true, "folds", folds, "window", "expanding",
+                "selectionMetric", metric, "holdoutIndependent", true));
         modelCard.put("limitations", timeSeries
-                ? List.of("Temporal holdout is chronological; rolling-origin cross-validation is not enabled.")
+                ? List.of("Rolling-origin folds use walk-forward one-step evaluation; multi-horizon forecasting requires a separate evaluation protocol.")
                 : List.of("Holdout is deterministic; external temporal or group leakage checks depend on dataset semantics."));
 
         String modelUri = null;
@@ -351,6 +375,9 @@ public final class AutoMlService {
         result.put("numericMissingValueTreatment", "median imputation fitted inside each training fold");
         result.put("featureSelection", "variance threshold for numeric and cardinality filter for categorical columns");
         result.put("timeSeriesLagFeatures", timeSeries);
+        if (timeSeries) result.put("rollingOriginCrossValidation", Map.of(
+                "enabled", true, "folds", folds, "window", "expanding", "averageMetric", bestSelectionScore,
+                "protocol", "walk_forward_one_step"));
         result.put("trials", trials);
         result.put("modelCard", modelCard);
         result.put("modelFormat", "Spark PipelineModel");
@@ -373,7 +400,52 @@ public final class AutoMlService {
                 : new RegressionEvaluator().setLabelCol(label).setPredictionCol("prediction").setMetricName(metric);
     }
 
-    private static Map<String, Object> evaluate(Dataset<Row> predictions, String label, boolean classification) {
+    private static Map<String, Object> rollingOriginEvaluate(Pipeline pipeline, Dataset<Row> training,
+                                                                  String timeColumn, String label,
+                                                                  boolean classification, String metric,
+                                                                  int requestedFolds) {
+        final String indexColumn = "__sbase_rolling_origin_index";
+        if (Arrays.asList(training.columns()).contains(indexColumn))
+            throw new IllegalArgumentException("Reserved column exists: " + indexColumn);
+        Dataset<Row> ordered = training.withColumn(indexColumn,
+                row_number().over(Window.orderBy(col(timeColumn).asc())));
+        long rows = ordered.count();
+        List<RollingOriginPlan.Fold> plan = RollingOriginPlan.expandingWindow((int) rows, requestedFolds);
+        List<Map<String, Object>> foldReports = new ArrayList<>();
+        List<Double> scores = new ArrayList<>();
+        for (RollingOriginPlan.Fold fold : plan) {
+            long trainEnd = fold.trainingEndInclusive();
+            long validationEnd = fold.validationEndInclusive();
+            Dataset<Row> foldTrain = ordered.filter(col(indexColumn).leq(trainEnd)).drop(indexColumn);
+            Dataset<Row> foldValidation = ordered.filter(col(indexColumn).geq(fold.validationStartInclusive())
+                    .and(col(indexColumn).leq(validationEnd))).drop(indexColumn);
+            PipelineModel fitted = pipeline.fit(foldTrain);
+            Map<String, Object> metrics = evaluate(fitted.transform(foldValidation), label, classification);
+            Object rawScore = metrics.get(metric);
+            if (!(rawScore instanceof Number number) || !Double.isFinite(number.doubleValue()))
+                throw new IllegalStateException("Rolling-origin fold " + fold.number() + " did not produce metric " + metric);
+            double score = number.doubleValue();
+            scores.add(score);
+            Map<String, Object> report = new LinkedHashMap<>();
+            report.put("fold", fold.number());
+            report.put("trainingRows", foldTrain.count());
+            report.put("validationRows", foldValidation.count());
+            report.put("trainingEndOrder", trainEnd);
+            report.put("validationStartOrder", fold.validationStartInclusive());
+            report.put("validationEndOrder", validationEnd);
+            report.put("metric", metric);
+            report.put("score", score);
+            report.put("metrics", metrics);
+            foldReports.add(report);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("averageMetric", scores.stream().mapToDouble(Double::doubleValue).average().orElseThrow());
+        result.put("folds", foldReports);
+        result.put("foldCount", foldReports.size());
+        return result;
+    }
+
+    static Map<String, Object> evaluate(Dataset<Row> predictions, String label, boolean classification) {
         Map<String, Object> result = new LinkedHashMap<>();
         if (classification) {
             for (String metric : List.of("accuracy", "f1", "weightedPrecision", "weightedRecall")) {
