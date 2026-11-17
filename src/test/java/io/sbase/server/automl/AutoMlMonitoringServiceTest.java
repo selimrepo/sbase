@@ -33,7 +33,7 @@ class AutoMlMonitoringServiceTest {
         List<Map<String,Object>> current = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
             reference.add(Map.of("segment", "A"));
-            current.add(i < 80 ? Map.of("segment", "B") : Collections.singletonMap("segment", null));
+            Map<String,Object> row = new HashMap<>(); row.put("segment", i < 80 ? "B" : null); current.add(row);
         }
         Map<String,Object> report = AutoMlMonitoringService.compare(reference, current,
                 List.of("segment"), 0.20, 0.05, 0.10);
