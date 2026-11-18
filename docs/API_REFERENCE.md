@@ -100,6 +100,9 @@ The validator checks node IDs, supported operators, edge references and cycles. 
 |---|---|---|
 | GET | `/automl/metrics` | Supported task-specific optimization metrics |
 | POST | `/automl/data/profile` | Schema, missingness, cardinality, distribution and outlier profile |
+| POST | `/automl/science/associations` | Pairwise Pearson/Spearman, Cramer's V and correlation-ratio analysis with Benjamini-Hochberg FDR correction |
+| POST | `/automl/science/feature-selection` | Numeric-target Spearman filter ranking with FDR-adjusted q-values |
+| POST | `/automl/science/compare-groups` | Welch two-sample t-test, 95% confidence interval and Hedges' g effect size |
 | POST | `/automl/monitoring/statistical-drift` | PSI, KS and missing-rate drift comparison |
 | GET | `/automl/monitoring/statistical-runs` | Recent statistical drift runs |
 | POST | `/automl/train` | Synchronous scientific AutoML |
@@ -118,6 +121,8 @@ The validator checks node IDs, supported operators, edge references and cycles. 
 | PUT | `/models/aliases/{alias}` | Promote a READY model |
 | POST | `/models/aliases/{alias}/rollback` | Guarded rollback |
 | POST | `/models/{modelId}/archive` | Archive a READY model |
+
+Scientific mining requests accept an inline `data` array of row objects (1..100000 rows). Association and feature-selection requests accept a `features` array; feature selection additionally requires a numeric `target`. Group comparison requires `groupColumn`, `valueColumn`, `groupA`, and `groupB`. Feature selection supports optional `fdrAlpha` (default 0.05) and `minimumAbsoluteSpearman` (default 0.05). The current feature selector is explicitly a univariate numeric-feature filter; use nested cross-validation for unbiased model selection. Group comparison uses Welch's unequal-variance t-test and reports an effect size; significance is not causality.
 
 Metric discovery returns classification, regression and time-series metric groups. A metric is not comparable across different task types or validation protocols. PSI/KS are covariate-shift indicators, not proof of model degradation or causality.
 
