@@ -29,6 +29,19 @@ class ScientificMiningServiceTest {
     }
 
     @Test
+    void detectsPerfectCategoricalAssociationWithCramersV() {
+        List<Map<String,Object>> data = new ArrayList<>();
+        for (int i=0;i<40;i++) data.add(Map.of("region",i<20?"north":"south",
+                "segment",i<20?"one":"two"));
+        Map<String,Object> result=service.associations(Map.of("data",data,
+                "features",List.of("region","segment")));
+        Map<?,?> association=(Map<?,?>)((List<?>)result.get("associations")).get(0);
+        assertEquals("CRAMERS_V_CHI_SQUARE",association.get("method"));
+        assertEquals(1.0,((Number)association.get("cramersV")).doubleValue(),1e-9);
+        assertTrue(((Number)association.get("pValue")).doubleValue()<0.001);
+    }
+
+    @Test
     void selectsMonotonicFeaturesAndExcludesConstantFeatures() {
         List<Map<String,Object>> data = new ArrayList<>();
         for (int i=0;i<50;i++) data.add(Map.of("signal",i,"constant",1,"target",i*2.0));
