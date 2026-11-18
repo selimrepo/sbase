@@ -24,8 +24,7 @@ public final class ScientificMiningService {
                 List<Object> x = new ArrayList<>(), y = new ArrayList<>();
                 for (Map<String, Object> row : rows) {
                     Object a = row.get(left), b = row.get(right);
-                    if (a != null && b != null && !(a instanceof String s && s.isBlank())
-                            && !(b instanceof String s && s.isBlank())) {
+                    if (!isBlank(a) && !isBlank(b)) {
                         x.add(a); y.add(b);
                     }
                 }
@@ -193,6 +192,8 @@ public final class ScientificMiningService {
         if (!available.containsAll(result)) throw new IllegalArgumentException("Unknown feature column");
         return result;
     }
+
+    private static boolean isBlank(Object value) { return value == null || (value instanceof String text && text.isBlank()); }
 
     private static String required(Object value, String name) {
         if (value == null || String.valueOf(value).isBlank()) throw new IllegalArgumentException(name + " is required");
