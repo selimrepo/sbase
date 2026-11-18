@@ -243,7 +243,7 @@ public final class ScientificMiningService {
         for(List<Double> group:groups.values()){double delta=mean(group)-overall;between+=group.size()*delta*delta;}
         double eta=total<=0?0:Math.sqrt(Math.max(0,Math.min(1,between/total)));
         int df1=groups.size()-1,df2=values.size()-groups.size();
-        double f=df1<=0||df2<=0||total<=between?0:(between/df1)/((total-between)/df2);
+        double f=df1<=0||df2<=0?0:(total<=between?Double.POSITIVE_INFINITY:(between/df1)/((total-between)/df2));
         double p=df1<=0||df2<=0?1:regularizedBeta(df2/(df2+df1*f),df2/2.0,df1/2.0);
         return new Association(eta,p,df1);
     }
