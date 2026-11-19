@@ -74,6 +74,7 @@ Returns PostgreSQL column name, SQL type, JDBC type, size, nullability, ordinal 
 | GET | `/deployments/{slug}` | Inspect a published workflow service |
 | GET | `/deployments/{slug}/runs?limit=100` | List execution history for one published service |
 | POST | `/deployments/{slug}/runs` | Invoke a published service; queues the pinned workflow version |
+| POST | `/deployments/{slug}/rotate-key` | Rotate the service bearer credential (admin token required; plaintext returned once) |
 | POST | `/deployments/{slug}/pause` | Stop accepting new invocations without cancelling existing runs |
 | POST | `/deployments/{slug}/resume` | Re-enable service invocations |
 | GET | `/workflows/{workflowId}/audit?limit=100` | Read workflow publication, invocation and deployment-control audit events |
