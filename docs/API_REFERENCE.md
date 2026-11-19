@@ -69,6 +69,13 @@ Returns PostgreSQL column name, SQL type, JDBC type, size, nullability, ordinal 
 | POST | `/workflows/{workflowId}/versions` | Create a new immutable version |
 | PUT | `/workflows/{workflowId}/versions/{version}/activate` | Activate a version |
 | GET | `/workflows/{workflowId}/runs?limit=100` | List workflow runs |
+| GET/POST | `/workflows/{workflowId}/deployments` | List or publish version-pinned REST-callable deployments |
+| GET | `/deployments?limit=100` | List published workflow services and active-run counts |
+| GET | `/deployments/{slug}` | Inspect a published workflow service |
+| POST | `/deployments/{slug}/runs` | Invoke a published service; queues the pinned workflow version |
+| POST | `/deployments/{slug}/pause` | Stop accepting new invocations without cancelling existing runs |
+| POST | `/deployments/{slug}/resume` | Re-enable service invocations |
+| GET | `/workflows/{workflowId}/audit?limit=100` | Read workflow publication, invocation and deployment-control audit events |
 | POST | `/workflows/{workflowId}/runs` | Submit an idempotent run |
 | GET | `/jobs?limit=100` | List recent jobs across workflows |
 | GET | `/jobs/{jobId}` | Read job state and result |
@@ -93,6 +100,37 @@ Validation request:
 ```
 
 The validator checks node IDs, supported operators, edge references and cycles. It does not execute nodes or persist the graph.
+
+### Published workflow services
+
+A workflow can be published as a stable REST service. Publication pins an immutable workflow version; activating a newer editor version does not silently change the deployed service. Publishing the same slug again for the same workflow updates the pinned version and concurrency policy. A slug cannot be reassigned to a different workflow.
+
+Publish request:
+
+```json
+{
+  "slug": "monthly-risk-scoring",
+  "version": 3,
+  "maxConcurrentRuns": 4,
+  "maxAttempts": 5
+}
+```
+
+Omit `version` or set it to `0` to pin the workflow's current active version.
+
+Invoke request:
+
+```json
+{
+  "idempotencyKey": "risk-batch-2026-11-19",
+  "maxAttempts": 5
+}
+```
+
+Invocation returns HTTP 202 with a durable `jobId`, the pinned `workflowVersion`, and `QUEUED` status. Use `GET /jobs/{jobId}` and `GET /jobs/{jobId}/events` to monitor execution. Idempotency keys are scoped to the deployment. The configured concurrent-run ceiling is enforced transactionally per deployment; excess invocations receive HTTP 429. Paused services reject new invocations with HTTP 409; already queued or running jobs are not cancelled.
+
+The deployment audit endpoint records publication, invocation, pause and resume events. Current audit actors are recorded as `system` because this API layer does not yet establish authenticated user principals; do not treat the audit actor field as a verified human identity. Protect these management endpoints with an authenticated gateway until first-class SBase identity and workspace RBAC are enabled.
+
 
 ## Scientific AutoML and model governance
 
