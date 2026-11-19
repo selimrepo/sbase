@@ -68,4 +68,14 @@ class OperatorRegistryTest {
       assertTrue(result.compactPrint.contains("5"))
     } finally registry.stop()
   }
+
+  @Test
+  def deploymentParametersResolveTypedConfigReferences(): Unit = {
+    val registry = new OperatorRegistry()
+    val definition = """{"nodes":[{"id":"sum","operator":"mahout-vector-sum","config":{"values":{"$parameter":"numbers"}}}]}"""
+    val result = registry.execute(definition, """{"numbers":[2.0,3.5,4.5]}""").compactPrint
+    assertTrue(result.contains("\\"sum\\":10.0"))
+    assertThrows(classOf[IllegalArgumentException], () => registry.execute(definition, """{"other":[1,2]}"""))
+  }
+
 }
