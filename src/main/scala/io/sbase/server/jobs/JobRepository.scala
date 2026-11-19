@@ -370,8 +370,8 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   try {
    val sql="""SELECT d.id,d.workflow_id,w.name AS workflow_name,d.workflow_version,d.slug,d.enabled,
     | d.max_concurrent_runs,d.max_attempts,d.invocation_count,d.last_invoked_at,d.created_at,d.updated_at,
-    | (SELECT COUNT(*) FROM job_execution j WHERE j.workflow_id=d.workflow_id
-    |  AND j.workflow_version=d.workflow_version AND j.status IN ('QUEUED','RUNNING','RETRY_WAIT')) AS active_runs
+    | (SELECT COUNT(*) FROM job_execution j WHERE j.deployment_id=d.id
+    |  AND j.status IN ('QUEUED','RUNNING','RETRY_WAIT')) AS active_runs
     | FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id """+
     (if(workflowId.isDefined)"WHERE d.workflow_id=? " else "")+"ORDER BY d.updated_at DESC LIMIT ?"
    val p=c.prepareStatement(sql);var i=1;workflowId.foreach{id=>p.setObject(i,id);i+=1};p.setInt(i,math.max(1,math.min(limit,500)))
@@ -387,8 +387,25 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   } finally c.close()
  }
 
- def deployment(slug:String):Option[Map[String,Object]] =
-  deployments(None,500).find(_.get("slug")==slug)
+ def deployment(slug:String):Option[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("""SELECT d.id,d.workflow_id,w.name AS workflow_name,d.workflow_version,d.slug,d.enabled,
+    | d.max_concurrent_runs,d.max_attempts,d.invocation_count,d.last_invoked_at,d.created_at,d.updated_at,
+    | (SELECT COUNT(*) FROM job_execution j WHERE j.deployment_id=d.id
+    |  AND j.status IN ('QUEUED','RUNNING','RETRY_WAIT')) AS active_runs
+    | FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id WHERE d.slug=?""".stripMargin)
+   p.setString(1,slug);val rs=p.executeQuery()
+   val result=if(rs.next())Some(Map[String,Object](
+    "id"->rs.getObject("id"),"workflowId"->rs.getObject("workflow_id"),"workflowName"->rs.getString("workflow_name"),
+    "workflowVersion"->Int.box(rs.getInt("workflow_version")),"slug"->rs.getString("slug"),
+    "enabled"->Boolean.box(rs.getBoolean("enabled")),"maxConcurrentRuns"->Int.box(rs.getInt("max_concurrent_runs")),
+    "maxAttempts"->Int.box(rs.getInt("max_attempts")),"invocationCount"->Long.box(rs.getLong("invocation_count")),
+    "activeRuns"->Int.box(rs.getInt("active_runs")),"lastInvokedAt"->Option(rs.getString("last_invoked_at")).orNull,
+    "createdAt"->rs.getString("created_at"),"updatedAt"->rs.getString("updated_at")))else None
+   rs.close();p.close();result
+  } finally c.close()
+ }
 
  def setDeploymentEnabled(slug:String,enabled:Boolean):Boolean = {
   val c=dataSource.getConnection
