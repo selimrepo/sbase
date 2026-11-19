@@ -82,6 +82,94 @@ object Main {
   val host=sys.env.getOrElse("SBASE_HTTP_HOST","0.0.0.0")
   val port=sys.env.get("SBASE_HTTP_PORT").flatMap(_.toIntOption).getOrElse(8080)
 
+  val deploymentRoutes =
+path("workflows"/JavaUUID/"deployments"){workflowId=>
+     get{
+      parameter("limit".as[Int].withDefault(100)){limit=>
+       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deployments(Some(workflowId),limit)).parseJson))){
+        case Success(value)=>complete(value)
+        case Failure(error)=>system.log.error("Workflow deployment listing failed",error);complete(StatusCodes.InternalServerError)
+       }
+      }
+     } ~
+     post{entity(as[JsObject]){request=>
+      try {
+       val slug=request.fields.getOrElse("slug",JsString("")).convertTo[String]
+       val version=request.fields.get("version").map(_.convertTo[Int]).getOrElse(0)
+       val concurrency=request.fields.get("maxConcurrentRuns").map(_.convertTo[Int]).getOrElse(5)
+       val attempts=request.fields.get("maxAttempts").map(_.convertTo[Int]).getOrElse(5)
+       onComplete(Future(scala.concurrent.blocking(repository.publishDeployment(workflowId,slug,version,concurrency,attempts)))){
+        case Success(id)=>complete(StatusCodes.Created->JsObject("deploymentId"->JsString(id.toString),"workflowId"->JsString(workflowId.toString),"slug"->JsString(slug),"version"->JsNumber(if(version>0)version else repository.workflow(workflowId).flatMap(v=>Option(v("activeVersion")).map(_.toString.toInt)).getOrElse(0))))
+        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Workflow or requested version not found")))
+        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("deployment publication failed"))))
+       }
+      } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid deployment request"))))}
+     }}
+    } ~
+    path("workflows"/JavaUUID/"audit"){workflowId=>get{
+     parameter("limit".as[Int].withDefault(100)){limit=>
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.workflowAudit(workflowId,limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Workflow audit lookup failed",error);complete(StatusCodes.InternalServerError)
+      }
+     }
+    }} ~
+    path("deployments"){get{
+     parameter("limit".as[Int].withDefault(100)){limit=>
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deployments(None,limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Deployment listing failed",error);complete(StatusCodes.InternalServerError)
+      }
+     }
+    }} ~
+    path("deployments"/Segment){slug=>get{
+     onComplete(Future(scala.concurrent.blocking(repository.deployment(slug)))){
+      case Success(Some(value))=>complete(mapper.writeValueAsString(value).parseJson)
+      case Success(None)=>complete(StatusCodes.NotFound)
+      case Failure(error)=>system.log.error("Deployment lookup failed",error);complete(StatusCodes.InternalServerError)
+     }
+    }} ~
+    path("deployments"/Segment/"pause"){slug=>post{
+     onComplete(Future(scala.concurrent.blocking(repository.setDeploymentEnabled(slug,false)))){
+      case Success(true)=>complete(JsObject("slug"->JsString(slug),"enabled"->JsBoolean(false)))
+      case Success(false)=>complete(StatusCodes.NotFound)
+      case Failure(error)=>system.log.error("Deployment pause failed",error);complete(StatusCodes.InternalServerError)
+     }
+    }} ~
+    path("deployments"/Segment/"resume"){slug=>post{
+     onComplete(Future(scala.concurrent.blocking(repository.setDeploymentEnabled(slug,true)))){
+      case Success(true)=>complete(JsObject("slug"->JsString(slug),"enabled"->JsBoolean(true)))
+      case Success(false)=>complete(StatusCodes.NotFound)
+      case Failure(error)=>system.log.error("Deployment resume failed",error);complete(StatusCodes.InternalServerError)
+     }
+    }} ~
+    path("deployments"/Segment/"runs"){slug=>get{
+     parameter("limit".as[Int].withDefault(100)){limit=>
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deploymentRuns(slug,limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Deployment run history failed",error);complete(StatusCodes.InternalServerError)
+      }
+     }
+    }} ~
+    path("deployments"/Segment/"runs"){slug=>post{entity(as[JsObject]){request=>
+     try {
+      val key=request.fields.getOrElse("idempotencyKey",JsString("")).convertTo[String]
+      val attempts=request.fields.get("maxAttempts").map(_.convertTo[Int]).getOrElse(5)
+      val parameters=request.fields.get("parameters") match {
+       case None | Some(JsNull)=>"{}"
+       case Some(value:JsObject)=>value.compactPrint
+       case Some(_)=>throw new IllegalArgumentException("parameters must be a JSON object")
+      }
+      onComplete(Future(scala.concurrent.blocking(repository.invokeDeployment(slug,key,attempts,parameters)))){
+       case Success((jobId,version))=>complete(StatusCodes.Accepted->JsObject("jobId"->JsString(jobId.toString),"workflowVersion"->JsNumber(version),"status"->JsString("QUEUED")))
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Deployment not found")))
+       case Failure(error) if Option(error.getMessage).exists(_.contains("concurrency limit"))=>complete(StatusCodes.TooManyRequests->JsObject("error"->JsString(error.getMessage)))
+       case Failure(error) if Option(error.getMessage).exists(_.contains("paused"))=>complete(StatusCodes.Conflict->JsObject("error"->JsString(error.getMessage)))
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("deployment invocation failed"))))
+      }
+     } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid invocation request"))))}
+    }}}
+
   val route=
    path("health"){get{complete(Health("UP","sbase-server"))}} ~
    pathPrefix("api"/"v1"){
@@ -485,92 +573,7 @@ object Main {
       case Success(None)=>complete(StatusCodes.NotFound)
       case Failure(error)=>system.log.error("Workflow version lookup failed",error);complete(StatusCodes.InternalServerError)
      }
-    }} ~ (path("workflows"/JavaUUID/"deployments"){workflowId=>
-     get{
-      parameter("limit".as[Int].withDefault(100)){limit=>
-       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deployments(Some(workflowId),limit)).parseJson))){
-        case Success(value)=>complete(value)
-        case Failure(error)=>system.log.error("Workflow deployment listing failed",error);complete(StatusCodes.InternalServerError)
-       }
-      }
-     } ~
-     post{entity(as[JsObject]){request=>
-      try {
-       val slug=request.fields.getOrElse("slug",JsString("")).convertTo[String]
-       val version=request.fields.get("version").map(_.convertTo[Int]).getOrElse(0)
-       val concurrency=request.fields.get("maxConcurrentRuns").map(_.convertTo[Int]).getOrElse(5)
-       val attempts=request.fields.get("maxAttempts").map(_.convertTo[Int]).getOrElse(5)
-       onComplete(Future(scala.concurrent.blocking(repository.publishDeployment(workflowId,slug,version,concurrency,attempts)))){
-        case Success(id)=>complete(StatusCodes.Created->JsObject("deploymentId"->JsString(id.toString),"workflowId"->JsString(workflowId.toString),"slug"->JsString(slug),"version"->JsNumber(if(version>0)version else repository.workflow(workflowId).flatMap(v=>Option(v("activeVersion")).map(_.toString.toInt)).getOrElse(0))))
-        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Workflow or requested version not found")))
-        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("deployment publication failed"))))
-       }
-      } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid deployment request"))))}
-     }}
-    }) ~
-    path("workflows"/JavaUUID/"audit"){workflowId=>get{
-     parameter("limit".as[Int].withDefault(100)){limit=>
-      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.workflowAudit(workflowId,limit)).parseJson))){
-       case Success(value)=>complete(value)
-       case Failure(error)=>system.log.error("Workflow audit lookup failed",error);complete(StatusCodes.InternalServerError)
-      }
-     }
-    }} ~
-    path("deployments"){get{
-     parameter("limit".as[Int].withDefault(100)){limit=>
-      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deployments(None,limit)).parseJson))){
-       case Success(value)=>complete(value)
-       case Failure(error)=>system.log.error("Deployment listing failed",error);complete(StatusCodes.InternalServerError)
-      }
-     }
-    }} ~
-    path("deployments"/Segment){slug=>get{
-     onComplete(Future(scala.concurrent.blocking(repository.deployment(slug)))){
-      case Success(Some(value))=>complete(mapper.writeValueAsString(value).parseJson)
-      case Success(None)=>complete(StatusCodes.NotFound)
-      case Failure(error)=>system.log.error("Deployment lookup failed",error);complete(StatusCodes.InternalServerError)
-     }
-    }} ~
-    path("deployments"/Segment/"pause"){slug=>post{
-     onComplete(Future(scala.concurrent.blocking(repository.setDeploymentEnabled(slug,false)))){
-      case Success(true)=>complete(JsObject("slug"->JsString(slug),"enabled"->JsBoolean(false)))
-      case Success(false)=>complete(StatusCodes.NotFound)
-      case Failure(error)=>system.log.error("Deployment pause failed",error);complete(StatusCodes.InternalServerError)
-     }
-    }} ~
-    path("deployments"/Segment/"resume"){slug=>post{
-     onComplete(Future(scala.concurrent.blocking(repository.setDeploymentEnabled(slug,true)))){
-      case Success(true)=>complete(JsObject("slug"->JsString(slug),"enabled"->JsBoolean(true)))
-      case Success(false)=>complete(StatusCodes.NotFound)
-      case Failure(error)=>system.log.error("Deployment resume failed",error);complete(StatusCodes.InternalServerError)
-     }
-    }} ~
-    path("deployments"/Segment/"runs"){slug=>get{
-     parameter("limit".as[Int].withDefault(100)){limit=>
-      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deploymentRuns(slug,limit)).parseJson))){
-       case Success(value)=>complete(value)
-       case Failure(error)=>system.log.error("Deployment run history failed",error);complete(StatusCodes.InternalServerError)
-      }
-     }
-    }} ~
-    path("deployments"/Segment/"runs"){slug=>post{entity(as[JsObject]){request=>
-     try {
-      val key=request.fields.getOrElse("idempotencyKey",JsString("")).convertTo[String]
-      val attempts=request.fields.get("maxAttempts").map(_.convertTo[Int]).getOrElse(5)
-      val parameters=request.fields.get("parameters") match {
-       case None | Some(JsNull)=>"{}"
-       case Some(value:JsObject)=>value.compactPrint
-       case Some(_)=>throw new IllegalArgumentException("parameters must be a JSON object")
-      }
-      onComplete(Future(scala.concurrent.blocking(repository.invokeDeployment(slug,key,attempts,parameters)))){
-       case Success((jobId,version))=>complete(StatusCodes.Accepted->JsObject("jobId"->JsString(jobId.toString),"workflowVersion"->JsNumber(version),"status"->JsString("QUEUED")))
-       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Deployment not found")))
-       case Failure(error) if Option(error.getMessage).exists(_.contains("concurrency limit"))=>complete(StatusCodes.TooManyRequests->JsObject("error"->JsString(error.getMessage)))
-       case Failure(error) if Option(error.getMessage).exists(_.contains("paused"))=>complete(StatusCodes.Conflict->JsObject("error"->JsString(error.getMessage)))
-       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("deployment invocation failed"))))
-      }
-     } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid invocation request"))))}
-    }}} ~
+    }} ~ deploymentRoutes ~
     path("jobs"){get{
      parameter("limit".as[Int].withDefault(100)){limit=>
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.jobs(limit)).parseJson))){
