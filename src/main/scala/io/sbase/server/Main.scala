@@ -263,7 +263,7 @@ object Main {
        case Failure(error)=>system.log.warn("One-way ANOVA failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("ANOVA failed"))))
       }
     }}} ~
-    path("automl"/"science"/"time-series/anomalies"){post{entity(as[JsObject]){request=>
+    path("automl"/"science"/"time-series"/"anomalies"){post{entity(as[JsObject]){request=>
       onComplete(Future(scala.concurrent.blocking{
        val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
        mapper.writeValueAsString(scientificResearch.detectTimeSeriesAnomalies(input)).parseJson
