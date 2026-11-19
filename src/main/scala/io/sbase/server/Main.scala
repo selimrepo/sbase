@@ -487,7 +487,7 @@ object Main {
      }
     }} ~
 
-    path("workflows"/JavaUUID/"deployments"){workflowId=>
+    (path("workflows"/JavaUUID/"deployments"){workflowId=>
      get{
       parameter("limit".as[Int].withDefault(100)){limit=>
        onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deployments(Some(workflowId),limit)).parseJson))){
@@ -509,7 +509,7 @@ object Main {
        }
       } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid deployment request"))))}
      }}
-    } ~
+    }) ~
     path("workflows"/JavaUUID/"audit"){workflowId=>get{
      parameter("limit".as[Int].withDefault(100)){limit=>
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.workflowAudit(workflowId,limit)).parseJson))){
