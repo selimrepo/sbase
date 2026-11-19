@@ -96,4 +96,44 @@ class JobRepositoryPostgresTest {
         UUID second = repository.submit(workflow._2(), key, 2);
         assertEquals(first, second);
     }
+
+    @Test
+    void publishedDeploymentPinsVersionAndEnforcesConcurrencyAndAudit() {
+        var workflow = repository.createWorkflow("deployment-test", "{\"nodes\":[]}");
+        UUID deploymentId = repository.publishDeployment(workflow._2(), "scientific-pipeline", 1, 1, 3);
+        assertNotNull(deploymentId);
+        var deployment = repository.deployment("scientific-pipeline");
+        assertTrue(deployment.isDefined());
+        assertEquals(1, deployment.get().get("workflowVersion"));
+
+        var first = repository.invokeDeployment("scientific-pipeline", "external-request-1", 3);
+        assertEquals(1, first._2());
+        assertThrows(IllegalStateException.class,
+            () -> repository.invokeDeployment("scientific-pipeline", "external-request-2", 3));
+
+        var retry = repository.invokeDeployment("scientific-pipeline", "external-request-1", 3);
+        assertEquals(first._1(), retry._1(), "idempotent retries must return the original run");
+        assertTrue(repository.setDeploymentEnabled("scientific-pipeline", false));
+        assertThrows(IllegalStateException.class,
+            () -> repository.invokeDeployment("scientific-pipeline", "external-request-3", 3));
+        assertTrue(repository.setDeploymentEnabled("scientific-pipeline", true));
+
+        var audit = repository.workflowAudit(workflow._2(), 50);
+        assertTrue(audit.stream().anyMatch(e -> "DEPLOYMENT_PUBLISHED".equals(e.get("eventType"))));
+        assertTrue(audit.stream().anyMatch(e -> "DEPLOYMENT_INVOKED".equals(e.get("eventType"))));
+        assertTrue(audit.stream().anyMatch(e -> "DEPLOYMENT_PAUSED".equals(e.get("eventType"))));
+        assertTrue(audit.stream().anyMatch(e -> "DEPLOYMENT_RESUMED".equals(e.get("eventType"))));
+    }
+
+    @Test
+    void deploymentCanBeUpdatedToAnotherImmutableWorkflowVersion() {
+        var workflow = repository.createWorkflow("deployment-version-test", "{\"nodes\":[]}");
+        UUID deploymentId = repository.publishDeployment(workflow._2(), "versioned-service", 1, 2, 4);
+        int secondVersion = repository.createWorkflowVersion(workflow._2(), "{\"nodes\":[{\"id\":\"x\",\"operator\":\"dataset-values\",\"config\":{\"values\":[1]}}]}", false);
+        assertEquals(2, secondVersion);
+        assertEquals(deploymentId, repository.publishDeployment(workflow._2(), "versioned-service", 2, 2, 4));
+        var run = repository.invokeDeployment("versioned-service", "version-2-request", 4);
+        assertEquals(2, run._2());
+    }
+
 }
