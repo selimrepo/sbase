@@ -76,4 +76,88 @@ class ScientificMiningServiceTest {
         assertThrows(IllegalArgumentException.class,()->service.compareGroups(Map.of("data",data,
                 "groupColumn","arm","valueColumn","value","groupA","A","groupB","B")));
     }
+
+    @Test
+    void mannWhitneyDetectsSeparatedIndependentGroups() {
+        List<Map<String,Object>> data=new ArrayList<>();
+        for(int i=1;i<=12;i++) {
+            data.add(Map.of("arm","A","value",i));
+            data.add(Map.of("arm","B","value",i+20));
+        }
+        Map<String,Object> result=new ScientificResearchService().mannWhitneyU(Map.of("data",data,
+                "groupColumn","arm","valueColumn","value","groupA","A","groupB","B"));
+        assertEquals("MANN_WHITNEY_U_ASYMPTOTIC_TWO_SIDED",result.get("method"));
+        assertTrue(((Number)result.get("pValueTwoSided")).doubleValue()<0.001);
+        assertTrue(((Number)result.get("rankBiserialCorrelation")).doubleValue()<0);
+    }
+
+    @Test
+    void kruskalWallisFindsRankDifferenceAcrossThreeGroups() {
+        List<Map<String,Object>> data=new ArrayList<>();
+        for(int i=1;i<=10;i++) {
+            data.add(Map.of("arm","A","value",i));
+            data.add(Map.of("arm","B","value",i+20));
+            data.add(Map.of("arm","C","value",i+40));
+        }
+        Map<String,Object> result=new ScientificResearchService().kruskalWallis(Map.of("data",data,
+                "groupColumn","arm","valueColumn","value"));
+        assertEquals("KRUSKAL_WALLIS_CHI_SQUARE_APPROXIMATION",result.get("method"));
+        assertEquals(2,result.get("degreesOfFreedom"));
+        assertTrue(((Number)result.get("pValue")).doubleValue()<0.001);
+    }
+
+    @Test
+    void oneWayAnovaReportsEffectSizeAndOmnibusPValue() {
+        List<Map<String,Object>> data=new ArrayList<>();
+        for(int i=0;i<15;i++) {
+            data.add(Map.of("arm","A","value",(double)i));
+            data.add(Map.of("arm","B","value",(double)i+15));
+            data.add(Map.of("arm","C","value",(double)i+30));
+        }
+        Map<String,Object> result=new ScientificResearchService().oneWayAnova(Map.of("data",data,
+                "groupColumn","arm","valueColumn","value"));
+        assertEquals("ONE_WAY_CLASSICAL_ANOVA",result.get("method"));
+        assertTrue(((Number)result.get("pValue")).doubleValue()<0.001);
+        assertTrue(((Number)result.get("etaSquared")).doubleValue()>0.5);
+    }
+
+    @Test
+    void rollingMadDetectsSpikeWithoutUsingCurrentPointInBaseline() {
+        List<Map<String,Object>> points=new ArrayList<>();
+        for(int i=0;i<12;i++) points.add(Map.of("timestamp","2026-01-"+String.format("%02d",i+1),
+                "value",i==11?100.0:10.0));
+        Map<String,Object> result=new ScientificResearchService().detectTimeSeriesAnomalies(
+                Map.of("points",points,"window",5,"threshold",3.5));
+        assertEquals(1,result.get("anomalyCount"));
+        Map<?,?> anomaly=(Map<?,?>)((List<?>)result.get("anomalies")).get(0);
+        assertEquals(11,anomaly.get("index"));
+    }
+
+    @Test
+    void propensityWeightingEstimatesKnownSyntheticTreatmentEffect() {
+        List<Map<String,Object>> data=new ArrayList<>();
+        for(int i=0;i<100;i++) {
+            int treated=i%2;
+            data.add(Map.of("treatment",treated==1?"yes":"no","age",(double)i,
+                    "outcome",3.0*treated+0.5*i));
+        }
+        Map<String,Object> result=new ScientificResearchService().estimateCausalEffect(Map.of(
+                "data",data,"treatmentColumn","treatment","treatedValue","yes",
+                "outcomeColumn","outcome","covariates",List.of("age")));
+        assertEquals("PROPENSITY_SCORE_INVERSE_PROBABILITY_WEIGHTED_ATE",result.get("method"));
+        assertEquals(3.0,((Number)result.get("estimatedAverageTreatmentEffect")).doubleValue(),0.15);
+        assertEquals(100,result.get("completeCaseSampleSize"));
+    }
+
+    @Test
+    void experimentDesignInflatesSampleSizeForAttrition() {
+        ScientificResearchService service=new ScientificResearchService();
+        Map<String,Object> base=service.designContinuousExperiment(Map.of("standardizedEffect",0.5));
+        Map<String,Object> adjusted=service.designContinuousExperiment(Map.of("standardizedEffect",0.5,
+                "attritionRate",0.1));
+        assertTrue(((Number)adjusted.get("totalRequiredN")).intValue()>
+                ((Number)base.get("totalRequiredN")).intValue());
+        assertEquals(0.8,((Number)adjusted.get("targetPower")).doubleValue(),1e-9);
+    }
+
 }
