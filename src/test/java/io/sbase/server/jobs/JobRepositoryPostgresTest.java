@@ -109,7 +109,7 @@ class JobRepositoryPostgresTest {
         var first = repository.invokeDeployment("scientific-pipeline", "external-request-1", 3, "{\\"sampleSize\\":100}");
         assertEquals(1, first._2());
         assertThrows(IllegalStateException.class,
-            () -> repository.invokeDeployment("scientific-pipeline", "external-request-2", 3));
+            () -> repository.invokeDeployment("scientific-pipeline", "external-request-2", 3, "{}"));
 
         var retry = repository.invokeDeployment("scientific-pipeline", "external-request-1", 3, "{\\"sampleSize\\":100}");
         assertEquals(first._1(), retry._1(), "idempotent retries must return the original run");
@@ -127,7 +127,7 @@ class JobRepositoryPostgresTest {
         assertTrue(parameterizedLease.inputParameters().contains("100"));
         assertTrue(repository.setDeploymentEnabled("scientific-pipeline", false));
         assertThrows(IllegalStateException.class,
-            () -> repository.invokeDeployment("scientific-pipeline", "external-request-3", 3));
+            () -> repository.invokeDeployment("scientific-pipeline", "external-request-3", 3, "{}"));
         assertTrue(repository.setDeploymentEnabled("scientific-pipeline", true));
 
         var audit = repository.workflowAudit(workflow._2(), 50);
@@ -151,7 +151,7 @@ class JobRepositoryPostgresTest {
         int secondVersion = repository.createWorkflowVersion(workflow._2(), "{\"nodes\":[{\"id\":\"x\",\"operator\":\"dataset-values\",\"config\":{\"values\":[1]}}]}", false);
         assertEquals(2, secondVersion);
         assertEquals(deploymentId, repository.publishDeployment(workflow._2(), "versioned-service", 2, 2, 4));
-        var run = repository.invokeDeployment("versioned-service", "version-2-request", 4);
+        var run = repository.invokeDeployment("versioned-service", "version-2-request", 4, "{}");
         assertEquals(2, run._2());
     }
 
