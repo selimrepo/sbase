@@ -27,3 +27,11 @@ CREATE INDEX IF NOT EXISTS ix_job_deployment_active
 
 COMMENT ON TABLE workflow_deployment IS
     'Published, version-pinned workflow services callable by external systems.';
+
+ALTER TABLE job_execution
+    ADD COLUMN IF NOT EXISTS deployment_id UUID
+    REFERENCES workflow_deployment(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS ix_job_deployment_active_runs
+    ON job_execution(deployment_id, status)
+    WHERE deployment_id IS NOT NULL AND status IN ('QUEUED', 'RUNNING', 'RETRY_WAIT');
