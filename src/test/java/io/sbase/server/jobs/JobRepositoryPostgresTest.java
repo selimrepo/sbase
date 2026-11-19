@@ -107,15 +107,19 @@ class JobRepositoryPostgresTest {
         assertTrue(deployment.isDefined());
         assertNotNull(deployment.get());
 
-        var first = repository.invokeDeployment(deploymentSlug, "external-request-1", 3, "{\"sampleSize\":100}");
+        String apiKey = repository.rotateDeploymentApiKey(deploymentSlug);
+        assertNotNull(apiKey);
+        assertThrows(SecurityException.class,
+            () -> repository.invokeDeployment(deploymentSlug, "wrong-key", "unauthorized", 3, "{}"));
+        var first = repository.invokeDeployment(deploymentSlug, apiKey, "external-request-1", 3, "{\"sampleSize\":100}");
         assertEquals(1, first._2());
         assertThrows(IllegalStateException.class,
-            () -> repository.invokeDeployment(deploymentSlug, "external-request-2", 3, "{}"));
+            () -> repository.invokeDeployment(deploymentSlug, apiKey, "external-request-2", 3, "{}"));
 
-        var retry = repository.invokeDeployment(deploymentSlug, "external-request-1", 3, "{\"sampleSize\":100}");
+        var retry = repository.invokeDeployment(deploymentSlug, apiKey, "external-request-1", 3, "{\"sampleSize\":100}");
         assertEquals(first._1(), retry._1(), "idempotent retries must return the original run");
         assertThrows(IllegalArgumentException.class,
-            () -> repository.invokeDeployment(deploymentSlug, "external-request-1", 3, "{\"sampleSize\":200}"));
+            () -> repository.invokeDeployment(deploymentSlug, apiKey, "external-request-1", 3, "{\"sampleSize\":200}"));
         var claimed = repository.claim(100);
         JobLease parameterizedLease = null;
         var leaseIterator = claimed.iterator();
@@ -129,8 +133,14 @@ class JobRepositoryPostgresTest {
         assertEquals(1, repository.deploymentRuns(deploymentSlug, 20).size());
         assertTrue(repository.setDeploymentEnabled(deploymentSlug, false));
         assertThrows(IllegalStateException.class,
-            () -> repository.invokeDeployment(deploymentSlug, "external-request-3", 3, "{}"));
+            () -> repository.invokeDeployment(deploymentSlug, apiKey, "external-request-3", 3, "{}"));
         assertTrue(repository.setDeploymentEnabled(deploymentSlug, true));
+        String rotatedKey = repository.rotateDeploymentApiKey(deploymentSlug);
+        assertNotEquals(apiKey, rotatedKey);
+        assertThrows(SecurityException.class,
+            () -> repository.invokeDeployment(deploymentSlug, apiKey, "old-key-after-rotation", 3, "{}"));
+        var afterRotation = repository.invokeDeployment(deploymentSlug, rotatedKey, "new-key-after-rotation", 3, "{}");
+        assertEquals(1, afterRotation._2());
 
         var audit = repository.workflowAudit(workflow._2(), 50);
         boolean published = false, invoked = false, paused = false, resumed = false;
@@ -154,7 +164,7 @@ class JobRepositoryPostgresTest {
         int secondVersion = repository.createWorkflowVersion(workflow._2(), "{\"nodes\":[{\"id\":\"x\",\"operator\":\"dataset-values\",\"config\":{\"values\":[1]}}]}", false);
         assertEquals(2, secondVersion);
         assertEquals(deploymentId, repository.publishDeployment(workflow._2(), deploymentSlug, 2, 2, 4));
-        var run = repository.invokeDeployment(deploymentSlug, "version-2-request", 4, "{}");
+        var run = repository.invokeDeployment(deploymentSlug, repository.rotateDeploymentApiKey(deploymentSlug), "version-2-request", 4, "{}");
         assertEquals(2, run._2());
     }
 
