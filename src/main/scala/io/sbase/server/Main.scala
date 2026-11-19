@@ -551,7 +551,12 @@ object Main {
      try {
       val key=request.fields.getOrElse("idempotencyKey",JsString("")).convertTo[String]
       val attempts=request.fields.get("maxAttempts").map(_.convertTo[Int]).getOrElse(5)
-      onComplete(Future(scala.concurrent.blocking(repository.invokeDeployment(slug,key,attempts)))){
+      val parameters=request.fields.get("parameters") match {
+       case None | Some(JsNull)=>"{}"
+       case Some(value:JsObject)=>value.compactPrint
+       case Some(_)=>throw new IllegalArgumentException("parameters must be a JSON object")
+      }
+      onComplete(Future(scala.concurrent.blocking(repository.invokeDeployment(slug,key,attempts,parameters)))){
        case Success((jobId,version))=>complete(StatusCodes.Accepted->JsObject("jobId"->JsString(jobId.toString),"workflowVersion"->JsNumber(version),"status"->JsString("QUEUED")))
        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Deployment not found")))
        case Failure(error) if Option(error.getMessage).exists(_.contains("concurrency limit"))=>complete(StatusCodes.TooManyRequests->JsObject("error"->JsString(error.getMessage)))
