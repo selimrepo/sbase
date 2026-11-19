@@ -130,6 +130,7 @@ class JobRepositoryPostgresTest {
         assertNotNull(parameterizedLease);
         assertTrue(parameterizedLease.inputParameters().contains("sampleSize"));
         assertTrue(parameterizedLease.inputParameters().contains("100"));
+        assertTrue(repository.complete(parameterizedLease, "{}"), "claimed deployment run should be completable");
         assertEquals(1, repository.deploymentRuns(deploymentSlug, 20).size());
         assertTrue(repository.setDeploymentEnabled(deploymentSlug, false));
         assertThrows(IllegalStateException.class,
