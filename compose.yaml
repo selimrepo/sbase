@@ -21,6 +21,7 @@ services:
       SBASE_FEDERATED_SPILL_PATH: /var/lib/sbase/spark-tmp/federation
       SBASE_AUTOML_WORKERS: ${SBASE_AUTOML_WORKERS:-2}
       SBASE_AUTOML_QUEUE_CAPACITY: ${SBASE_AUTOML_QUEUE_CAPACITY:-16}
+      SBASE_ADMIN_TOKEN: ${SBASE_ADMIN_TOKEN:-}
       SPARK_LOCAL_DIRS: /var/lib/sbase/spark-tmp
     ports:
       - "${SBASE_HTTP_PORT:-8080}:8080"
