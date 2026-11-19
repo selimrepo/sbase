@@ -485,9 +485,7 @@ object Main {
       case Success(None)=>complete(StatusCodes.NotFound)
       case Failure(error)=>system.log.error("Workflow version lookup failed",error);complete(StatusCodes.InternalServerError)
      }
-    }} ~
-
-    (path("workflows"/JavaUUID/"deployments"){workflowId=>
+    }} ~ (path("workflows"/JavaUUID/"deployments"){workflowId=>
      get{
       parameter("limit".as[Int].withDefault(100)){limit=>
        onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deployments(Some(workflowId),limit)).parseJson))){
