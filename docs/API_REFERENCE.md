@@ -123,11 +123,15 @@ Invoke request:
 ```json
 {
   "idempotencyKey": "risk-batch-2026-11-19",
-  "maxAttempts": 5
+  "maxAttempts": 5,
+  "parameters": {
+    "threshold": 0.5,
+    "window": 48
+  }
 }
 ```
 
-Invocation returns HTTP 202 with a durable `jobId`, the pinned `workflowVersion`, and `QUEUED` status. Use `GET /jobs/{jobId}` and `GET /jobs/{jobId}/events` to monitor execution. Idempotency keys are scoped to the deployment. The configured concurrent-run ceiling is enforced transactionally per deployment; excess invocations receive HTTP 429. Paused services reject new invocations with HTTP 409; already queued or running jobs are not cancelled.
+Invocation returns HTTP 202 with a durable `jobId`, the pinned `workflowVersion`, and `QUEUED` status. Use `GET /jobs/{jobId}` and `GET /jobs/{jobId}/events` to monitor execution. The optional `parameters` field must be a JSON object and is persisted with the job. Workflow node configuration can reference typed values with an explicit object such as `{"$parameter":"threshold"}`; missing references fail the run rather than silently becoming null. Reusing an idempotency key with a different parameter object is rejected. Idempotency keys are scoped to the deployment. The configured concurrent-run ceiling is enforced transactionally per deployment; excess invocations receive HTTP 429. Paused services reject new invocations with HTTP 409; already queued or running jobs are not cancelled.
 
 The deployment audit endpoint records publication, invocation, pause and resume events. Current audit actors are recorded as `system` because this API layer does not yet establish authenticated user principals; do not treat the audit actor field as a verified human identity. Protect these management endpoints with an authenticated gateway until first-class SBase identity and workspace RBAC are enabled.
 
