@@ -472,6 +472,26 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
  }
 
+
+ def deploymentRuns(slug:String,limit:Int):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("""SELECT j.id,j.workflow_version,j.status,j.attempt,j.max_attempts,
+    | j.error_code,j.error_message,j.submitted_at,j.started_at,j.finished_at,j.result::text
+    | FROM job_execution j JOIN workflow_deployment d ON d.id=j.deployment_id
+    | WHERE d.slug=? ORDER BY j.submitted_at DESC LIMIT ?""".stripMargin)
+   p.setString(1,slug);p.setInt(2,math.max(1,math.min(limit,500)))
+   val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next())out+=Map[String,Object](
+    "jobId"->rs.getObject(1),"workflowVersion"->Int.box(rs.getInt(2)),"status"->rs.getString(3),
+    "attempt"->Int.box(rs.getInt(4)),"maxAttempts"->Int.box(rs.getInt(5)),
+    "errorCode"->Option(rs.getString(6)).orNull,"errorMessage"->Option(rs.getString(7)).orNull,
+    "submittedAt"->rs.getString(8),"startedAt"->Option(rs.getString(9)).orNull,
+    "finishedAt"->Option(rs.getString(10)).orNull,"result"->Option(rs.getString(11)).orNull)
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
  def workflowAudit(workflowId:UUID,limit:Int):Seq[Map[String,Object]] = {
   val c=dataSource.getConnection
   try {
