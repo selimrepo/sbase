@@ -73,7 +73,7 @@ object Main {
   val autoMlJobs=new AutoMlJobQueue(autoMl,operators.sparkSession,sys.env.get("SBASE_AUTOML_WORKERS").flatMap(_.toIntOption).getOrElse(2),sys.env.get("SBASE_AUTOML_QUEUE_CAPACITY").flatMap(_.toIntOption).getOrElse(16))
   val autoMlScience=new AutoMlScienceService(operators.sparkSession)
   val scientificMining=new io.sbase.server.automl.ScientificMiningService()
-  val scientificMining=new io.sbase.server.automl.ScientificMiningService()
+  val scientificResearch=new io.sbase.server.automl.ScientificResearchService()
   val autoMlStatisticalDrift=new AutoMlMonitoringService()
   val runtime=new PlatformRuntimeService(operators.sparkSession)
   val workerRegion=WorkerSharding.start(system,repository,operators)
@@ -89,7 +89,7 @@ object Main {
       "catalogs"->JsArray(JsString("postgresql"),JsString("cassandra"),JsString("solr")),
       "queryEngines"->JsArray(JsString("calcite-sql"),JsString("federated-calcite"),JsString("spark-sql")),
       "compute"->JsArray(JsString("mahout"),JsString("spark-ml-automl"),JsString("flink")),
-      "scientificAutoMl"->JsArray(JsString("dataset-profiling"),JsString("cross-validation"),JsString("model-cards"),JsString("fairness-diagnostics"),JsString("psi-drift"),JsString("kolmogorov-smirnov"),JsString("feature-association"),JsString("fdr-feature-selection"),JsString("welch-hypothesis-testing")),
+      "scientificAutoMl"->JsArray(JsString("dataset-profiling"),JsString("cross-validation"),JsString("model-cards"),JsString("fairness-diagnostics"),JsString("psi-drift"),JsString("kolmogorov-smirnov"),JsString("feature-association"),JsString("fdr-feature-selection"),JsString("welch-hypothesis-testing"),JsString("mann-whitney-u"),JsString("kruskal-wallis"),JsString("one-way-anova"),JsString("rolling-mad-anomaly-detection"),JsString("propensity-score-ipw"),JsString("experiment-power-analysis")),
       "apiVersion"->JsString("v1")
     ))}} ~
     path("components"){get{
@@ -236,6 +236,60 @@ object Main {
        case Failure(error)=>system.log.warn("Scientific group comparison failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("group comparison failed"))))
       }
     }}} ~
+    path("automl"/"science"/"mann-whitney"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(scientificResearch.mannWhitneyU(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Mann-Whitney analysis failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Mann-Whitney analysis failed"))))
+      }
+    }}} ~
+    path("automl"/"science"/"kruskal-wallis"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(scientificResearch.kruskalWallis(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Kruskal-Wallis analysis failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Kruskal-Wallis analysis failed"))))
+      }
+    }}} ~
+    path("automl"/"science"/"anova"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(scientificResearch.oneWayAnova(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("One-way ANOVA failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("ANOVA failed"))))
+      }
+    }}} ~
+    path("automl"/"science"/"time-series/anomalies"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(scientificResearch.detectTimeSeriesAnomalies(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Time-series anomaly detection failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("anomaly detection failed"))))
+      }
+    }}} ~
+    path("automl"/"science"/"causal-effect"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(scientificResearch.estimateCausalEffect(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Causal effect estimation failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("causal effect estimation failed"))))
+      }
+    }}} ~
+    path("automl"/"science"/"experiment-design"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(scientificResearch.designContinuousExperiment(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Experiment design failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("experiment design failed"))))
+      }
+    }}} ~
     path("automl"/"data"/"profile"){post{entity(as[JsObject]){request=>
       onComplete(Future(scala.concurrent.blocking{
        val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
@@ -243,33 +297,6 @@ object Main {
       })){
        case Success(value)=>complete(value)
        case Failure(error)=>system.log.warn("AutoML data profiling failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("profiling failed"))))
-      }
-    }}} ~
-    path("automl"/"science"/"associations"){post{entity(as[JsObject]){request=>
-      onComplete(Future(scala.concurrent.blocking{
-       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
-       mapper.writeValueAsString(scientificMining.associations(input)).parseJson
-      })){
-       case Success(value)=>complete(value)
-       case Failure(error)=>system.log.warn("Scientific association analysis failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("association analysis failed"))))
-      }
-    }}} ~
-    path("automl"/"science"/"feature-selection"){post{entity(as[JsObject]){request=>
-      onComplete(Future(scala.concurrent.blocking{
-       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
-       mapper.writeValueAsString(scientificMining.selectFeatures(input)).parseJson
-      })){
-       case Success(value)=>complete(value)
-       case Failure(error)=>system.log.warn("Scientific feature selection failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("feature selection failed"))))
-      }
-    }}} ~
-    path("automl"/"science"/"compare-groups"){post{entity(as[JsObject]){request=>
-      onComplete(Future(scala.concurrent.blocking{
-       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
-       mapper.writeValueAsString(scientificMining.compareGroups(input)).parseJson
-      })){
-       case Success(value)=>complete(value)
-       case Failure(error)=>system.log.warn("Scientific group comparison failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("group comparison failed"))))
       }
     }}} ~
     path("automl"/"monitoring"/"statistical-drift"){post{entity(as[JsObject]){request=>
