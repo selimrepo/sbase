@@ -73,6 +73,7 @@ object Main {
   val autoMlJobs=new AutoMlJobQueue(autoMl,operators.sparkSession,sys.env.get("SBASE_AUTOML_WORKERS").flatMap(_.toIntOption).getOrElse(2),sys.env.get("SBASE_AUTOML_QUEUE_CAPACITY").flatMap(_.toIntOption).getOrElse(16))
   val autoMlScience=new AutoMlScienceService(operators.sparkSession)
   val scientificMining=new io.sbase.server.automl.ScientificMiningService()
+  val scientificMining=new io.sbase.server.automl.ScientificMiningService()
   val autoMlStatisticalDrift=new AutoMlMonitoringService()
   val runtime=new PlatformRuntimeService(operators.sparkSession)
   val workerRegion=WorkerSharding.start(system,repository,operators)
@@ -206,6 +207,33 @@ object Main {
       })){
        case Success(value)=>complete(value)
        case Failure(error)=>system.log.error("Federated query execution failed",error);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query execution failed"))))
+      }
+    }}} ~
+    path("automl"/"science"/"associations"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(scientificMining.associations(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Scientific association mining failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("association analysis failed"))))
+      }
+    }}} ~
+    path("automl"/"science"/"feature-selection"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(scientificMining.selectFeatures(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Scientific feature selection failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("feature selection failed"))))
+      }
+    }}} ~
+    path("automl"/"science"/"compare-groups"){post{entity(as[JsObject]){request=>
+      onComplete(Future(scala.concurrent.blocking{
+       val input=mapper.readValue(request.compactPrint,classOf[java.util.Map[String,Object]])
+       mapper.writeValueAsString(scientificMining.compareGroups(input)).parseJson
+      })){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Scientific group comparison failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("group comparison failed"))))
       }
     }}} ~
     path("automl"/"data"/"profile"){post{entity(as[JsObject]){request=>
