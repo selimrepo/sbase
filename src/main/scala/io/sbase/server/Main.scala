@@ -85,7 +85,7 @@ object Main {
   val deploymentRoutes =
   optionalHeaderValueByName("X-SBase-Admin-Token"){provided=>
    val expected=sys.env.get("SBASE_ADMIN_TOKEN")
-   val authorized=(for(actual<-provided,configured<-expected) yield java.security.MessageDigest.isEqual(actual.getBytes("UTF-8"),configured.getBytes("UTF-8"))).getOrElse(false)
+   val authorized = (for { actual <- provided; configured <- expected } yield java.security.MessageDigest.isEqual(actual.getBytes("UTF-8"),configured.getBytes("UTF-8"))).getOrElse(false)
    if(expected.isEmpty) complete(StatusCodes.ServiceUnavailable->JsObject("error"->JsString("SBASE_ADMIN_TOKEN is not configured")))
    else if(!authorized) complete(StatusCodes.Unauthorized->JsObject("error"->JsString("Admin token required")))
    else {
@@ -163,7 +163,7 @@ path("workflows"/JavaUUID/"deployments"){workflowId=>
        case Failure(error)=>system.log.error("Deployment run history failed",error);complete(StatusCodes.InternalServerError)
       }
      }
-    }} ~
+    }}
    }
   }
 
@@ -192,7 +192,7 @@ path("deployments"/Segment/"runs"){slug=>post{
        } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid invocation request"))))}
       }
      }
-    }}}
+    }}
 
   val route=
    path("health"){get{complete(Health("UP","sbase-server"))}} ~
