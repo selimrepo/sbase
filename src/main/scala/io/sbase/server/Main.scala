@@ -547,6 +547,14 @@ object Main {
       case Failure(error)=>system.log.error("Deployment resume failed",error);complete(StatusCodes.InternalServerError)
      }
     }} ~
+    path("deployments"/Segment/"runs"){slug=>get{
+     parameter("limit".as[Int].withDefault(100)){limit=>
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deploymentRuns(slug,limit)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Deployment run history failed",error);complete(StatusCodes.InternalServerError)
+      }
+     }
+    }} ~
     path("deployments"/Segment/"runs"){slug=>post{entity(as[JsObject]){request=>
      try {
       val key=request.fields.getOrElse("idempotencyKey",JsString("")).convertTo[String]
