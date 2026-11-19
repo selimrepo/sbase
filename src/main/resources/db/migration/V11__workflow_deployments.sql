@@ -31,3 +31,12 @@ ALTER TABLE job_execution
 CREATE INDEX IF NOT EXISTS ix_job_deployment_active_runs
     ON job_execution(deployment_id, status)
     WHERE deployment_id IS NOT NULL AND status IN ('QUEUED', 'RUNNING', 'RETRY_WAIT');
+
+ALTER TABLE job_execution
+    ADD COLUMN IF NOT EXISTS input_parameters JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE job_execution
+    DROP CONSTRAINT IF EXISTS ck_job_input_parameters_object;
+ALTER TABLE job_execution
+    ADD CONSTRAINT ck_job_input_parameters_object
+    CHECK (jsonb_typeof(input_parameters) = 'object');
