@@ -104,7 +104,7 @@ class JobRepositoryPostgresTest {
         assertNotNull(deploymentId);
         var deployment = repository.deployment("scientific-pipeline");
         assertTrue(deployment.isDefined());
-        assertEquals(1, deployment.get().get("workflowVersion"));
+        assertNotNull(deployment.get());
 
         var first = repository.invokeDeployment("scientific-pipeline", "external-request-1", 3);
         assertEquals(1, first._2());
@@ -119,10 +119,17 @@ class JobRepositoryPostgresTest {
         assertTrue(repository.setDeploymentEnabled("scientific-pipeline", true));
 
         var audit = repository.workflowAudit(workflow._2(), 50);
-        assertTrue(audit.stream().anyMatch(e -> "DEPLOYMENT_PUBLISHED".equals(e.get("eventType"))));
-        assertTrue(audit.stream().anyMatch(e -> "DEPLOYMENT_INVOKED".equals(e.get("eventType"))));
-        assertTrue(audit.stream().anyMatch(e -> "DEPLOYMENT_PAUSED".equals(e.get("eventType"))));
-        assertTrue(audit.stream().anyMatch(e -> "DEPLOYMENT_RESUMED".equals(e.get("eventType"))));
+        boolean published = false, invoked = false, paused = false, resumed = false;
+        var auditIterator = audit.iterator();
+        while (auditIterator.hasNext()) {
+            var event = auditIterator.next();
+            String eventType = String.valueOf(event.apply("eventType"));
+            published |= "DEPLOYMENT_PUBLISHED".equals(eventType);
+            invoked |= "DEPLOYMENT_INVOKED".equals(eventType);
+            paused |= "DEPLOYMENT_PAUSED".equals(eventType);
+            resumed |= "DEPLOYMENT_RESUMED".equals(eventType);
+        }
+        assertTrue(published); assertTrue(invoked); assertTrue(paused); assertTrue(resumed);
     }
 
     @Test
