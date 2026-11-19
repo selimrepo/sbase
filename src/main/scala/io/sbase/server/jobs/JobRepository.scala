@@ -426,8 +426,33 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
  }
 
+ /** Rotate a deployment credential. Only the SHA-256 digest is persisted; the raw token is returned once. */
+ def rotateDeploymentApiKey(slug:String):String = {
+  require(slug!=null && slug.matches("[a-z0-9][a-z0-9-]{1,118}[a-z0-9]"),"Invalid deployment slug")
+  val random=new Array[Byte](32)
+  new java.security.SecureRandom().nextBytes(random)
+  val token="sbase_"+java.util.Base64.getUrlEncoder.withoutPadding().encodeToString(random)
+  val digest=java.security.MessageDigest.getInstance("SHA-256").digest(token.getBytes("UTF-8")).map(b=>f"${b & 0xff}%02x").mkString
+  val prefix=token.take(14)
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false)
+   val p=c.prepareStatement("""UPDATE workflow_deployment d SET api_key_hash=?,api_key_prefix=?,api_key_rotated_at=now(),updated_at=now()
+    | FROM workflow w WHERE d.workflow_id=w.id AND d.slug=?
+    | RETURNING d.id,d.workflow_id,w.workspace_id""".stripMargin)
+   p.setString(1,digest);p.setString(2,prefix);p.setString(3,slug)
+   val rs=p.executeQuery()
+   if(!rs.next()) {rs.close();p.close();throw new NoSuchElementException("Deployment not found")}
+   val deploymentId=rs.getObject(1,classOf[UUID]);val workflowId=rs.getObject(2,classOf[UUID]);val workspaceId=rs.getObject(3,classOf[UUID])
+   rs.close();p.close()
+   audit(c,workspaceId,workflowId,"DEPLOYMENT_API_KEY_ROTATED",
+    "{\"deploymentId\":\""+deploymentId+"\",\"slug\":\""+slug+"\",\"keyPrefix\":\""+prefix+"\"}")
+   c.commit()
+   token
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
  /** Atomic per-deployment concurrency admission, pinned-version queueing and idempotency. */
- def invokeDeployment(slug:String,idempotencyKey:String,requestedAttempts:Int,parametersJson:String="{}"):(UUID,Int) = {
+ def invokeDeployment(slug:String,apiKey:String,idempotencyKey:String,requestedAttempts:Int,parametersJson:String="{}"):(UUID,Int) = {
   require(idempotencyKey!=null && idempotencyKey.nonEmpty && idempotencyKey.length<=150,"idempotencyKey must be 1..150 characters")
   require(slug!=null && slug.matches("[a-z0-9][a-z0-9-]{1,118}[a-z0-9]"),"Invalid deployment slug")
   val scopedKey="deployment:"+slug+":"+idempotencyKey
@@ -436,14 +461,18 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   try {
    c.setAutoCommit(false)
    val p=c.prepareStatement("""SELECT d.id,d.workflow_id,d.workflow_version,d.max_concurrent_runs,d.max_attempts,
-    | d.enabled,w.workspace_id FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id
+    | d.enabled,w.workspace_id,d.api_key_hash FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id
     | WHERE d.slug=? FOR UPDATE OF d""".stripMargin)
    p.setString(1,slug);val rs=p.executeQuery()
    if(!rs.next()) throw new NoSuchElementException("Deployment not found")
    val deploymentId=rs.getObject(1,classOf[UUID]);val workflowId=rs.getObject(2,classOf[UUID])
    val version=rs.getInt(3);val maxConcurrent=rs.getInt(4);val configuredAttempts=rs.getInt(5)
-   val enabled=rs.getBoolean(6);val workspaceId=rs.getObject(7,classOf[UUID])
+   val enabled=rs.getBoolean(6);val workspaceId=rs.getObject(7,classOf[UUID]);val storedHash=rs.getString(8)
    rs.close();p.close()
+   if(storedHash==null || apiKey==null || apiKey.isEmpty) throw new SecurityException("A valid deployment API key is required")
+   val suppliedHash=java.security.MessageDigest.getInstance("SHA-256").digest(apiKey.getBytes("UTF-8")).map(b=>f"${b & 0xff}%02x").mkString
+   if(!java.security.MessageDigest.isEqual(storedHash.getBytes("UTF-8"),suppliedHash.getBytes("UTF-8")))
+    throw new SecurityException("A valid deployment API key is required")
    if(!enabled) throw new IllegalStateException("Deployment is paused")
    val existing=c.prepareStatement("SELECT id,workflow_version,(input_parameters=?::jsonb) AS same_payload FROM job_execution WHERE idempotency_key=?")
    existing.setString(1,parametersJson);existing.setString(2,scopedKey);val er=existing.executeQuery()
