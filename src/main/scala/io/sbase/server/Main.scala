@@ -83,6 +83,12 @@ object Main {
   val port=sys.env.get("SBASE_HTTP_PORT").flatMap(_.toIntOption).getOrElse(8080)
 
   val deploymentRoutes =
+  optionalHeaderValueByName("X-SBase-Admin-Token"){provided=>
+   val expected=sys.env.get("SBASE_ADMIN_TOKEN")
+   val authorized=(for(actual<-provided,configured<-expected) yield java.security.MessageDigest.isEqual(actual.getBytes("UTF-8"),configured.getBytes("UTF-8"))).getOrElse(false)
+   if(expected.isEmpty) complete(StatusCodes.ServiceUnavailable->JsObject("error"->JsString("SBASE_ADMIN_TOKEN is not configured")))
+   else if(!authorized) complete(StatusCodes.Unauthorized->JsObject("error"->JsString("Admin token required")))
+   else {
 path("workflows"/JavaUUID/"deployments"){workflowId=>
      get{
       parameter("limit".as[Int].withDefault(100)){limit=>
@@ -144,16 +150,10 @@ path("workflows"/JavaUUID/"deployments"){workflowId=>
      }
     }} ~
     path("deployments"/Segment/"rotate-key"){slug=>post{
-     optionalHeaderValueByName("X-SBase-Admin-Token"){provided=>
-      val expected=sys.env.get("SBASE_ADMIN_TOKEN")
-      val authorized=(for(actual<-provided,configured<-expected) yield java.security.MessageDigest.isEqual(actual.getBytes("UTF-8"),configured.getBytes("UTF-8"))).getOrElse(false)
-      if(expected.isEmpty) complete(StatusCodes.ServiceUnavailable->JsObject("error"->JsString("SBASE_ADMIN_TOKEN is not configured")))
-      else if(!authorized) complete(StatusCodes.Unauthorized->JsObject("error"->JsString("Admin token required")))
-      else onComplete(Future(scala.concurrent.blocking(repository.rotateDeploymentApiKey(slug)))){
-       case Success(token)=>complete(JsObject("slug"->JsString(slug),"apiKey"->JsString(token),"warning"->JsString("Store this key now; it will not be shown again.")))
-       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Deployment not found")))
-       case Failure(error)=>system.log.error("Deployment API key rotation failed",error);complete(StatusCodes.InternalServerError)
-      }
+     onComplete(Future(scala.concurrent.blocking(repository.rotateDeploymentApiKey(slug)))){
+      case Success(token)=>complete(JsObject("slug"->JsString(slug),"apiKey"->JsString(token),"warning"->JsString("Store this key now; it will not be shown again.")))
+      case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Deployment not found")))
+      case Failure(error)=>system.log.error("Deployment API key rotation failed",error);complete(StatusCodes.InternalServerError)
      }
     }} ~
     path("deployments"/Segment/"runs"){slug=>get{
@@ -164,7 +164,11 @@ path("workflows"/JavaUUID/"deployments"){workflowId=>
       }
      }
     }} ~
-    path("deployments"/Segment/"runs"){slug=>post{
+   }
+  }
+
+  val deploymentInvocationRoute =
+path("deployments"/Segment/"runs"){slug=>post{
      optionalHeaderValueByName("Authorization"){authorization=>
       val apiKey=authorization.filter(_.startsWith("Bearer ")).map(_.substring(7)).getOrElse("")
       if(apiKey.isEmpty) complete(StatusCodes.Unauthorized->JsObject("error"->JsString("Bearer deployment API key required")))
@@ -593,7 +597,7 @@ path("workflows"/JavaUUID/"deployments"){workflowId=>
       case Success(None)=>complete(StatusCodes.NotFound)
       case Failure(error)=>system.log.error("Workflow version lookup failed",error);complete(StatusCodes.InternalServerError)
      }
-    }} ~ deploymentRoutes ~
+    }} ~ deploymentRoutes ~ deploymentInvocationRoute ~
     path("jobs"){get{
      parameter("limit".as[Int].withDefault(100)){limit=>
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.jobs(limit)).parseJson))){
