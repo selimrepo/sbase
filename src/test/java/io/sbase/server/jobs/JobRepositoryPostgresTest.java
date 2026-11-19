@@ -125,6 +125,7 @@ class JobRepositoryPostgresTest {
         assertNotNull(parameterizedLease);
         assertTrue(parameterizedLease.inputParameters().contains("sampleSize"));
         assertTrue(parameterizedLease.inputParameters().contains("100"));
+        assertEquals(1, repository.deploymentRuns("scientific-pipeline", 20).size());
         assertTrue(repository.setDeploymentEnabled("scientific-pipeline", false));
         assertThrows(IllegalStateException.class,
             () -> repository.invokeDeployment("scientific-pipeline", "external-request-3", 3, "{}"));
