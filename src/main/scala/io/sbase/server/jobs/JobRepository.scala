@@ -34,13 +34,14 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
     | FROM candidates x WHERE j.id=x.id
     | RETURNING j.id,j.lease_owner,j.attempt,j.max_attempts,
     | (SELECT v.definition::text FROM workflow_version v
-    | WHERE v.workflow_id=j.workflow_id AND v.version=j.workflow_version) AS definition
+    | WHERE v.workflow_id=j.workflow_id AND v.version=j.workflow_version) AS definition,
+    | j.input_parameters::text AS input_parameters
     |""".stripMargin
    val p=c.prepareStatement(sql); p.setInt(1,math.max(1,limit)); p.setInt(2,leaseSeconds)
    val rs=p.executeQuery(); val result=ArrayBuffer.empty[JobLease]
    while(rs.next()) {
     val id=rs.getObject("id",classOf[UUID]); val attempt=rs.getInt("attempt")
-    result += JobLease(id,rs.getObject("lease_owner",classOf[UUID]),attempt,rs.getInt("max_attempts"),rs.getString("definition"))
+    result += JobLease(id,rs.getObject("lease_owner",classOf[UUID]),attempt,rs.getInt("max_attempts"),rs.getString("definition"),rs.getString("input_parameters"))
     event(c,id,"LEASE_ACQUIRED",attempt,"{}")
    }
    rs.close(); p.close(); c.commit(); result.toSeq
@@ -426,7 +427,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
  }
 
  /** Atomic per-deployment concurrency admission, pinned-version queueing and idempotency. */
- def invokeDeployment(slug:String,idempotencyKey:String,requestedAttempts:Int):(UUID,Int) = {
+ def invokeDeployment(slug:String,idempotencyKey:String,requestedAttempts:Int,parametersJson:String="{}"):(UUID,Int) = {
   require(idempotencyKey!=null && idempotencyKey.nonEmpty && idempotencyKey.length<=150,"idempotencyKey must be 1..150 characters")
   require(slug!=null && slug.matches("[a-z0-9][a-z0-9-]{1,118}[a-z0-9]"),"Invalid deployment slug")
   val scopedKey="deployment:"+slug+":"+idempotencyKey
@@ -444,20 +445,23 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
    val enabled=rs.getBoolean(6);val workspaceId=rs.getObject(7,classOf[UUID])
    rs.close();p.close()
    if(!enabled) throw new IllegalStateException("Deployment is paused")
-   val existing=c.prepareStatement("SELECT id,workflow_version FROM job_execution WHERE idempotency_key=?")
-   existing.setString(1,scopedKey);val er=existing.executeQuery()
+   val existing=c.prepareStatement("SELECT id,workflow_version,(input_parameters=?::jsonb) AS same_payload FROM job_execution WHERE idempotency_key=?")
+   existing.setString(1,parametersJson);existing.setString(2,scopedKey);val er=existing.executeQuery()
    if(er.next()) {
-    val result=(er.getObject(1,classOf[UUID]),er.getInt(2));er.close();existing.close();c.commit();return result
+    val samePayload=er.getBoolean(3)
+    val result=(er.getObject(1,classOf[UUID]),er.getInt(2));er.close();existing.close()
+    if(!samePayload) throw new IllegalArgumentException("Idempotency key was already used with different parameters")
+    c.commit();return result
    }
    er.close();existing.close()
    val count=c.prepareStatement("SELECT COUNT(*) FROM job_execution WHERE deployment_id=? AND status IN ('QUEUED','RUNNING','RETRY_WAIT')")
    count.setObject(1,deploymentId);val cr=count.executeQuery();cr.next();val active=cr.getInt(1);cr.close();count.close()
    if(active>=maxConcurrent) throw new IllegalStateException("Deployment concurrency limit reached")
    val jobId=UUID.randomUUID()
-   val insert=c.prepareStatement("""INSERT INTO job_execution(id,workflow_id,workflow_version,status,idempotency_key,correlation_id,max_attempts,deployment_id)
-    | VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?)""".stripMargin)
+   val insert=c.prepareStatement("""INSERT INTO job_execution(id,workflow_id,workflow_version,status,idempotency_key,correlation_id,max_attempts,deployment_id,input_parameters)
+    | VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?::jsonb)""".stripMargin)
    insert.setObject(1,jobId);insert.setObject(2,workflowId);insert.setInt(3,version);insert.setString(4,scopedKey)
-   insert.setObject(5,UUID.randomUUID());insert.setInt(6,math.max(1,math.min(requestedAttempts,configuredAttempts)));insert.setObject(7,deploymentId)
+   insert.setObject(5,UUID.randomUUID());insert.setInt(6,math.max(1,math.min(requestedAttempts,configuredAttempts)));insert.setObject(7,deploymentId);insert.setString(8,parametersJson)
    insert.executeUpdate();insert.close()
    event(c,jobId,"QUEUED_BY_DEPLOYMENT",0,"{\"deploymentId\":\""+deploymentId+"\",\"slug\":\""+slug+"\"}")
    val update=c.prepareStatement("UPDATE workflow_deployment SET invocation_count=invocation_count+1,last_invoked_at=now(),updated_at=now() WHERE id=?")
