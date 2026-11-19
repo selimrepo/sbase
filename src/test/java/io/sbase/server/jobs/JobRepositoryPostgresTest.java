@@ -143,7 +143,7 @@ class JobRepositoryPostgresTest {
         assertEquals(1, afterRotation._2());
 
         var audit = repository.workflowAudit(workflow._2(), 50);
-        boolean published = false, invoked = false, paused = false, resumed = false;
+        boolean published = false, invoked = false, paused = false, resumed = false, keyRotated = false;
         var auditIterator = audit.iterator();
         while (auditIterator.hasNext()) {
             var event = auditIterator.next();
@@ -152,8 +152,9 @@ class JobRepositoryPostgresTest {
             invoked |= "DEPLOYMENT_INVOKED".equals(eventType);
             paused |= "DEPLOYMENT_PAUSED".equals(eventType);
             resumed |= "DEPLOYMENT_RESUMED".equals(eventType);
+            keyRotated |= "DEPLOYMENT_API_KEY_ROTATED".equals(eventType);
         }
-        assertTrue(published); assertTrue(invoked); assertTrue(paused); assertTrue(resumed);
+        assertTrue(published); assertTrue(invoked); assertTrue(paused); assertTrue(resumed); assertTrue(keyRotated);
     }
 
     @Test
