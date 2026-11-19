@@ -143,6 +143,19 @@ path("workflows"/JavaUUID/"deployments"){workflowId=>
       case Failure(error)=>system.log.error("Deployment resume failed",error);complete(StatusCodes.InternalServerError)
      }
     }} ~
+    path("deployments"/Segment/"rotate-key"){slug=>post{
+     optionalHeaderValueByName("X-SBase-Admin-Token"){provided=>
+      val expected=sys.env.get("SBASE_ADMIN_TOKEN")
+      val authorized=(for(actual<-provided,configured<-expected) yield java.security.MessageDigest.isEqual(actual.getBytes("UTF-8"),configured.getBytes("UTF-8"))).getOrElse(false)
+      if(expected.isEmpty) complete(StatusCodes.ServiceUnavailable->JsObject("error"->JsString("SBASE_ADMIN_TOKEN is not configured")))
+      else if(!authorized) complete(StatusCodes.Unauthorized->JsObject("error"->JsString("Admin token required")))
+      else onComplete(Future(scala.concurrent.blocking(repository.rotateDeploymentApiKey(slug)))){
+       case Success(token)=>complete(JsObject("slug"->JsString(slug),"apiKey"->JsString(token),"warning"->JsString("Store this key now; it will not be shown again.")))
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Deployment not found")))
+       case Failure(error)=>system.log.error("Deployment API key rotation failed",error);complete(StatusCodes.InternalServerError)
+      }
+     }
+    }} ~
     path("deployments"/Segment/"runs"){slug=>get{
      parameter("limit".as[Int].withDefault(100)){limit=>
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(repository.deploymentRuns(slug,limit)).parseJson))){
@@ -151,23 +164,30 @@ path("workflows"/JavaUUID/"deployments"){workflowId=>
       }
      }
     }} ~
-    path("deployments"/Segment/"runs"){slug=>post{entity(as[JsObject]){request=>
-     try {
-      val key=request.fields.getOrElse("idempotencyKey",JsString("")).convertTo[String]
-      val attempts=request.fields.get("maxAttempts").map(_.convertTo[Int]).getOrElse(5)
-      val parameters=request.fields.get("parameters") match {
-       case None | Some(JsNull)=>"{}"
-       case Some(value:JsObject)=>value.compactPrint
-       case Some(_)=>throw new IllegalArgumentException("parameters must be a JSON object")
+    path("deployments"/Segment/"runs"){slug=>post{
+     optionalHeaderValueByName("Authorization"){authorization=>
+      val apiKey=authorization.filter(_.startsWith("Bearer ")).map(_.substring(7)).getOrElse("")
+      if(apiKey.isEmpty) complete(StatusCodes.Unauthorized->JsObject("error"->JsString("Bearer deployment API key required")))
+      else entity(as[JsObject]){request=>
+       try {
+        val key=request.fields.getOrElse("idempotencyKey",JsString("")).convertTo[String]
+        val attempts=request.fields.get("maxAttempts").map(_.convertTo[Int]).getOrElse(5)
+        val parameters=request.fields.get("parameters") match {
+         case None | Some(JsNull)=>"{}"
+         case Some(value:JsObject)=>value.compactPrint
+         case Some(_)=>throw new IllegalArgumentException("parameters must be a JSON object")
+        }
+        onComplete(Future(scala.concurrent.blocking(repository.invokeDeployment(slug,apiKey,key,attempts,parameters)))){
+         case Success((jobId,version))=>complete(StatusCodes.Accepted->JsObject("jobId"->JsString(jobId.toString),"workflowVersion"->JsNumber(version),"status"->JsString("QUEUED")))
+         case Failure(_:SecurityException)=>complete(StatusCodes.Unauthorized->JsObject("error"->JsString("Invalid deployment API key")))
+         case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Deployment not found")))
+         case Failure(error) if Option(error.getMessage).exists(_.contains("concurrency limit"))=>complete(StatusCodes.TooManyRequests->JsObject("error"->JsString(error.getMessage)))
+         case Failure(error) if Option(error.getMessage).exists(_.contains("paused"))=>complete(StatusCodes.Conflict->JsObject("error"->JsString(error.getMessage)))
+         case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("deployment invocation failed"))))
+        }
+       } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid invocation request"))))}
       }
-      onComplete(Future(scala.concurrent.blocking(repository.invokeDeployment(slug,key,attempts,parameters)))){
-       case Success((jobId,version))=>complete(StatusCodes.Accepted->JsObject("jobId"->JsString(jobId.toString),"workflowVersion"->JsNumber(version),"status"->JsString("QUEUED")))
-       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound->JsObject("error"->JsString("Deployment not found")))
-       case Failure(error) if Option(error.getMessage).exists(_.contains("concurrency limit"))=>complete(StatusCodes.TooManyRequests->JsObject("error"->JsString(error.getMessage)))
-       case Failure(error) if Option(error.getMessage).exists(_.contains("paused"))=>complete(StatusCodes.Conflict->JsObject("error"->JsString(error.getMessage)))
-       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("deployment invocation failed"))))
-      }
-     } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("invalid invocation request"))))}
+     }
     }}}
 
   val route=
@@ -177,7 +197,7 @@ path("workflows"/JavaUUID/"deployments"){workflowId=>
       "catalogs"->JsArray(JsString("postgresql"),JsString("cassandra"),JsString("solr")),
       "queryEngines"->JsArray(JsString("calcite-sql"),JsString("federated-calcite"),JsString("spark-sql")),
       "compute"->JsArray(JsString("mahout"),JsString("spark-ml-automl"),JsString("flink")),
-      "scientificAutoMl"->JsArray(JsString("dataset-profiling"),JsString("cross-validation"),JsString("model-cards"),JsString("fairness-diagnostics"),JsString("psi-drift"),JsString("kolmogorov-smirnov"),JsString("feature-association"),JsString("fdr-feature-selection"),JsString("welch-hypothesis-testing"),JsString("mann-whitney-u"),JsString("kruskal-wallis"),JsString("one-way-anova"),JsString("rolling-mad-anomaly-detection"),JsString("propensity-score-ipw"),JsString("experiment-power-analysis"),JsString("version-pinned-workflow-deployments"),JsString("rest-workflow-services"),JsString("deployment-concurrency-limits"),JsString("workflow-audit-trail")),
+      "scientificAutoMl"->JsArray(JsString("dataset-profiling"),JsString("cross-validation"),JsString("model-cards"),JsString("fairness-diagnostics"),JsString("psi-drift"),JsString("kolmogorov-smirnov"),JsString("feature-association"),JsString("fdr-feature-selection"),JsString("welch-hypothesis-testing"),JsString("mann-whitney-u"),JsString("kruskal-wallis"),JsString("one-way-anova"),JsString("rolling-mad-anomaly-detection"),JsString("propensity-score-ipw"),JsString("experiment-power-analysis"),JsString("version-pinned-workflow-deployments"),JsString("rest-workflow-services"),JsString("deployment-concurrency-limits"),JsString("workflow-audit-trail"),JsString("deployment-api-keys"),JsString("hashed-credential-storage")),
       "apiVersion"->JsString("v1")
     ))}} ~
     path("components"){get{
