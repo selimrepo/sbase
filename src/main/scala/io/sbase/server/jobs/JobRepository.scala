@@ -331,6 +331,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
  /** Publish an immutable workflow version as a stable REST-callable service. */
  def publishDeployment(workflowId:UUID,slug:String,requestedVersion:Int,maxConcurrentRuns:Int,maxAttempts:Int):UUID = {
   require(slug!=null && slug.matches("[a-z0-9][a-z0-9-]{1,118}[a-z0-9]"),"Deployment slug must be 3..120 lowercase letters, digits or hyphens")
+  require(requestedVersion>=0,"version must be zero (active) or a positive immutable version")
   require(maxConcurrentRuns>=1 && maxConcurrentRuns<=100,"maxConcurrentRuns must be between 1 and 100")
   require(maxAttempts>=1 && maxAttempts<=20,"maxAttempts must be between 1 and 20")
   val c=dataSource.getConnection
@@ -427,7 +428,9 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
  /** Atomic per-deployment concurrency admission, pinned-version queueing and idempotency. */
  def invokeDeployment(slug:String,idempotencyKey:String,requestedAttempts:Int):(UUID,Int) = {
   require(idempotencyKey!=null && idempotencyKey.nonEmpty && idempotencyKey.length<=150,"idempotencyKey must be 1..150 characters")
+  require(slug!=null && slug.matches("[a-z0-9][a-z0-9-]{1,118}[a-z0-9]"),"Invalid deployment slug")
   val scopedKey="deployment:"+slug+":"+idempotencyKey
+  require(scopedKey.length<=200,"Combined deployment slug and idempotency key must fit the 200-character durable key limit")
   val c=dataSource.getConnection
   try {
    c.setAutoCommit(false)
