@@ -1,0 +1,42 @@
+CREATE TABLE IF NOT EXISTS workflow_deployment (
+    id UUID PRIMARY KEY,
+    workflow_id UUID NOT NULL,
+    workflow_version INTEGER NOT NULL,
+    slug VARCHAR(120) NOT NULL UNIQUE,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    max_concurrent_runs INTEGER NOT NULL DEFAULT 5 CHECK (max_concurrent_runs BETWEEN 1 AND 100),
+    max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts BETWEEN 1 AND 20),
+    invocation_count BIGINT NOT NULL DEFAULT 0 CHECK (invocation_count >= 0),
+    last_invoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_workflow_deployment_slug CHECK (slug ~ '^[a-z0-9][a-z0-9-]{1,118}[a-z0-9]$'),
+    CONSTRAINT fk_deployment_workflow_version
+      FOREIGN KEY (workflow_id, workflow_version)
+      REFERENCES workflow_version(workflow_id, version) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS ix_workflow_deployment_workflow
+    ON workflow_deployment(workflow_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_workflow_deployment_enabled
+    ON workflow_deployment(enabled, slug);
+
+COMMENT ON TABLE workflow_deployment IS
+    'Published, version-pinned workflow services callable by external systems.';
+
+ALTER TABLE job_execution
+    ADD COLUMN IF NOT EXISTS deployment_id UUID
+    REFERENCES workflow_deployment(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS ix_job_deployment_active_runs
+    ON job_execution(deployment_id, status)
+    WHERE deployment_id IS NOT NULL AND status IN ('QUEUED', 'RUNNING', 'RETRY_WAIT');
+
+ALTER TABLE job_execution
+    ADD COLUMN IF NOT EXISTS input_parameters JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE job_execution
+    DROP CONSTRAINT IF EXISTS ck_job_input_parameters_object;
+ALTER TABLE job_execution
+    ADD CONSTRAINT ck_job_input_parameters_object
+    CHECK (jsonb_typeof(input_parameters) = 'object');

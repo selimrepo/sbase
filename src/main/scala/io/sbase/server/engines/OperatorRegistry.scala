@@ -94,8 +94,13 @@ final class OperatorRegistry {
   ordered.toVector
  }
 
- def execute(definition:String):JsValue = {
-  val root=definition.parseJson.asJsObject
+ def execute(definition:String):JsValue = execute(definition,"{}")
+
+ /** Resolve explicit {"$parameter":"name"} references from a JSON object supplied at invocation time. */
+ def execute(definition:String,parametersJson:String):JsValue = {
+  val parameters=parametersJson.parseJson.asJsObject.fields
+  val resolved=resolveParameterRefs(definition.parseJson,parameters)
+  val root=resolved.asJsObject
   val edges=root.fields.get("edges").map(_.convertTo[Vector[JsValue]]).getOrElse(Vector.empty)
   val incoming=edges.groupBy(_.asJsObject.fields("target").convertTo[String])
     .view.mapValues(_.map(_.asJsObject.fields("source").convertTo[String])).toMap
@@ -159,6 +164,19 @@ final class OperatorRegistry {
    outputs += JsObject("nodeId"->JsString(id),"operator"->JsString(op),"output"->output)
   }
   JsObject("nodes"->JsArray(outputs.toVector))
+ }
+
+
+ private def resolveParameterRefs(value:JsValue,parameters:Map[String,JsValue]):JsValue = value match {
+  case obj:JsObject if obj.fields.contains("$parameter") =>
+   if(obj.fields.size!=1) throw new IllegalArgumentException("A parameter reference must contain only the $parameter key")
+   val name=obj.fields("$parameter").convertTo[String]
+   parameters.getOrElse(name,throw new IllegalArgumentException("Missing workflow invocation parameter: "+name))
+  case obj:JsObject =>
+   JsObject(obj.fields.map { case (key,nested)=>key->resolveParameterRefs(nested,parameters) })
+  case JsArray(values) =>
+   JsArray(values.map(value=>resolveParameterRefs(value,parameters)))
+  case other=>other
  }
 
  def autoMl(request:String):JsValue = {

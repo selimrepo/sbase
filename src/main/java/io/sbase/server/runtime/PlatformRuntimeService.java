@@ -34,7 +34,7 @@ public final class PlatformRuntimeService {
     public List<Map<String, Object>> components() {
         List<Map<String, Object>> values = new ArrayList<>();
         values.add(component("workflow-engine", "Workflow Engine", "Apache Pekko Typed/Cluster Sharding", "available",
-                List.of("immutable-versions", "graph-validation", "durable-jobs", "leases", "retries", "schedules", "execution-events")));
+                List.of("immutable-versions", "graph-validation", "durable-jobs", "leases", "retries", "schedules", "execution-events", "published-deployments", "rest-triggered-runs", "version-pinning", "concurrency-limits", "audit-trail")));
         values.add(component("catalog", "Data Catalog", "PostgreSQL, Cassandra and Solr adapters", "available",
                 List.of("discovery", "read-only-query", "schema-inspection", "federated-sources")));
         values.add(component("query", "Query Engine", "Apache Calcite and Spark SQL", "available",

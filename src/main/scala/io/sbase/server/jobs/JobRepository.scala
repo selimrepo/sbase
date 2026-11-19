@@ -34,13 +34,14 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
     | FROM candidates x WHERE j.id=x.id
     | RETURNING j.id,j.lease_owner,j.attempt,j.max_attempts,
     | (SELECT v.definition::text FROM workflow_version v
-    | WHERE v.workflow_id=j.workflow_id AND v.version=j.workflow_version) AS definition
+    | WHERE v.workflow_id=j.workflow_id AND v.version=j.workflow_version) AS definition,
+    | j.input_parameters::text AS input_parameters
     |""".stripMargin
    val p=c.prepareStatement(sql); p.setInt(1,math.max(1,limit)); p.setInt(2,leaseSeconds)
    val rs=p.executeQuery(); val result=ArrayBuffer.empty[JobLease]
    while(rs.next()) {
     val id=rs.getObject("id",classOf[UUID]); val attempt=rs.getInt("attempt")
-    result += JobLease(id,rs.getObject("lease_owner",classOf[UUID]),attempt,rs.getInt("max_attempts"),rs.getString("definition"))
+    result += JobLease(id,rs.getObject("lease_owner",classOf[UUID]),attempt,rs.getInt("max_attempts"),rs.getString("definition"),rs.getString("input_parameters"))
     event(c,id,"LEASE_ACQUIRED",attempt,"{}")
    }
    rs.close(); p.close(); c.commit(); result.toSeq
@@ -325,6 +326,187 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
    }
    c.commit();due.size
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+
+ /** Publish an immutable workflow version as a stable REST-callable service. */
+ def publishDeployment(workflowId:UUID,slug:String,requestedVersion:Int,maxConcurrentRuns:Int,maxAttempts:Int):UUID = {
+  require(slug!=null && slug.matches("[a-z0-9][a-z0-9-]{1,118}[a-z0-9]"),"Deployment slug must be 3..120 lowercase letters, digits or hyphens")
+  require(requestedVersion>=0,"version must be zero (active) or a positive immutable version")
+  require(maxConcurrentRuns>=1 && maxConcurrentRuns<=100,"maxConcurrentRuns must be between 1 and 100")
+  require(maxAttempts>=1 && maxAttempts<=20,"maxAttempts must be between 1 and 20")
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false)
+   val wf=c.prepareStatement("SELECT workspace_id,active_version FROM workflow WHERE id=? FOR UPDATE")
+   wf.setObject(1,workflowId);val wr=wf.executeQuery()
+   if(!wr.next()) throw new NoSuchElementException("Workflow not found")
+   val workspaceId=wr.getObject(1,classOf[UUID])
+   val active=wr.getInt(2);val activeWasNull=wr.wasNull()
+   wr.close();wf.close()
+   val version=if(requestedVersion<=0) { if(activeWasNull) throw new IllegalStateException("Workflow has no active version"); active } else requestedVersion
+   val exists=c.prepareStatement("SELECT 1 FROM workflow_version WHERE workflow_id=? AND version=?")
+   exists.setObject(1,workflowId);exists.setInt(2,version);val er=exists.executeQuery()
+   val versionExists=er.next();er.close();exists.close()
+   if(!versionExists) throw new NoSuchElementException("Workflow version not found")
+   val p=c.prepareStatement("""INSERT INTO workflow_deployment(id,workflow_id,workflow_version,slug,max_concurrent_runs,max_attempts)
+    | VALUES (?,?,?,?,?,?)
+    | ON CONFLICT (slug) DO UPDATE SET workflow_version=EXCLUDED.workflow_version,
+    | max_concurrent_runs=EXCLUDED.max_concurrent_runs,max_attempts=EXCLUDED.max_attempts,
+    | enabled=TRUE,updated_at=now()
+    | WHERE workflow_deployment.workflow_id=EXCLUDED.workflow_id
+    | RETURNING id""".stripMargin)
+   p.setObject(1,UUID.randomUUID());p.setObject(2,workflowId);p.setInt(3,version);p.setString(4,slug)
+   p.setInt(5,maxConcurrentRuns);p.setInt(6,maxAttempts)
+   val rs=p.executeQuery()
+   if(!rs.next()) throw new IllegalArgumentException("Deployment slug is already assigned to another workflow")
+   val id=rs.getObject(1,classOf[UUID]);rs.close();p.close()
+   audit(c,workspaceId,workflowId,"DEPLOYMENT_PUBLISHED",
+     "{\"deploymentId\":\""+id+"\",\"slug\":\""+slug+"\",\"version\":"+version+"}")
+   c.commit();id
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ def deployments(workflowId:Option[UUID],limit:Int):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val sql="""SELECT d.id,d.workflow_id,w.name AS workflow_name,d.workflow_version,d.slug,d.enabled,
+    | d.max_concurrent_runs,d.max_attempts,d.invocation_count,d.last_invoked_at,d.created_at,d.updated_at,
+    | (SELECT COUNT(*) FROM job_execution j WHERE j.deployment_id=d.id
+    |  AND j.status IN ('QUEUED','RUNNING','RETRY_WAIT')) AS active_runs
+    | FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id """+
+    (if(workflowId.isDefined)"WHERE d.workflow_id=? " else "")+"ORDER BY d.updated_at DESC LIMIT ?"
+   val p=c.prepareStatement(sql);var i=1;workflowId.foreach{id=>p.setObject(i,id);i+=1};p.setInt(i,math.max(1,math.min(limit,500)))
+   val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next()) out+=Map[String,Object](
+    "id"->rs.getObject("id"),"workflowId"->rs.getObject("workflow_id"),"workflowName"->rs.getString("workflow_name"),
+    "workflowVersion"->Int.box(rs.getInt("workflow_version")),"slug"->rs.getString("slug"),
+    "enabled"->Boolean.box(rs.getBoolean("enabled")),"maxConcurrentRuns"->Int.box(rs.getInt("max_concurrent_runs")),
+    "maxAttempts"->Int.box(rs.getInt("max_attempts")),"invocationCount"->Long.box(rs.getLong("invocation_count")),
+    "activeRuns"->Int.box(rs.getInt("active_runs")),"lastInvokedAt"->Option(rs.getString("last_invoked_at")).orNull,
+    "createdAt"->rs.getString("created_at"),"updatedAt"->rs.getString("updated_at"))
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
+ def deployment(slug:String):Option[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("""SELECT d.id,d.workflow_id,w.name AS workflow_name,d.workflow_version,d.slug,d.enabled,
+    | d.max_concurrent_runs,d.max_attempts,d.invocation_count,d.last_invoked_at,d.created_at,d.updated_at,
+    | (SELECT COUNT(*) FROM job_execution j WHERE j.deployment_id=d.id
+    |  AND j.status IN ('QUEUED','RUNNING','RETRY_WAIT')) AS active_runs
+    | FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id WHERE d.slug=?""".stripMargin)
+   p.setString(1,slug);val rs=p.executeQuery()
+   val result=if(rs.next())Some(Map[String,Object](
+    "id"->rs.getObject("id"),"workflowId"->rs.getObject("workflow_id"),"workflowName"->rs.getString("workflow_name"),
+    "workflowVersion"->Int.box(rs.getInt("workflow_version")),"slug"->rs.getString("slug"),
+    "enabled"->Boolean.box(rs.getBoolean("enabled")),"maxConcurrentRuns"->Int.box(rs.getInt("max_concurrent_runs")),
+    "maxAttempts"->Int.box(rs.getInt("max_attempts")),"invocationCount"->Long.box(rs.getLong("invocation_count")),
+    "activeRuns"->Int.box(rs.getInt("active_runs")),"lastInvokedAt"->Option(rs.getString("last_invoked_at")).orNull,
+    "createdAt"->rs.getString("created_at"),"updatedAt"->rs.getString("updated_at")))else None
+   rs.close();p.close();result
+  } finally c.close()
+ }
+
+ def setDeploymentEnabled(slug:String,enabled:Boolean):Boolean = {
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false)
+   val p=c.prepareStatement("""UPDATE workflow_deployment d SET enabled=?,updated_at=now()
+    | FROM workflow w WHERE d.workflow_id=w.id AND d.slug=?
+    | RETURNING d.id,d.workflow_id,w.workspace_id""".stripMargin)
+   p.setBoolean(1,enabled);p.setString(2,slug);val rs=p.executeQuery()
+   if(!rs.next()){rs.close();p.close();c.rollback();return false}
+   val deploymentId=rs.getObject(1,classOf[UUID]);val workflowId=rs.getObject(2,classOf[UUID]);val workspaceId=rs.getObject(3,classOf[UUID])
+   rs.close();p.close()
+   audit(c,workspaceId,workflowId,if(enabled)"DEPLOYMENT_RESUMED" else "DEPLOYMENT_PAUSED",
+    "{\"deploymentId\":\""+deploymentId+"\",\"slug\":\""+slug+"\"}")
+   c.commit();true
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ /** Atomic per-deployment concurrency admission, pinned-version queueing and idempotency. */
+ def invokeDeployment(slug:String,idempotencyKey:String,requestedAttempts:Int,parametersJson:String="{}"):(UUID,Int) = {
+  require(idempotencyKey!=null && idempotencyKey.nonEmpty && idempotencyKey.length<=150,"idempotencyKey must be 1..150 characters")
+  require(slug!=null && slug.matches("[a-z0-9][a-z0-9-]{1,118}[a-z0-9]"),"Invalid deployment slug")
+  val scopedKey="deployment:"+slug+":"+idempotencyKey
+  require(scopedKey.length<=200,"Combined deployment slug and idempotency key must fit the 200-character durable key limit")
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false)
+   val p=c.prepareStatement("""SELECT d.id,d.workflow_id,d.workflow_version,d.max_concurrent_runs,d.max_attempts,
+    | d.enabled,w.workspace_id FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id
+    | WHERE d.slug=? FOR UPDATE OF d""".stripMargin)
+   p.setString(1,slug);val rs=p.executeQuery()
+   if(!rs.next()) throw new NoSuchElementException("Deployment not found")
+   val deploymentId=rs.getObject(1,classOf[UUID]);val workflowId=rs.getObject(2,classOf[UUID])
+   val version=rs.getInt(3);val maxConcurrent=rs.getInt(4);val configuredAttempts=rs.getInt(5)
+   val enabled=rs.getBoolean(6);val workspaceId=rs.getObject(7,classOf[UUID])
+   rs.close();p.close()
+   if(!enabled) throw new IllegalStateException("Deployment is paused")
+   val existing=c.prepareStatement("SELECT id,workflow_version,(input_parameters=?::jsonb) AS same_payload FROM job_execution WHERE idempotency_key=?")
+   existing.setString(1,parametersJson);existing.setString(2,scopedKey);val er=existing.executeQuery()
+   if(er.next()) {
+    val samePayload=er.getBoolean(3)
+    val result=(er.getObject(1,classOf[UUID]),er.getInt(2));er.close();existing.close()
+    if(!samePayload) throw new IllegalArgumentException("Idempotency key was already used with different parameters")
+    c.commit();return result
+   }
+   er.close();existing.close()
+   val count=c.prepareStatement("SELECT COUNT(*) FROM job_execution WHERE deployment_id=? AND status IN ('QUEUED','RUNNING','RETRY_WAIT')")
+   count.setObject(1,deploymentId);val cr=count.executeQuery();cr.next();val active=cr.getInt(1);cr.close();count.close()
+   if(active>=maxConcurrent) throw new IllegalStateException("Deployment concurrency limit reached")
+   val jobId=UUID.randomUUID()
+   val insert=c.prepareStatement("""INSERT INTO job_execution(id,workflow_id,workflow_version,status,idempotency_key,correlation_id,max_attempts,deployment_id,input_parameters)
+    | VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?::jsonb)""".stripMargin)
+   insert.setObject(1,jobId);insert.setObject(2,workflowId);insert.setInt(3,version);insert.setString(4,scopedKey)
+   insert.setObject(5,UUID.randomUUID());insert.setInt(6,math.max(1,math.min(requestedAttempts,configuredAttempts)));insert.setObject(7,deploymentId);insert.setString(8,parametersJson)
+   insert.executeUpdate();insert.close()
+   event(c,jobId,"QUEUED_BY_DEPLOYMENT",0,"{\"deploymentId\":\""+deploymentId+"\",\"slug\":\""+slug+"\"}")
+   val update=c.prepareStatement("UPDATE workflow_deployment SET invocation_count=invocation_count+1,last_invoked_at=now(),updated_at=now() WHERE id=?")
+   update.setObject(1,deploymentId);update.executeUpdate();update.close()
+   audit(c,workspaceId,workflowId,"DEPLOYMENT_INVOKED",
+    "{\"deploymentId\":\""+deploymentId+"\",\"slug\":\""+slug+"\",\"jobId\":\""+jobId+"\",\"version\":"+version+"}")
+   c.commit();(jobId,version)
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+
+ def deploymentRuns(slug:String,limit:Int):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("""SELECT j.id,j.workflow_version,j.status,j.attempt,j.max_attempts,
+    | j.error_code,j.error_message,j.submitted_at,j.started_at,j.finished_at,j.result::text
+    | FROM job_execution j JOIN workflow_deployment d ON d.id=j.deployment_id
+    | WHERE d.slug=? ORDER BY j.submitted_at DESC LIMIT ?""".stripMargin)
+   p.setString(1,slug);p.setInt(2,math.max(1,math.min(limit,500)))
+   val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next())out+=Map[String,Object](
+    "jobId"->rs.getObject(1),"workflowVersion"->Int.box(rs.getInt(2)),"status"->rs.getString(3),
+    "attempt"->Int.box(rs.getInt(4)),"maxAttempts"->Int.box(rs.getInt(5)),
+    "errorCode"->Option(rs.getString(6)).orNull,"errorMessage"->Option(rs.getString(7)).orNull,
+    "submittedAt"->rs.getString(8),"startedAt"->Option(rs.getString(9)).orNull,
+    "finishedAt"->Option(rs.getString(10)).orNull,"result"->Option(rs.getString(11)).orNull)
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
+ def workflowAudit(workflowId:UUID,limit:Int):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("SELECT event_type,actor_id,details::text,created_at FROM workflow_audit_event WHERE workflow_id=? ORDER BY created_at DESC,id DESC LIMIT ?")
+   p.setObject(1,workflowId);p.setInt(2,math.max(1,math.min(limit,500)))
+   val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next())out+=Map[String,Object]("eventType"->rs.getString(1),"actorId"->rs.getString(2),
+    "details"->rs.getString(3),"createdAt"->rs.getString(4))
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
+ private def audit(c:Connection,workspaceId:UUID,workflowId:UUID,eventType:String,details:String):Unit = {
+  val p=c.prepareStatement("INSERT INTO workflow_audit_event(workspace_id,workflow_id,event_type,actor_id,details) VALUES (?,?,?,'system',?::jsonb)")
+  p.setObject(1,workspaceId);p.setObject(2,workflowId);p.setString(3,eventType);p.setString(4,details);p.executeUpdate();p.close()
  }
 
  def isHealthy:Boolean = {
