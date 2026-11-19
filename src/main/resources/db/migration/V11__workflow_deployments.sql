@@ -21,10 +21,6 @@ CREATE INDEX IF NOT EXISTS ix_workflow_deployment_workflow
 CREATE INDEX IF NOT EXISTS ix_workflow_deployment_enabled
     ON workflow_deployment(enabled, slug);
 
-CREATE INDEX IF NOT EXISTS ix_job_deployment_active
-    ON job_execution(workflow_id, status)
-    WHERE status IN ('QUEUED', 'RUNNING', 'RETRY_WAIT');
-
 COMMENT ON TABLE workflow_deployment IS
     'Published, version-pinned workflow services callable by external systems.';
 
