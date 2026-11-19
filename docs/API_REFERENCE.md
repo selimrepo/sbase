@@ -72,6 +72,7 @@ Returns PostgreSQL column name, SQL type, JDBC type, size, nullability, ordinal 
 | GET/POST | `/workflows/{workflowId}/deployments` | List or publish version-pinned REST-callable deployments |
 | GET | `/deployments?limit=100` | List published workflow services and active-run counts |
 | GET | `/deployments/{slug}` | Inspect a published workflow service |
+| GET | `/deployments/{slug}/runs?limit=100` | List execution history for one published service |
 | POST | `/deployments/{slug}/runs` | Invoke a published service; queues the pinned workflow version |
 | POST | `/deployments/{slug}/pause` | Stop accepting new invocations without cancelling existing runs |
 | POST | `/deployments/{slug}/resume` | Re-enable service invocations |
