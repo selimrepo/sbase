@@ -106,13 +106,25 @@ class JobRepositoryPostgresTest {
         assertTrue(deployment.isDefined());
         assertNotNull(deployment.get());
 
-        var first = repository.invokeDeployment("scientific-pipeline", "external-request-1", 3);
+        var first = repository.invokeDeployment("scientific-pipeline", "external-request-1", 3, "{\\"sampleSize\\":100}");
         assertEquals(1, first._2());
         assertThrows(IllegalStateException.class,
             () -> repository.invokeDeployment("scientific-pipeline", "external-request-2", 3));
 
-        var retry = repository.invokeDeployment("scientific-pipeline", "external-request-1", 3);
+        var retry = repository.invokeDeployment("scientific-pipeline", "external-request-1", 3, "{\\"sampleSize\\":100}");
         assertEquals(first._1(), retry._1(), "idempotent retries must return the original run");
+        assertThrows(IllegalArgumentException.class,
+            () -> repository.invokeDeployment("scientific-pipeline", "external-request-1", 3, "{\\"sampleSize\\":200}"));
+        var claimed = repository.claim(100);
+        JobLease parameterizedLease = null;
+        var leaseIterator = claimed.iterator();
+        while (leaseIterator.hasNext()) {
+            var candidate = leaseIterator.next();
+            if (candidate.id().equals(first._1())) parameterizedLease = candidate;
+        }
+        assertNotNull(parameterizedLease);
+        assertTrue(parameterizedLease.inputParameters().contains("sampleSize"));
+        assertTrue(parameterizedLease.inputParameters().contains("100"));
         assertTrue(repository.setDeploymentEnabled("scientific-pipeline", false));
         assertThrows(IllegalStateException.class,
             () -> repository.invokeDeployment("scientific-pipeline", "external-request-3", 3));
