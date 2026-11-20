@@ -94,6 +94,68 @@ public final class PlatformRuntimeService {
         return response;
     }
 
+    /** Returns Spark's optimized and physical plans without collecting query results. */
+    public Map<String, Object> sparkExplain(String sql) {
+        if (sql == null || sql.isBlank()) throw new IllegalArgumentException("sql is required");
+        SqlNode parsed;
+        try { parsed = SqlParser.create(sql).parseQuery(); }
+        catch (Exception error) { throw new IllegalArgumentException("Invalid Spark SQL query", error); }
+        if (parsed.getKind() != SqlKind.SELECT && parsed.getKind() != SqlKind.WITH)
+            throw new IllegalArgumentException("Only read-only SELECT queries are supported");
+        Dataset<Row> frame = spark.sql(sql);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("engine", "spark-sql");
+        response.put("schema", frame.schema().json());
+        response.put("optimizedPlan", frame.queryExecution().optimizedPlan().toString());
+        response.put("physicalPlan", frame.queryExecution().executedPlan().toString());
+        return response;
+    }
+
+    /** Lists tables visible to the Spark session catalog. */
+    public Map<String, Object> sparkTables(String database) {
+        String selected = (database == null || database.isBlank()) ? "default" : database;
+        if (!selected.matches("[A-Za-z_][A-Za-z0-9_]*"))
+            throw new IllegalArgumentException("Invalid Spark database name");
+        List<Map<String, Object>> tables = new ArrayList<>();
+        for (org.apache.spark.sql.catalog.Table table : spark.catalog().listTables(selected).collectAsList()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("name", table.name()); item.put("database", table.database());
+            item.put("tableType", table.tableType()); item.put("isTemporary", table.isTemporary());
+            tables.add(item);
+        }
+        return Map.of("database", selected, "tables", tables, "count", tables.size());
+    }
+
+    /** Caches a validated catalog table for repeated analytical queries. */
+    public Map<String, Object> sparkCacheTable(String table) {
+        if (table == null || !table.matches("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?"))
+            throw new IllegalArgumentException("Invalid Spark table identifier");
+        spark.catalog().cacheTable(table);
+        return Map.of("table", table, "cached", true);
+    }
+
+    /** Cancels a running Flink job through the supported REST endpoint. */
+    public Map<String, Object> flinkCancel(String jobId) throws Exception {
+        validateFlinkId(jobId, "job");
+        return send("PATCH", "/jobs/" + jobId, JSON.writeValueAsString(Map.of("state", "CANCELED")));
+    }
+
+    /** Requests a Flink savepoint; the target directory must be configured and writable by Flink. */
+    public Map<String, Object> flinkSavepoint(String jobId, String targetDirectory) throws Exception {
+        validateFlinkId(jobId, "job");
+        if (targetDirectory == null || targetDirectory.isBlank())
+            throw new IllegalArgumentException("targetDirectory is required");
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("target-directory", targetDirectory);
+        payload.put("cancel-job", false);
+        return send("POST", "/jobs/" + jobId + "/savepoints", JSON.writeValueAsString(payload));
+    }
+
+    private static void validateFlinkId(String id, String kind) {
+        if (id == null || !id.matches("[A-Fa-f0-9]{32}"))
+            throw new IllegalArgumentException("Invalid Flink " + kind + " id");
+    }
+
     /** Only named, read-only Flink REST resources are exposed; arbitrary proxy paths are rejected. */
     public Map<String, Object> flinkGet(String resource) throws Exception {
         String path = switch (resource) {
@@ -129,6 +191,9 @@ public final class PlatformRuntimeService {
         if ("POST".equals(method)) {
             request.header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body == null ? "{}" : body));
+        } else if ("PATCH".equals(method)) {
+            request.header("Content-Type", "application/json")
+                    .method("PATCH", HttpRequest.BodyPublishers.ofString(body == null ? "{}" : body));
         } else request.GET();
         HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() / 100 != 2)
