@@ -159,12 +159,6 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 15s
     restart: unless-stopped
 
   minio-init:
@@ -172,11 +166,12 @@ services:
     profiles: ["full"]
     depends_on:
       minio:
-        condition: service_healthy
+        condition: service_started
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >
         mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+        until mc ready local; do sleep 2; done &&
         mc mb --ignore-existing local/sbase-warehouse &&
         mc version enable local/sbase-warehouse
     environment:
