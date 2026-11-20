@@ -372,3 +372,8 @@ python3 scripts/platform_test.py --scenario balanced --requests 300 --workers 12
 
 Persistent workflow/AutoML integration checks require the explicit `--write-tests` flag
 and should use a disposable test database.
+
+## Engine platform and lakehouse direction
+
+SBase now exposes deeper Spark SQL/Structured Streaming controls, Flink job lifecycle operations, Cassandra schema discovery and an expanded Mahout vector operator set. See [Engine Platform](docs/ENGINE_PLATFORM.md) for API details, engine responsibilities, operational constraints and the Databricks-style lakehouse roadmap.
+
