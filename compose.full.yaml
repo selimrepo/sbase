@@ -155,6 +155,12 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
     restart: unless-stopped
 
   minio-init:
@@ -190,3 +196,6 @@ services:
 # Persist engine state and Spark spill across restarts. The application model
 # registry, PostgreSQL, Cassandra, Solr and Spark scratch volumes are declared
 # by compose.yaml and reused by this overlay.
+
+volumes:
+  minio_data:
