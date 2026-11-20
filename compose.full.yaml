@@ -64,7 +64,7 @@ services:
 
   solr:
     profiles: ["full"]
-    command: ["solr", "-f", "-c"]
+    command: ["solr", "-f"]
     environment:
       SOLR_JAVA_MEM: ${SOLR_JAVA_MEM:--Xms1g -Xmx2g}
       SOLR_HEAP: ${SOLR_HEAP:-2g}
