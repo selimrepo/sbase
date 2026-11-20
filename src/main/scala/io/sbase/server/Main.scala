@@ -272,7 +272,7 @@ path("deployments"/Segment/"runs"){slug=>post{
         case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Iceberg write failed"))))
        }
       } catch { case error:Throwable=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Invalid rows")))) }
-    }}}} ~
+    }}} ~
     path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"snapshots"){namespace=>table=>get{
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseSnapshots(namespace,table)).parseJson))){
        case Success(value)=>complete(value)
