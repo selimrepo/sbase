@@ -94,6 +94,38 @@ public final class PlatformRuntimeService {
         return response;
     }
 
+    /** Reports active Spark Structured Streaming queries and their latest progress snapshots. */
+    public Map<String, Object> sparkStreams() {
+        List<Map<String, Object>> streams = new ArrayList<>();
+        for (org.apache.spark.sql.streaming.StreamingQuery query : spark.streams().active()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", query.id().toString());
+            item.put("runId", query.runId().toString());
+            item.put("name", query.name());
+            item.put("isActive", query.isActive());
+            item.put("status", JSON.valueToTree(query.status()));
+            var progress = query.lastProgress();
+            item.put("lastProgress", progress == null ? null : JSON.readTree(progress.json()));
+            streams.add(item);
+        }
+        return Map.of("engine", "spark-structured-streaming", "activeQueries", streams,
+                "count", streams.size());
+    }
+
+    /** Stops only an active Spark stream identified by its stable query UUID. */
+    public Map<String, Object> sparkStopStream(String queryId) throws Exception {
+        UUID id;
+        try { id = UUID.fromString(queryId); }
+        catch (Exception invalid) { throw new IllegalArgumentException("Invalid Spark streaming query id"); }
+        for (org.apache.spark.sql.streaming.StreamingQuery query : spark.streams().active()) {
+            if (query.id().equals(id)) {
+                query.stop();
+                return Map.of("queryId", queryId, "status", "STOP_REQUESTED");
+            }
+        }
+        throw new NoSuchElementException("Active Spark streaming query not found: " + queryId);
+    }
+
     /** Returns Spark's optimized and physical plans without collecting query results. */
     public Map<String, Object> sparkExplain(String sql) {
         if (sql == null || sql.isBlank()) throw new IllegalArgumentException("sql is required");
