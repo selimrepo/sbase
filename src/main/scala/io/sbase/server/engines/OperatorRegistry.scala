@@ -18,6 +18,7 @@ final class OperatorRegistry(catalogService:Option[CatalogService]) {
    .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
    .config("spark.ui.enabled","false")
    .config("spark.driver.host",sys.env.getOrElse("SPARK_DRIVER_HOST","127.0.0.1"))
+   .config("spark.driver.bindAddress",sys.env.getOrElse("SPARK_DRIVER_BIND_ADDRESS","0.0.0.0"))
    .config("spark.sql.extensions","org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
   val enabled=sys.env.getOrElse("SBASE_ICEBERG_ENABLED","false").equalsIgnoreCase("true")
   if(enabled){
