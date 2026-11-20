@@ -198,9 +198,9 @@ path("deployments"/Segment/"runs"){slug=>post{
    path("health"){get{complete(Health("UP","sbase-server"))}} ~
    pathPrefix("api"/"v1"){
     path("capabilities"){get{complete(JsObject(
-      "catalogs"->JsArray(JsString("postgresql"),JsString("cassandra"),JsString("solr")),
+      "catalogs"->JsArray(JsString("postgresql"),JsString("cassandra"),JsString("solr"),JsString("apache-iceberg-jdbc")),
       "queryEngines"->JsArray(JsString("calcite-sql"),JsString("federated-calcite"),JsString("spark-sql")),
-      "compute"->JsArray(JsString("mahout"),JsString("spark-ml-automl"),JsString("flink")),
+      "compute"->JsArray(JsString("mahout"),JsString("spark-ml-automl"),JsString("flink"),JsString("iceberg-lakehouse"),JsString("s3-object-storage")),
       "scientificAutoMl"->JsArray(JsString("dataset-profiling"),JsString("cross-validation"),JsString("model-cards"),JsString("fairness-diagnostics"),JsString("psi-drift"),JsString("kolmogorov-smirnov"),JsString("feature-association"),JsString("fdr-feature-selection"),JsString("welch-hypothesis-testing"),JsString("mann-whitney-u"),JsString("kruskal-wallis"),JsString("one-way-anova"),JsString("rolling-mad-anomaly-detection"),JsString("propensity-score-ipw"),JsString("experiment-power-analysis"),JsString("version-pinned-workflow-deployments"),JsString("rest-workflow-services"),JsString("deployment-concurrency-limits"),JsString("workflow-audit-trail"),JsString("deployment-api-keys"),JsString("hashed-credential-storage")),
       "apiVersion"->JsString("v1")
     ))}} ~
