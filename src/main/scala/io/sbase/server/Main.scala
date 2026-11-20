@@ -231,6 +231,19 @@ path("deployments"/Segment/"runs"){slug=>post{
        case Failure(error)=>system.log.warn("Spark SQL request rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark SQL failed"))))
       }
     }}} ~
+    path("engines"/"spark"/"streams"){get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.sparkStreams()).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>complete(StatusCodes.BadGateway->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark stream listing failed"))))
+      }
+    }} ~
+    path("engines"/"spark"/"streams"/Segment/"stop"){queryId=>post{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.sparkStopStream(queryId)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark stream stop failed"))))
+      }
+    }} ~
     path("engines"/"spark"/"explain"){post{entity(as[JsObject]){request=>
       val sql=request.fields.get("sql").map(_.convertTo[String]).getOrElse("")
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.sparkExplain(sql)).parseJson))){
