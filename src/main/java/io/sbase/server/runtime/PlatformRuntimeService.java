@@ -127,10 +127,12 @@ public final class PlatformRuntimeService {
                     .parallelize(jsonRows, Math.max(1, Math.min(8, jsonRows.size())));
             Dataset<Row> frame = spark.read().json(javaRows);
             String identifier = "sbase." + namespace + "." + table;
-            frame.writeTo(identifier).using("iceberg").createOrReplace();
+            boolean exists = spark.catalog().tableExists(identifier);
+            if (exists) frame.writeTo(identifier).append();
+            else frame.writeTo(identifier).using("iceberg").create();
             return Map.of("catalog", "sbase", "namespace", namespace, "table", table,
                     "rowsSubmitted", rows.size(), "columns", Arrays.asList(frame.schema().fieldNames()),
-                    "format", "iceberg", "writeMode", "create-or-replace");
+                    "format", "iceberg", "writeMode", exists ? "append" : "create");
         } catch (Exception error) {
             throw new IllegalStateException("Iceberg table write failed: " + error.getMessage(), error);
         }
