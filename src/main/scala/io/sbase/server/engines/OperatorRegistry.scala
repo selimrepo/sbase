@@ -10,7 +10,7 @@ import java.time.Duration
 import scala.collection.mutable
 
 final class OperatorRegistry {
- private val supported=Set("dataset-values","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","spark-sql","flink-submit","flink-jobs-overview","calcite-sql")
+ private val supported=Set("dataset-values","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","mahout-dot-product","mahout-manhattan-distance","mahout-normalize","mahout-top-k","spark-sql","flink-submit","flink-jobs-overview","calcite-sql")
  private lazy val spark=SparkSession.builder().appName("SBase-Workflow-Operator")
   .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
   .config("spark.ui.enabled","false")
@@ -29,6 +29,10 @@ final class OperatorRegistry {
    descriptor("mahout-vector-sum","mining","Mahout vector reduction","sum",Seq.empty,Seq("values"),"Computes vector sum and element count"),
    descriptor("mahout-cosine-similarity","mining","Mahout cosine similarity","cosineSimilarity",Seq("left","right"),Seq.empty,"Compares two equal-length numeric vectors"),
    descriptor("mahout-euclidean-distance","mining","Mahout Euclidean distance","euclideanDistance",Seq("left","right"),Seq.empty,"Computes L2 distance between numeric vectors"),
+   descriptor("mahout-dot-product","mining","Mahout vector dot product","dotProduct",Seq("left","right"),Seq.empty,"Computes the inner product of equal-length vectors"),
+   descriptor("mahout-manhattan-distance","mining","Mahout Manhattan distance","manhattanDistance",Seq("left","right"),Seq.empty,"Computes L1 distance between equal-length vectors"),
+   descriptor("mahout-normalize","mining","Mahout L2 vector normalization","values",Seq("values"),Seq.empty,"Returns a unit-length vector; zero vectors remain zero"),
+   descriptor("mahout-top-k","mining","Mahout top-K vector coordinates","items",Seq("values","k"),Seq.empty,"Returns the largest K vector coordinates in descending value order"),
    descriptor("calcite-sql","query","Embedded Calcite SQL over workflow-local JSON tables","rows",Seq("query","tables"),Seq.empty,"Executes relational SQL against configured tables"),
    descriptor("spark-sql","compute","Spark SQL execution","rows",Seq("query"),Seq.empty,"Executes Spark SQL using the configured Spark session"),
    descriptor("flink-submit","streaming","Submit an uploaded Flink JAR","jobId",Seq("jarId"),Seq("entryClass","parallelism","programArgs"),"Submits a Flink application through the Flink REST API"),
@@ -136,6 +140,30 @@ final class OperatorRegistry {
      require(leftValues.nonEmpty && leftValues.size==rightValues.size,"Distance vectors must have equal non-zero dimensions")
      val distance=new DenseVector(leftValues.toArray).minus(new DenseVector(rightValues.toArray)).norm(2.0)
      JsObject("euclideanDistance"->JsNumber(distance))
+    case "mahout-dot-product" =>
+     val leftValues=config.fields.getOrElse("left",throw new IllegalArgumentException("left vector is required")).convertTo[Vector[Double]]
+     val rightValues=config.fields.getOrElse("right",throw new IllegalArgumentException("right vector is required")).convertTo[Vector[Double]]
+     require(leftValues.nonEmpty && leftValues.size==rightValues.size,"Dot-product vectors must have equal non-zero dimensions")
+     val product=new DenseVector(leftValues.toArray).dot(new DenseVector(rightValues.toArray))
+     JsObject("dotProduct"->JsNumber(product),"dimensions"->JsNumber(leftValues.size))
+    case "mahout-manhattan-distance" =>
+     val leftValues=config.fields.getOrElse("left",throw new IllegalArgumentException("left vector is required")).convertTo[Vector[Double]]
+     val rightValues=config.fields.getOrElse("right",throw new IllegalArgumentException("right vector is required")).convertTo[Vector[Double]]
+     require(leftValues.nonEmpty && leftValues.size==rightValues.size,"Manhattan vectors must have equal non-zero dimensions")
+     val distance=leftValues.zip(rightValues).map { case (left,right)=>math.abs(left-right) }.sum
+     JsObject("manhattanDistance"->JsNumber(distance),"dimensions"->JsNumber(leftValues.size))
+    case "mahout-normalize" =>
+     val values=config.fields.getOrElse("values",throw new IllegalArgumentException("values vector is required")).convertTo[Vector[Double]]
+     val vector=new DenseVector(values.toArray)
+     val norm=vector.norm(2.0)
+     val normalized=if(norm==0.0) values else values.map(_/norm)
+     JsObject("values"->JsArray(normalized.map(JsNumber(_))),"norm"->JsNumber(norm),"zeroVector"->JsBoolean(norm==0.0))
+    case "mahout-top-k" =>
+     val values=config.fields.getOrElse("values",throw new IllegalArgumentException("values vector is required")).convertTo[Vector[Double]]
+     val k=config.fields.getOrElse("k",throw new IllegalArgumentException("k is required")).convertTo[Int]
+     require(k>0 && k<=10000,"k must be between 1 and 10000")
+     val selected=values.zipWithIndex.sortBy { case (value,index)=>(-value,index) }.take(k)
+     JsObject("items"->JsArray(selected.map { case (value,index)=>JsObject("index"->JsNumber(index),"value"->JsNumber(value)) }))
     case "spark-sql" =>
      val query=config.fields.getOrElse("query",JsString("SELECT 1 AS value")).convertTo[String]
      JsObject("rows"->JsArray(spark.sql(query).toJSON.collect().toVector.map(JsString(_))))
