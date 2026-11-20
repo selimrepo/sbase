@@ -14,7 +14,8 @@ class OperatorRegistryCatalogTest {
 
         assertEquals(Set.of(
                 "dataset-values", "mahout-vector-sum", "mahout-cosine-similarity",
-                "mahout-euclidean-distance", "calcite-sql", "spark-sql",
+                "mahout-euclidean-distance", "mahout-dot-product", "mahout-manhattan-distance",
+                "mahout-normalize", "mahout-top-k", "calcite-sql", "spark-sql",
                 "flink-submit", "flink-jobs-overview"), names);
         assertTrue(catalog.stream().allMatch(item ->
                 item.containsKey("category") && item.containsKey("description")
