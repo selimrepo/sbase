@@ -106,7 +106,7 @@ final class OperatorRegistry {
     .view.mapValues(_.map(_.asJsObject.fields("source").convertTo[String])).toMap
   val outputsById=mutable.Map.empty[String,JsValue]
   val outputs=mutable.ArrayBuffer.empty[JsValue]
-  orderedNodes(definition).foreach { value =>
+  orderedNodes(resolved.compactPrint).foreach { value =>
    val node=value.asJsObject
    val id=node.fields("id").convertTo[String]
    val op=node.fields("operator").convertTo[String]
