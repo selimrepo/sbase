@@ -41,6 +41,7 @@ dependencies {
     implementation "org.apache.spark:spark-mllib_${scalaBinaryVersion}:${sparkVersion}"
     implementation "org.apache.iceberg:iceberg-spark-runtime-4.0_${scalaBinaryVersion}:${icebergVersion}"
     implementation "org.apache.iceberg:iceberg-aws-bundle:${icebergVersion}"
+    implementation "org.apache.iceberg:iceberg-jdbc:${icebergVersion}"
     implementation "org.apache.mahout:mahout-math:0.13.0"
     implementation "org.apache.calcite:calcite-core:${calciteVersion}"
     implementation "com.fasterxml.jackson.core:jackson-databind:2.18.3"
