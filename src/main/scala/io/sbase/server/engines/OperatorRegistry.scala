@@ -203,7 +203,7 @@ final class OperatorRegistry(catalogService:Option[CatalogService]) {
      val cql=config.fields.getOrElse("cql",throw new IllegalArgumentException("cassandra-query requires config.cql")).convertTo[String]
      val limit=config.fields.get("limit").map(_.convertTo[Int]).getOrElse(500)
      val result=service.queryCassandra(cql,limit)
-     new ObjectMapper().writeValueAsString(result).parseJson
+     new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result).parseJson
     case "spark-sql" =>
      val query=config.fields.getOrElse("query",JsString("SELECT 1 AS value")).convertTo[String]
      val inputTable=config.fields.get("inputTable").map(_.convertTo[String])
