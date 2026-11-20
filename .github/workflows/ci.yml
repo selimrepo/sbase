@@ -107,8 +107,9 @@ jobs:
               && docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T cassandra cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1 \
               && curl --fail --silent 'http://localhost:8983/solr/admin/info/system?wt=json' >/dev/null \
               && curl --fail --silent http://localhost:8081/json/ >/dev/null \
-              && curl --fail --silent http://localhost:8082/overview >/dev/null; then
-              echo "API, Studio, PostgreSQL, Cassandra, Solr, Spark Master and Flink JobManager are ready."
+              && curl --fail --silent http://localhost:8082/overview >/dev/null \
+              && curl --fail --silent http://localhost:9000/minio/health/ready >/dev/null; then
+              echo "API, Studio, PostgreSQL, Cassandra, Solr, Spark, Flink and MinIO are ready."
               break
             fi
             if [ "$attempt" -eq 90 ]; then
@@ -119,6 +120,19 @@ jobs:
             fi
             sleep 10
           done
+      - name: Verify Iceberg catalog, object storage writes, table reads and snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent -X POST http://localhost:8080/api/v1/lakehouse/namespaces \
+            -H 'Content-Type: application/json' -d '{"namespace":"ci_lakehouse"}'
+          curl --fail --silent -X POST http://localhost:8080/api/v1/lakehouse/namespaces/ci_lakehouse/tables/orders/write \
+            -H 'Content-Type: application/json' \
+            -d '{"rows":[{"order_id":1,"region":"EU","amount":120.5},{"order_id":2,"region":"US","amount":80.0}]}'
+          curl --fail --silent 'http://localhost:8080/api/v1/lakehouse/namespaces/ci_lakehouse/tables/orders?limit=10' \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["rowCount"] == 2 and d["format"] == "iceberg"'
+          curl --fail --silent http://localhost:8080/api/v1/lakehouse/namespaces/ci_lakehouse/tables/orders/snapshots \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d) >= 1, "Iceberg snapshot was not committed"'
       - name: Verify Spark worker registration and Flink TaskManager
         shell: bash
         run: |
