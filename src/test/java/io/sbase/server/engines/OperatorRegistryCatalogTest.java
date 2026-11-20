@@ -13,9 +13,9 @@ class OperatorRegistryCatalogTest {
         var names = catalog.stream().map(item -> (String) item.get("name")).collect(Collectors.toSet());
 
         assertEquals(Set.of(
-                "dataset-values", "mahout-vector-sum", "mahout-cosine-similarity",
+                "dataset-values", "dataset-rows", "mahout-vector-sum", "mahout-cosine-similarity",
                 "mahout-euclidean-distance", "mahout-dot-product", "mahout-manhattan-distance",
-                "mahout-normalize", "mahout-top-k", "calcite-sql", "spark-sql",
+                "mahout-normalize", "mahout-top-k", "cassandra-query", "calcite-sql", "spark-sql",
                 "flink-submit", "flink-jobs-overview"), names);
         assertTrue(catalog.stream().allMatch(item ->
                 item.containsKey("category") && item.containsKey("description")
