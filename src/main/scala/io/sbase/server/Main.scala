@@ -255,7 +255,7 @@ path("deployments"/Segment/"runs"){slug=>post{
        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Table listing failed"))))
       }
     }} ~
-    path("lakehouse"/"namespaces"/Segment/"tables"/Segment){namespace=>table=>get{
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment){(namespace,table)=>get{
       parameter("limit".as[Int].withDefault(100)){limit=>
        onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseTablePreview(namespace,table,limit)).parseJson))){
         case Success(value)=>complete(value)
@@ -263,7 +263,7 @@ path("deployments"/Segment/"runs"){slug=>post{
        }
       }
     }} ~
-    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"write"){namespace=>table=>post{entity(as[JsObject]){request=>
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"write"){(namespace,table)=>post{entity(as[JsObject]){request=>
       try {
        val rows=request.fields.getOrElse("rows",throw new IllegalArgumentException("rows is required"))
        val typed=mapper.readValue(rows.compactPrint,new TypeReference[java.util.List[java.util.Map[String,Object]]]() {})
@@ -273,7 +273,7 @@ path("deployments"/Segment/"runs"){slug=>post{
        }
       } catch { case error:Throwable=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Invalid rows")))) }
     }}} ~
-    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"snapshots"){namespace=>table=>get{
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"snapshots"){(namespace,table)=>get{
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseSnapshots(namespace,table)).parseJson))){
        case Success(value)=>complete(value)
        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Snapshot history failed"))))
@@ -389,7 +389,7 @@ path("deployments"/Segment/"runs"){slug=>post{
        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Cassandra table listing failed"))))
       }
     }} ~
-    path("catalogs"/"cassandra"/"keyspaces"/Segment/"tables"/Segment){keyspace=>table=>get{
+    path("catalogs"/"cassandra"/"keyspaces"/Segment/"tables"/Segment){(keyspace,table)=>get{
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.cassandraTable(keyspace,table)).parseJson))){
        case Success(value)=>complete(value)
        case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
