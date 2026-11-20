@@ -273,6 +273,32 @@ path("deployments"/Segment/"runs"){slug=>post{
        }
       } catch { case error:Throwable=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Invalid rows")))) }
     }}} ~
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"schema"){(namespace,table)=>get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseTableSchema(namespace,table)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Table schema lookup failed"))))
+      }
+    }} ~
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"compact"){(namespace,table)=>post{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseCompact(namespace,table)).parseJson))){
+       case Success(value)=>complete(StatusCodes.Accepted->value)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Iceberg compaction failed"))))
+      }
+    }} ~
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"snapshots"/LongNumber/"rollback"){(namespace,table,snapshotId)=>post{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseRollbackSnapshot(namespace,table,snapshotId)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Snapshot rollback failed"))))
+      }
+    }} ~
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"snapshots"/"expire"){(namespace,table)=>post{entity(as[JsObject]){request=>
+      val olderThan=request.fields.get("olderThan").map(_.convertTo[String]).getOrElse("")
+      val retainLast=request.fields.get("retainLast").map(_.convertTo[Int]).getOrElse(1)
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseExpireSnapshots(namespace,table,olderThan,retainLast)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Snapshot expiration failed"))))
+      }
+    }}} ~
     path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"snapshots"){(namespace,table)=>get{
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseSnapshots(namespace,table)).parseJson))){
        case Success(value)=>complete(value)
