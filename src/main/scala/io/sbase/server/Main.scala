@@ -231,6 +231,41 @@ path("deployments"/Segment/"runs"){slug=>post{
        case Failure(error)=>system.log.warn("Spark SQL request rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark SQL failed"))))
       }
     }}} ~
+    path("engines"/"spark"/"explain"){post{entity(as[JsObject]){request=>
+      val sql=request.fields.get("sql").map(_.convertTo[String]).getOrElse("")
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.sparkExplain(sql)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Spark explain failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark explain failed"))))
+      }
+    }}} ~
+    path("engines"/"spark"/"tables"){get{
+      parameter("database".as[String].withDefault("default")){database=>
+       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.sparkTables(database)).parseJson))){
+        case Success(value)=>complete(value)
+        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark table listing failed"))))
+       }
+      }
+    }} ~
+    path("engines"/"spark"/"cache"){post{entity(as[JsObject]){request=>
+      val table=request.fields.get("table").map(_.convertTo[String]).getOrElse("")
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.sparkCacheTable(table)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark cache failed"))))
+      }
+    }}} ~
+    path("engines"/"flink"/"jobs"/Segment/"cancel"){jobId=>post{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.flinkCancel(jobId)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.warn("Flink cancellation failed: {}",error.getMessage);complete(StatusCodes.BadGateway->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Flink cancellation failed"))))
+      }
+    }} ~
+    path("engines"/"flink"/"jobs"/Segment/"savepoints"){jobId=>post{entity(as[JsObject]){request=>
+      val target=request.fields.get("targetDirectory").map(_.convertTo[String]).getOrElse("")
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.flinkSavepoint(jobId,target)).parseJson))){
+       case Success(value)=>complete(StatusCodes.Accepted->value)
+       case Failure(error)=>system.log.warn("Flink savepoint request failed: {}",error.getMessage);complete(StatusCodes.BadGateway->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Flink savepoint failed"))))
+      }
+    }}} ~
     path("engines"/"flink"/Segment){resource=>get{
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.flinkGet(resource)).parseJson))){
        case Success(value)=>complete(value)
