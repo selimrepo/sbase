@@ -60,6 +60,11 @@ export default function App() {
       <button onClick={() => addNode("mahout-vector-sum", "Mahout vector sum", { values: [1, 2, 3] })}>+ Mahout sum</button>
       <button onClick={() => addNode("mahout-cosine-similarity", "Cosine similarity", { left: [1, 0], right: [1, 1] })}>+ Cosine</button>
       <button onClick={() => addNode("mahout-euclidean-distance", "Euclidean distance", { left: [0, 0], right: [3, 4] })}>+ Distance</button>
+      <button onClick={() => addNode("mahout-dot-product", "Mahout dot product", { left: [1, 2, 3], right: [4, 5, 6] })}>+ Dot product</button>
+      <button onClick={() => addNode("mahout-manhattan-distance", "Manhattan distance", { left: [1, 2], right: [4, 6] })}>+ Manhattan</button>
+      <button onClick={() => addNode("mahout-normalize", "L2 normalize", { values: [3, 4] })}>+ Normalize</button>
+      <button onClick={() => addNode("mahout-top-k", "Top-K coordinates", { values: [3, 9, 9, 1], k: 2 })}>+ Top-K</button>
+      <button onClick={() => addNode("dataset-rows", "Tabular dataset", { rows: [{ region: "EU", amount: 10 }, { region: "US", amount: 20 }] })}>+ Table</button>
       <input aria-label="Flink uploaded JAR ID" placeholder="Flink JAR ID" value={flinkJarId} onChange={(e) => setFlinkJarId(e.target.value)} />
       <button onClick={() => addNode("flink-submit", "Flink stream job", { jarId: flinkJarId, parallelism: 1 })} disabled={!flinkJarId.trim()}>+ Flink</button>
       <button className="primary" onClick={runWorkflow}>Run workflow ↗</button>
