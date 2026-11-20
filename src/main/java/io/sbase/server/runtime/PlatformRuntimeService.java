@@ -77,16 +77,38 @@ public final class PlatformRuntimeService {
         return result;
     }
 
-    /** Returns namespaces and the configured object-store/catalog coordinates without exposing credentials. */
+    /** Checks the PostgreSQL-backed Iceberg catalog and the configured S3 endpoint. */
     public Map<String, Object> lakehouseStatus() {
         Map<String,Object> result = new LinkedHashMap<>();
         result.put("engine", "apache-iceberg");
         result.put("catalog", "sbase");
         result.put("catalogType", "jdbc-postgresql");
+        result.put("metadataStore", "PostgreSQL");
         result.put("warehouse", Optional.ofNullable(System.getenv("SBASE_ICEBERG_WAREHOUSE")).orElse("s3://sbase-warehouse/"));
-        result.put("objectStoreEndpoint", Optional.ofNullable(System.getenv("S3_ENDPOINT")).orElse("http://localhost:9000"));
-        result.put("status", "UP");
-        result.put("namespaces", lakehouseNamespaces());
+        String endpoint = Optional.ofNullable(System.getenv("S3_ENDPOINT")).orElse("http://localhost:9000").replaceAll("/+$", "");
+        result.put("objectStoreEndpoint", endpoint);
+        try {
+            List<String> namespaces = lakehouseNamespaces();
+            result.put("catalogStatus", "UP");
+            result.put("namespaceCount", namespaces.size());
+            result.put("namespaces", namespaces);
+        } catch (Exception error) {
+            result.put("catalogStatus", "DOWN");
+            result.put("catalogError", error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage()));
+        }
+        try {
+            HttpRequest probe = HttpRequest.newBuilder(URI.create(endpoint + "/minio/health/live"))
+                    .timeout(Duration.ofSeconds(3)).GET().build();
+            HttpResponse<Void> response = http.send(probe, HttpResponse.BodyHandlers.discarding());
+            boolean reachable = response.statusCode() < 500;
+            result.put("objectStoreStatus", reachable ? "REACHABLE" : "UNAVAILABLE");
+            result.put("objectStoreHttpStatus", response.statusCode());
+        } catch (Exception error) {
+            result.put("objectStoreStatus", "UNAVAILABLE");
+            result.put("objectStoreError", error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage()));
+        }
+        boolean healthy = "UP".equals(result.get("catalogStatus")) && "REACHABLE".equals(result.get("objectStoreStatus"));
+        result.put("status", healthy ? "UP" : "DEGRADED");
         return result;
     }
 
@@ -112,6 +134,67 @@ public final class PlatformRuntimeService {
             tables.add(item);
         }
         return tables;
+    }
+
+    /** Returns the physical table schema and partitioning reported by Spark/Iceberg. */
+    public Map<String,Object> lakehouseTableSchema(String namespace, String table) {
+        requireIdentifier(namespace, "namespace");
+        requireIdentifier(table, "table");
+        Dataset<Row> frame = spark.table("sbase." + namespace + "." + table);
+        Map<String,Object> result = new LinkedHashMap<>();
+        result.put("catalog", "sbase");
+        result.put("namespace", namespace);
+        result.put("table", table);
+        result.put("schema", JSON.valueToTree(frame.schema()));
+        result.put("columns", Arrays.asList(frame.schema().fieldNames()));
+        result.put("partitioning", spark.sql("SHOW CREATE TABLE sbase." + namespace + "." + table)
+                .collectAsList().stream().map(row -> row.getString(0)).findFirst().orElse(""));
+        return result;
+    }
+
+    /** Atomically moves the Iceberg table's current pointer to an existing snapshot. */
+    public Map<String,Object> lakehouseRollbackSnapshot(String namespace, String table, long snapshotId) throws Exception {
+        requireIdentifier(namespace, "namespace");
+        requireIdentifier(table, "table");
+        if (snapshotId <= 0) throw new IllegalArgumentException("snapshotId must be positive");
+        String identifier = namespace + "." + table;
+        List<Map<String,Object>> rows = procedureRows("CALL sbase.system.rollback_to_snapshot(table => '"
+                + identifier + "', snapshot_id => " + snapshotId + ")");
+        return Map.of("catalog", "sbase", "table", identifier, "snapshotId", snapshotId,
+                "status", "ROLLED_BACK", "details", rows);
+    }
+
+    /** Rewrites small Iceberg data files into larger files using Iceberg's Spark procedure. */
+    public Map<String,Object> lakehouseCompact(String namespace, String table) throws Exception {
+        requireIdentifier(namespace, "namespace");
+        requireIdentifier(table, "table");
+        String identifier = namespace + "." + table;
+        List<Map<String,Object>> rows = procedureRows("CALL sbase.system.rewrite_data_files(table => '"
+                + identifier + "')");
+        return Map.of("catalog", "sbase", "table", identifier, "status", "COMPACTION_REQUESTED", "metrics", rows);
+    }
+
+    /** Expires old snapshots while retaining at least one snapshot for recoverability. */
+    public Map<String,Object> lakehouseExpireSnapshots(String namespace, String table, String olderThan, int retainLast) throws Exception {
+        requireIdentifier(namespace, "namespace");
+        requireIdentifier(table, "table");
+        if (retainLast < 1 || retainLast > 1000) throw new IllegalArgumentException("retainLast must be between 1 and 1000");
+        java.time.Instant cutoff;
+        try { cutoff = java.time.Instant.parse(olderThan); }
+        catch (Exception invalid) { throw new IllegalArgumentException("olderThan must be an ISO-8601 UTC instant", invalid); }
+        String timestamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                .withZone(java.time.ZoneOffset.UTC).format(cutoff);
+        String identifier = namespace + "." + table;
+        List<Map<String,Object>> rows = procedureRows("CALL sbase.system.expire_snapshots(table => '"
+                + identifier + "', older_than => TIMESTAMP '" + timestamp + "', retain_last => " + retainLast + ")");
+        return Map.of("catalog", "sbase", "table", identifier, "status", "SNAPSHOTS_EXPIRED",
+                "olderThan", cutoff.toString(), "retainLast", retainLast, "metrics", rows);
+    }
+
+    private List<Map<String,Object>> procedureRows(String sql) throws Exception {
+        List<Map<String,Object>> rows = new ArrayList<>();
+        for (String json : spark.sql(sql).toJSON().collectAsList()) rows.add(JSON.readValue(json, OBJECT));
+        return rows;
     }
 
     /** Writes a bounded JSON batch as an Iceberg table; large ingestion belongs in Spark jobs. */
