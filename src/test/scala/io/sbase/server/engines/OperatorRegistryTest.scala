@@ -104,4 +104,27 @@ class OperatorRegistryTest {
     assertTrue(result.contains("\"index\":2"))
     assertTrue(result.indexOf("\"index\":1") < result.indexOf("\"index\":2"))
   }
+
+  @Test
+  def datasetRowsCanFeedSparkSql(): Unit = {
+    val registry = new OperatorRegistry()
+    val definition = """{"nodes":[
+      {"id":"source","operator":"dataset-rows","config":{"rows":[{"region":"EU","amount":10},{"region":"US","amount":20},{"region":"EU","amount":5}]}},
+      {"id":"query","operator":"spark-sql","config":{"inputTable":"orders","query":"SELECT region, SUM(amount) AS total FROM orders GROUP BY region ORDER BY region"}}
+    ],"edges":[{"source":"source","target":"query"}]}"""
+    try {
+      val result = registry.execute(definition).compactPrint
+      assertTrue(result.contains("EU"))
+      assertTrue(result.contains("15"))
+      assertTrue(result.contains("US"))
+      assertTrue(result.contains("20"))
+    } finally registry.stop()
+  }
+
+  @Test
+  def cassandraSourceOperatorIsDiscoverable(): Unit = {
+    val registry = new OperatorRegistry()
+    assertTrue(registry.operatorDefinition("cassandra-query").isPresent)
+    assertTrue(registry.operatorDefinition("dataset-rows").isPresent)
+  }
 }
