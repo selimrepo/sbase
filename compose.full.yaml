@@ -9,6 +9,10 @@ services:
   app:
     environment:
       SPARK_MASTER: spark://spark-master:7077
+      SPARK_DRIVER_HOST: app
+      SPARK_DRIVER_BIND_ADDRESS: 0.0.0.0
+      SPARK_DRIVER_PORT: "7078"
+      SPARK_BLOCKMANAGER_PORT: "7079"
       FLINK_REST_URL: http://flink-jobmanager:8081
       SBASE_ICEBERG_ENABLED: ${SBASE_ICEBERG_ENABLED:-true}
       SBASE_ICEBERG_WAREHOUSE: ${SBASE_ICEBERG_WAREHOUSE:-s3://sbase-warehouse/}
