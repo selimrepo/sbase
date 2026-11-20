@@ -137,7 +137,7 @@ public final class PlatformRuntimeService {
     /** Cancels a running Flink job through the supported REST endpoint. */
     public Map<String, Object> flinkCancel(String jobId) throws Exception {
         validateFlinkId(jobId, "job");
-        return send("PATCH", "/jobs/" + jobId, JSON.writeValueAsString(Map.of("state", "CANCELED")));
+        return send("PATCH", "/jobs/" + jobId + "?mode=cancel", null);
     }
 
     /** Requests a Flink savepoint; the target directory must be configured and writable by Flink. */
@@ -192,8 +192,7 @@ public final class PlatformRuntimeService {
             request.header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body == null ? "{}" : body));
         } else if ("PATCH".equals(method)) {
-            request.header("Content-Type", "application/json")
-                    .method("PATCH", HttpRequest.BodyPublishers.ofString(body == null ? "{}" : body));
+            request.method("PATCH", HttpRequest.BodyPublishers.noBody());
         } else request.GET();
         HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() / 100 != 2)
