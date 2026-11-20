@@ -77,6 +77,91 @@ public final class PlatformRuntimeService {
         return result;
     }
 
+    /** Returns namespaces and the configured object-store/catalog coordinates without exposing credentials. */
+    public Map<String, Object> lakehouseStatus() {
+        Map<String,Object> result = new LinkedHashMap<>();
+        result.put("engine", "apache-iceberg");
+        result.put("catalog", "sbase");
+        result.put("catalogType", "jdbc-postgresql");
+        result.put("warehouse", Optional.ofNullable(System.getenv("SBASE_ICEBERG_WAREHOUSE")).orElse("s3://sbase-warehouse/"));
+        result.put("objectStoreEndpoint", Optional.ofNullable(System.getenv("S3_ENDPOINT")).orElse("http://localhost:9000"));
+        result.put("status", "UP");
+        result.put("namespaces", lakehouseNamespaces());
+        return result;
+    }
+
+    public List<String> lakehouseNamespaces() {
+        return spark.sql("SHOW NAMESPACES IN sbase").collectAsList().stream()
+                .map(row -> row.getString(0)).sorted().toList();
+    }
+
+    public Map<String,Object> createLakehouseNamespace(String namespace) {
+        requireIdentifier(namespace, "namespace");
+        spark.sql("CREATE NAMESPACE IF NOT EXISTS sbase." + namespace);
+        return Map.of("catalog", "sbase", "namespace", namespace, "status", "AVAILABLE");
+    }
+
+    public List<Map<String,Object>> lakehouseTables(String namespace) {
+        requireIdentifier(namespace, "namespace");
+        List<Map<String,Object>> tables = new ArrayList<>();
+        for (Row row : spark.sql("SHOW TABLES IN sbase." + namespace).collectAsList()) {
+            Map<String,Object> item = new LinkedHashMap<>();
+            item.put("namespace", namespace);
+            item.put("name", row.getAs("tableName"));
+            item.put("temporary", row.getAs("isTemporary"));
+            tables.add(item);
+        }
+        return tables;
+    }
+
+    /** Writes a bounded JSON batch as an Iceberg table; large ingestion belongs in Spark jobs. */
+    public Map<String,Object> writeLakehouseRows(String namespace, String table, List<Map<String,Object>> rows) {
+        requireIdentifier(namespace, "namespace");
+        requireIdentifier(table, "table");
+        if (rows == null || rows.isEmpty()) throw new IllegalArgumentException("At least one row is required");
+        if (rows.size() > 10000) throw new IllegalArgumentException("API ingestion is limited to 10000 rows; use a Spark ingestion job");
+        try {
+            List<String> jsonRows = new ArrayList<>();
+            for (Map<String,Object> row : rows) jsonRows.add(JSON.writeValueAsString(row));
+            var javaRows = new org.apache.spark.api.java.JavaSparkContext(spark.sparkContext())
+                    .parallelize(jsonRows, Math.max(1, Math.min(8, jsonRows.size())));
+            Dataset<Row> frame = spark.read().json(javaRows);
+            String identifier = "sbase." + namespace + "." + table;
+            frame.writeTo(identifier).using("iceberg").createOrReplace();
+            return Map.of("catalog", "sbase", "namespace", namespace, "table", table,
+                    "rowsSubmitted", rows.size(), "columns", Arrays.asList(frame.schema().fieldNames()),
+                    "format", "iceberg", "writeMode", "create-or-replace");
+        } catch (Exception error) {
+            throw new IllegalStateException("Iceberg table write failed: " + error.getMessage(), error);
+        }
+    }
+
+    public Map<String,Object> lakehouseTablePreview(String namespace, String table, int requestedLimit) throws Exception {
+        requireIdentifier(namespace, "namespace");
+        requireIdentifier(table, "table");
+        int limit = Math.max(1, Math.min(requestedLimit, 1000));
+        Dataset<Row> frame = spark.table("sbase." + namespace + "." + table).limit(limit);
+        List<Map<String,Object>> rows = new ArrayList<>();
+        for (String json : frame.toJSON().collectAsList()) rows.add(JSON.readValue(json, OBJECT));
+        return Map.of("catalog", "sbase", "namespace", namespace, "table", table,
+                "format", "iceberg", "columns", Arrays.asList(frame.schema().fieldNames()),
+                "rows", rows, "rowCount", rows.size(), "limit", limit);
+    }
+
+    public List<Map<String,Object>> lakehouseSnapshots(String namespace, String table) throws Exception {
+        requireIdentifier(namespace, "namespace");
+        requireIdentifier(table, "table");
+        List<Map<String,Object>> snapshots = new ArrayList<>();
+        Dataset<Row> history = spark.sql("SELECT * FROM sbase." + namespace + "." + table + ".snapshots ORDER BY committed_at DESC LIMIT 100");
+        for (String json : history.toJSON().collectAsList()) snapshots.add(JSON.readValue(json, OBJECT));
+        return snapshots;
+    }
+
+    private static void requireIdentifier(String value, String label) {
+        if (value == null || !value.matches("[A-Za-z_][A-Za-z0-9_]{0,127}"))
+            throw new IllegalArgumentException("Invalid " + label + " identifier");
+    }
+
     /** Executes bounded, read-only Spark SQL and returns JSON rows for Studio previews. */
     public Map<String, Object> sparkSql(String sql, int requestedLimit) throws Exception {
         if (sql == null || sql.isBlank()) throw new IllegalArgumentException("sql is required");
