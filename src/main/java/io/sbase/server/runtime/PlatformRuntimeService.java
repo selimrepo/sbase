@@ -95,7 +95,7 @@ public final class PlatformRuntimeService {
     }
 
     /** Reports active Spark Structured Streaming queries and their latest progress snapshots. */
-    public Map<String, Object> sparkStreams() {
+    public Map<String, Object> sparkStreams() throws Exception {
         List<Map<String, Object>> streams = new ArrayList<>();
         for (org.apache.spark.sql.streaming.StreamingQuery query : spark.streams().active()) {
             Map<String, Object> item = new LinkedHashMap<>();
