@@ -1,6 +1,7 @@
 package io.sbase.server.engines
 
 import org.apache.spark.sql.SparkSession
+import io.sbase.server.catalog.CatalogService
 import org.apache.mahout.math.DenseVector
 import spray.json._
 import spray.json.DefaultJsonProtocol._
@@ -9,8 +10,8 @@ import java.net.http.{HttpClient,HttpRequest,HttpResponse}
 import java.time.Duration
 import scala.collection.mutable
 
-final class OperatorRegistry {
- private val supported=Set("dataset-values","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","mahout-dot-product","mahout-manhattan-distance","mahout-normalize","mahout-top-k","spark-sql","flink-submit","flink-jobs-overview","calcite-sql")
+final class OperatorRegistry(catalogService:Option[CatalogService]=None) {
+ private val supported=Set("dataset-values","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","mahout-dot-product","mahout-manhattan-distance","mahout-normalize","mahout-top-k","cassandra-query","spark-sql","flink-submit","flink-jobs-overview","calcite-sql")
  private lazy val spark=SparkSession.builder().appName("SBase-Workflow-Operator")
   .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
   .config("spark.ui.enabled","false")
@@ -33,6 +34,7 @@ final class OperatorRegistry {
    descriptor("mahout-manhattan-distance","mining","Mahout Manhattan distance","manhattanDistance",Seq("left","right"),Seq.empty,"Computes L1 distance between equal-length vectors"),
    descriptor("mahout-normalize","mining","Mahout L2 vector normalization","values",Seq("values"),Seq.empty,"Returns a unit-length vector; zero vectors remain zero"),
    descriptor("mahout-top-k","mining","Mahout top-K vector coordinates","items",Seq("values","k"),Seq.empty,"Returns the largest K vector coordinates in descending value order"),
+   descriptor("cassandra-query","source","Cassandra CQL source","rows",Seq("cql"),Seq("limit"),"Executes a bounded read-only CQL query against the configured Cassandra catalog"),
    descriptor("calcite-sql","query","Embedded Calcite SQL over workflow-local JSON tables","rows",Seq("query","tables"),Seq.empty,"Executes relational SQL against configured tables"),
    descriptor("spark-sql","compute","Spark SQL execution","rows",Seq("query"),Seq.empty,"Executes Spark SQL using the configured Spark session"),
    descriptor("flink-submit","streaming","Submit an uploaded Flink JAR","jobId",Seq("jarId"),Seq("entryClass","parallelism","programArgs"),"Submits a Flink application through the Flink REST API"),
@@ -164,8 +166,27 @@ final class OperatorRegistry {
      require(k>0 && k<=10000,"k must be between 1 and 10000")
      val selected=values.zipWithIndex.sortBy { case (value,index)=>(-value,index) }.take(k)
      JsObject("items"->JsArray(selected.map { case (value,index)=>JsObject("index"->JsNumber(index),"value"->JsNumber(value)) }))
+    case "cassandra-query" =>
+     val service=catalogService.getOrElse(throw new IllegalStateException("Cassandra workflow source is not configured"))
+     val cql=config.fields.getOrElse("cql",throw new IllegalArgumentException("cassandra-query requires config.cql")).convertTo[String]
+     val limit=config.fields.get("limit").map(_.convertTo[Int]).getOrElse(500)
+     val result=service.queryCassandra(cql,limit)
+     new ObjectMapper().writeValueAsString(result).parseJson
     case "spark-sql" =>
      val query=config.fields.getOrElse("query",JsString("SELECT 1 AS value")).convertTo[String]
+     val inputTable=config.fields.get("inputTable").map(_.convertTo[String])
+     inputTable.foreach { tableName =>
+      require(tableName.matches("[A-Za-z_][A-Za-z0-9_]*"),"Invalid Spark input table name")
+      val sourceRows=upstream.flatMap(_.asJsObject.fields.get("rows").map(_.convertTo[Vector[JsValue]])).headOption
+      sourceRows.foreach { rows =>
+       val jsonRows=rows.map {
+        case JsString(json)=>json
+        case other=>other.compactPrint
+       }
+       val frame=spark.read.json(spark.sparkContext.parallelize(jsonRows))
+       frame.createOrReplaceTempView(tableName)
+      }
+     }
      JsObject("rows"->JsArray(spark.sql(query).toJSON.collect().toVector.map(JsString(_))))
     case "flink-submit" =>
      val base=sys.env.getOrElse("FLINK_REST_URL","http://localhost:8082")
