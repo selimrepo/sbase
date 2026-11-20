@@ -11,7 +11,7 @@ import java.time.Duration
 import scala.collection.mutable
 
 final class OperatorRegistry(catalogService:Option[CatalogService]=None) {
- private val supported=Set("dataset-values","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","mahout-dot-product","mahout-manhattan-distance","mahout-normalize","mahout-top-k","cassandra-query","spark-sql","flink-submit","flink-jobs-overview","calcite-sql")
+ private val supported=Set("dataset-values","dataset-rows","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","mahout-dot-product","mahout-manhattan-distance","mahout-normalize","mahout-top-k","cassandra-query","spark-sql","flink-submit","flink-jobs-overview","calcite-sql")
  private lazy val spark=SparkSession.builder().appName("SBase-Workflow-Operator")
   .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
   .config("spark.ui.enabled","false")
@@ -27,6 +27,7 @@ final class OperatorRegistry(catalogService:Option[CatalogService]=None) {
   import scala.jdk.CollectionConverters._
   val definitions=Vector(
    descriptor("dataset-values","data","Inline numeric dataset source","values",Seq("values"),Seq.empty,"Emits a numeric values array"),
+   descriptor("dataset-rows","data","Inline tabular dataset source","rows",Seq("rows"),Seq.empty,"Emits JSON records that can be registered as Spark SQL temporary views"),
    descriptor("mahout-vector-sum","mining","Mahout vector reduction","sum",Seq.empty,Seq("values"),"Computes vector sum and element count"),
    descriptor("mahout-cosine-similarity","mining","Mahout cosine similarity","cosineSimilarity",Seq("left","right"),Seq.empty,"Compares two equal-length numeric vectors"),
    descriptor("mahout-euclidean-distance","mining","Mahout Euclidean distance","euclideanDistance",Seq("left","right"),Seq.empty,"Computes L2 distance between numeric vectors"),
@@ -122,6 +123,10 @@ final class OperatorRegistry(catalogService:Option[CatalogService]=None) {
     case "dataset-values" =>
      val values=config.fields.getOrElse("values",JsArray()).convertTo[Vector[Double]]
      JsObject("values"->JsArray(values.map(JsNumber(_))))
+    case "dataset-rows" =>
+     val rows=config.fields.getOrElse("rows",throw new IllegalArgumentException("dataset-rows requires config.rows")).convertTo[Vector[JsValue]]
+     require(rows.forall(_.isInstanceOf[JsObject]),"dataset-rows accepts only JSON objects")
+     JsObject("rows"->JsArray(rows))
     case "mahout-vector-sum" =>
      val configured=config.fields.get("values").map(_.convertTo[Vector[Double]])
      val inherited:Vector[Double]=upstream.flatMap(_.asJsObject.fields.get("values").map(_.convertTo[Vector[Double]])).flatten
