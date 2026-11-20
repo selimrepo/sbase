@@ -375,5 +375,4 @@ and should use a disposable test database.
 
 ## Engine platform and lakehouse direction
 
-SBase now exposes deeper Spark SQL/Structured Streaming controls, Flink job lifecycle operations, Cassandra schema discovery and an expanded Mahout vector operator set. See [Engine Platform](docs/ENGINE_PLATFORM.md) for API details, engine responsibilities, operational constraints and the Databricks-style lakehouse roadmap.
-
+SBase now exposes deeper Spark SQL/Structured Streaming controls, Flink job lifecycle operations, Cassandra schema discovery and an expanded Mahout vector operator set. See [Engine Platform](docs/ENGINE_PLATFORM.md) for API details, engine responsibilities, operational constraints and the Databricks-style lakehouse roadmap.\n## Lakehouse\n\nThe full profile includes MinIO-backed S3 storage and an Apache Iceberg JDBC catalog backed by PostgreSQL. See [Lakehouse Architecture](docs/LAKEHOUSE_ARCHITECTURE.md) for deployment, APIs, snapshots and maintenance operations.\n
