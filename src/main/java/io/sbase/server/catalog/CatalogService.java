@@ -98,6 +98,49 @@ public final class CatalogService implements AutoCloseable {
         }
     }
 
+    /** Lists tables and views in a Cassandra keyspace from driver metadata. */
+    public Map<String,Object> cassandraTables(String keyspaceName) {
+        if (keyspaceName == null || !keyspaceName.matches("[A-Za-z_][A-Za-z0-9_]{0,47}"))
+            throw new IllegalArgumentException("Invalid Cassandra keyspace name");
+        var keyspace = cassandra().getMetadata().getKeyspace(
+                com.datastax.oss.driver.api.core.CqlIdentifier.fromCql(keyspaceName))
+                .orElseThrow(() -> new NoSuchElementException("Cassandra keyspace not found: " + keyspaceName));
+        List<Map<String,Object>> tables = new ArrayList<>();
+        keyspace.getTables().keySet().stream().sorted().forEach(name -> {
+            Map<String,Object> item = new LinkedHashMap<>();
+            item.put("name", name.asInternal()); item.put("kind", "table");
+            tables.add(item);
+        });
+        keyspace.getViews().keySet().stream().sorted().forEach(name -> {
+            Map<String,Object> item = new LinkedHashMap<>();
+            item.put("name", name.asInternal()); item.put("kind", "materialized-view");
+            tables.add(item);
+        });
+        return Map.of("source", "cassandra", "keyspace", keyspaceName, "tables", tables, "count", tables.size());
+    }
+
+    /** Returns column types and primary-key membership from Cassandra schema metadata. */
+    public Map<String,Object> cassandraTable(String keyspaceName, String tableName) {
+        if (keyspaceName == null || !keyspaceName.matches("[A-Za-z_][A-Za-z0-9_]{0,47}")
+                || tableName == null || !tableName.matches("[A-Za-z_][A-Za-z0-9_]{0,47}"))
+            throw new IllegalArgumentException("Invalid Cassandra keyspace or table name");
+        var keyspace = cassandra().getMetadata().getKeyspace(
+                com.datastax.oss.driver.api.core.CqlIdentifier.fromCql(keyspaceName))
+                .orElseThrow(() -> new NoSuchElementException("Cassandra keyspace not found: " + keyspaceName));
+        var table = keyspace.getTable(com.datastax.oss.driver.api.core.CqlIdentifier.fromCql(tableName))
+                .orElseThrow(() -> new NoSuchElementException("Cassandra table not found: " + keyspaceName + "." + tableName));
+        List<Map<String,Object>> columns = new ArrayList<>();
+        table.getColumns().forEach((name, definition) -> {
+            Map<String,Object> column = new LinkedHashMap<>();
+            column.put("name", name.asInternal());
+            column.put("type", definition.getType().toString());
+            column.put("partitionKey", table.getPartitionKey().stream().anyMatch(key -> key.getName().equals(name)));
+            column.put("clusteringKey", table.getClusteringColumns().containsKey(name));
+            columns.add(column);
+        });
+        return Map.of("source", "cassandra", "keyspace", keyspaceName, "table", tableName, "columns", columns);
+    }
+
     public Map<String,Object> queryCassandra(String cql, int limit) {
         if(cql==null||!cql.stripLeading().toLowerCase(Locale.ROOT).startsWith("select "))
             throw new IllegalArgumentException("Only Cassandra SELECT is allowed");
