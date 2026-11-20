@@ -65,8 +65,8 @@ object Main {
 
   val repository=JobRepository.fromEnvironment()
   repository.migrate()
-  val operators=new OperatorRegistry()
   val catalogs=new CatalogService()
+  val operators=new OperatorRegistry(Some(catalogs))
   val mapper=new ObjectMapper()
   val federated=new FederatedQueryExecutor(catalogs,operators.sparkSession,sys.env.get("SBASE_FEDERATED_SCAN_PARALLELISM").flatMap(_.toIntOption).getOrElse(8))
   val autoMl=new AutoMlLifecycleService(operators.sparkSession)
