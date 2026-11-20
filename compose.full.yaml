@@ -41,7 +41,7 @@ services:
       flink-jobmanager:
         condition: service_started
       minio:
-        condition: service_healthy
+        condition: service_started
       minio-init:
         condition: service_completed_successfully
     restart: unless-stopped
@@ -155,12 +155,6 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 20s
     restart: unless-stopped
 
   minio-init:
