@@ -231,6 +231,54 @@ path("deployments"/Segment/"runs"){slug=>post{
        case Failure(error)=>system.log.warn("Spark SQL request rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark SQL failed"))))
       }
     }}} ~
+    path("lakehouse"){get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseStatus()).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>system.log.error("Lakehouse status failed",error);complete(StatusCodes.BadGateway->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Lakehouse unavailable"))))
+      }
+    }} ~
+    path("lakehouse"/"namespaces"){get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseNamespaces()).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>complete(StatusCodes.BadGateway->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Namespace listing failed"))))
+      }
+    } ~ post{entity(as[JsObject]){request=>
+      val namespace=request.fields.get("namespace").map(_.convertTo[String]).getOrElse("")
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.createLakehouseNamespace(namespace)).parseJson))){
+       case Success(value)=>complete(StatusCodes.Created->value)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Namespace creation failed"))))
+      }
+    }}} ~
+    path("lakehouse"/"namespaces"/Segment/"tables"){namespace=>get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseTables(namespace)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Table listing failed"))))
+      }
+    }} ~
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment){namespace=>table=>get{
+      parameter("limit".as[Int].withDefault(100)){limit=>
+       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseTablePreview(namespace,table,limit)).parseJson))){
+        case Success(value)=>complete(value)
+        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Table preview failed"))))
+       }
+      }
+    }} ~
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"write"){namespace=>table=>post{entity(as[JsObject]){request=>
+      try {
+       val rows=request.fields.getOrElse("rows",throw new IllegalArgumentException("rows is required"))
+       val typed=mapper.readValue(rows.compactPrint,new TypeReference[java.util.List[java.util.Map[String,Object]]]() {})
+       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.writeLakehouseRows(namespace,table,typed)).parseJson))){
+        case Success(value)=>complete(StatusCodes.Created->value)
+        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Iceberg write failed"))))
+       }
+      } catch { case error:Throwable=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Invalid rows")))) }
+    }}}} ~
+    path("lakehouse"/"namespaces"/Segment/"tables"/Segment/"snapshots"){namespace=>table=>get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseSnapshots(namespace,table)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Snapshot history failed"))))
+      }
+    }} ~
     path("engines"/"spark"/"streams"){get{
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.sparkStreams()).parseJson))){
        case Success(value)=>complete(value)
