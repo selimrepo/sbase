@@ -1,8 +1,24 @@
+# Full local platform profile.
+# Start with:
+# docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d
+#
+# Tune *_MEMORY / *_CORES values in .env for the host. Values below are
+# deliberately conservative defaults, not hard caps on the host machine.
+
 services:
   app:
     environment:
       SPARK_MASTER: spark://spark-master:7077
       FLINK_REST_URL: http://flink-jobmanager:8081
+      SBASE_DB_POOL_SIZE: ${SBASE_DB_POOL_SIZE:-32}
+      SBASE_AUTOML_WORKERS: ${SBASE_AUTOML_WORKERS:-4}
+      SBASE_AUTOML_QUEUE_CAPACITY: ${SBASE_AUTOML_QUEUE_CAPACITY:-128}
+      SBASE_FEDERATED_SCAN_PARALLELISM: ${SBASE_FEDERATED_SCAN_PARALLELISM:-16}
+      JAVA_TOOL_OPTIONS: >-
+        -XX:+UseG1GC
+        -XX:InitialRAMPercentage=${SBASE_JVM_INITIAL_RAM_PERCENTAGE:-25}
+        -XX:MaxRAMPercentage=${SBASE_JVM_MAX_RAM_PERCENTAGE:-70}
+        -Dfile.encoding=UTF-8
     depends_on:
       postgres:
         condition: service_healthy
@@ -14,16 +30,116 @@ services:
         condition: service_started
       flink-jobmanager:
         condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-200}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-16MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-256MB}
+    shm_size: ${POSTGRES_SHM_SIZE:-1gb}
+    restart: unless-stopped
 
   cassandra:
     profiles: ["full"]
+    environment:
+      MAX_HEAP_SIZE: ${CASSANDRA_MAX_HEAP_SIZE:-2G}
+      HEAP_NEWSIZE: ${CASSANDRA_HEAP_NEWSIZE:-512M}
+    mem_limit: ${CASSANDRA_MEMORY_LIMIT:-4g}
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
+      interval: 30s
+      timeout: 15s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
   solr:
     profiles: ["full"]
+    command: ["solr", "-f", "-c"]
+    environment:
+      SOLR_JAVA_MEM: ${SOLR_JAVA_MEM:--Xms1g -Xmx2g}
+      SOLR_HEAP: ${SOLR_HEAP:-2g}
+    mem_limit: ${SOLR_MEMORY_LIMIT:-3g}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/admin/info/system >/dev/null"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+    restart: unless-stopped
+
   spark-master:
     profiles: ["full"]
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8081"
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: "7077"
+      SPARK_MASTER_WEBUI_PORT: "8081"
+    mem_limit: ${SPARK_MASTER_MEMORY_LIMIT:-2g}
+    restart: unless-stopped
+
   spark-worker:
     profiles: ["full"]
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - --cores
+      - ${SPARK_WORKER_CORES:-4}
+      - --memory
+      - ${SPARK_WORKER_MEMORY:-8g}
+      - spark://spark-master:7077
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_LOCAL_DIRS: /tmp
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-8g}
+    mem_limit: ${SPARK_WORKER_MEMORY_LIMIT:-10g}
+    depends_on:
+      - spark-master
+    restart: unless-stopped
+
   flink-jobmanager:
     profiles: ["full"]
+    command: ["jobmanager"]
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.memory.process.size: ${FLINK_JOBMANAGER_MEMORY:-1600m}
+        rest.address: flink-jobmanager
+    mem_limit: ${FLINK_JOBMANAGER_MEMORY_LIMIT:-2g}
+    restart: unless-stopped
+
   flink-taskmanager:
     profiles: ["full"]
+    command: ["taskmanager"]
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS:-4}
+        taskmanager.memory.process.size: ${FLINK_TASKMANAGER_MEMORY:-4g}
+    mem_limit: ${FLINK_TASKMANAGER_MEMORY_LIMIT:-5g}
+    depends_on:
+      - flink-jobmanager
+    restart: unless-stopped
+
+# Persist engine state and Spark spill across restarts. The application model
+# registry, PostgreSQL, Cassandra, Solr and Spark scratch volumes are declared
+# by compose.yaml and reused by this overlay.
