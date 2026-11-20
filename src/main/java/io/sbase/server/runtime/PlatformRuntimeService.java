@@ -38,13 +38,13 @@ public final class PlatformRuntimeService {
         values.add(component("catalog", "Data Catalog", "PostgreSQL, Cassandra and Solr adapters", "available",
                 List.of("discovery", "read-only-query", "schema-inspection", "federated-sources")));
         values.add(component("query", "Query Engine", "Apache Calcite and Spark SQL", "available",
-                List.of("sql-validation", "spark-sql", "federated-query-planning", "federated-query-execution", "predicate-pushdown")));
+                List.of("sql-validation", "spark-sql", "spark-explain", "spark-catalog", "spark-table-cache", "federated-query-planning", "federated-query-execution", "predicate-pushdown")));
         values.add(component("automl", "Scientific AutoML", "Spark ML", "available",
                 List.of("classification", "regression", "time-series", "cross-validation", "fairness", "model-cards", "async-jobs", "drift-monitoring")));
         values.add(component("mining", "Scientific Mining", "Apache Mahout", "available",
-                List.of("vector-sum", "cosine-similarity", "euclidean-distance")));
+                List.of("vector-sum", "cosine-similarity", "euclidean-distance", "dot-product", "manhattan-distance", "l2-normalization", "top-k-coordinates")));
         values.add(component("stream-processing", "Stream Processing", "Apache Flink REST adapter", "configured",
-                List.of("jar-submit", "jobs-overview", "job-details", "taskmanagers", "jars")));
+                List.of("jar-submit", "jobs-overview", "job-details", "taskmanagers", "jars", "job-cancellation", "savepoint-trigger")));
         values.add(component("model-registry", "Model Registry", "PostgreSQL metadata and model artifacts", "available",
                 List.of("registry", "model-cards", "prediction", "aliases", "promotion", "rollback", "archive")));
         return values;
@@ -198,6 +198,8 @@ public final class PlatformRuntimeService {
         if (response.statusCode() / 100 != 2)
             throw new IllegalStateException("Flink REST returned HTTP " + response.statusCode() + ": "
                     + response.body().substring(0, Math.min(response.body().length(), 1000)));
+        if (response.body() == null || response.body().isBlank())
+            return Map.of("status", "ACCEPTED", "httpStatus", response.statusCode());
         return JSON.readValue(response.body(), OBJECT);
     }
 }
