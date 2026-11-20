@@ -144,7 +144,7 @@ public final class PlatformRuntimeService {
     }
 
     /** Lists tables visible to the Spark session catalog. */
-    public Map<String, Object> sparkTables(String database) {
+    public Map<String, Object> sparkTables(String database) throws Exception {
         String selected = (database == null || database.isBlank()) ? "default" : database;
         if (!selected.matches("[A-Za-z_][A-Za-z0-9_]*"))
             throw new IllegalArgumentException("Invalid Spark database name");
