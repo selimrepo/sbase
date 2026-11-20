@@ -26,7 +26,7 @@ object WorkerSharding {
     case Process(lease) if lease.id.toString==id =>
      if(heartbeat!=null) heartbeat.cancel()
      heartbeat=context.system.scheduler.scheduleAtFixedRate(15.seconds,15.seconds)(() => Future(repo.heartbeat(lease))(ec))(ec)
-     context.pipeToSelf(Future(operators.execute(lease.workflowDefinition).compactPrint)(ec)) {
+     context.pipeToSelf(Future(operators.execute(lease.workflowDefinition,lease.inputParameters).compactPrint)(ec)) {
       case Success(value)=>Finished(lease,Right(value))
       case Failure(error)=>Finished(lease,Left(Option(error.getMessage).getOrElse(error.getClass.getName)))
      }
