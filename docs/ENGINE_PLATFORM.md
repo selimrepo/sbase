@@ -58,8 +58,12 @@ The operator catalog is discoverable through `GET /operators/catalog`. New opera
 - `mahout-manhattan-distance`: `left`, `right`.
 - `mahout-normalize`: `values`.
 - `mahout-top-k`: `values`, `k`.
+- `dataset-rows`: emits JSON records; connect it to a `spark-sql` node and set `inputTable` to register those records as a temporary Spark SQL view.
+- `cassandra-query`: `cql`, optional `limit`; executes bounded read-only CQL through the configured Cassandra catalog and emits rows that can feed a downstream Spark SQL node.
 
 All vector operators require numeric arrays; pairwise operations require equal, non-empty dimensions. Top-K sorts by descending value and uses ascending coordinate index as a stable tie-breaker.
+
+A Cassandra-to-Spark workflow can connect a `cassandra-query` node to a `spark-sql` node with `inputTable` set (for example, `orders`). Spark registers the bounded upstream row set as a temporary view before executing the query. This is intended for bounded operational extracts and previews, not bulk replication of an entire Cassandra keyspace.
 
 ## Databricks-style target architecture
 
