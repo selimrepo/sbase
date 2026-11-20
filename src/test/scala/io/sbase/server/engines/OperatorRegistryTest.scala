@@ -78,4 +78,30 @@ class OperatorRegistryTest {
     assertThrows(classOf[IllegalArgumentException], () => registry.execute(definition, """{"other":[1,2]}"""))
   }
 
+
+  @Test
+  def mahoutDotProductExecutes(): Unit = {
+    val result = new OperatorRegistry().execute("""{"nodes":[{"id":"dot","operator":"mahout-dot-product","config":{"left":[1,2,3],"right":[4,5,6]}}]}""").compactPrint
+    assertTrue(result.contains("\"dotProduct\":32.0"))
+  }
+
+  @Test
+  def mahoutManhattanDistanceExecutes(): Unit = {
+    val result = new OperatorRegistry().execute("""{"nodes":[{"id":"l1","operator":"mahout-manhattan-distance","config":{"left":[1,2],"right":[4,6]}}]}""").compactPrint
+    assertTrue(result.contains("\"manhattanDistance\":7.0"))
+  }
+
+  @Test
+  def mahoutNormalizationHandlesZeroVectors(): Unit = {
+    val result = new OperatorRegistry().execute("""{"nodes":[{"id":"normalize","operator":"mahout-normalize","config":{"values":[0,0]}}]}""").compactPrint
+    assertTrue(result.contains("\"zeroVector\":true"))
+  }
+
+  @Test
+  def mahoutTopKIsStableAndDescending(): Unit = {
+    val result = new OperatorRegistry().execute("""{"nodes":[{"id":"top","operator":"mahout-top-k","config":{"values":[3,9,9,1],"k":2}}]}""").compactPrint
+    assertTrue(result.contains("\"index\":1"))
+    assertTrue(result.contains("\"index\":2"))
+    assertTrue(result.indexOf("\"index\":1") < result.indexOf("\"index\":2"))
+  }
 }
