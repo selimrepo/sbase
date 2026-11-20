@@ -13,10 +13,31 @@ import scala.collection.mutable
 final class OperatorRegistry(catalogService:Option[CatalogService]) {
  def this()=this(None)
  private val supported=Set("dataset-values","dataset-rows","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","mahout-dot-product","mahout-manhattan-distance","mahout-normalize","mahout-top-k","cassandra-query","spark-sql","flink-submit","flink-jobs-overview","calcite-sql")
- private lazy val spark=SparkSession.builder().appName("SBase-Workflow-Operator")
-  .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
-  .config("spark.ui.enabled","false")
-  .config("spark.driver.host",sys.env.getOrElse("SPARK_DRIVER_HOST","127.0.0.1")).getOrCreate()
+ private lazy val spark={
+  val builder=SparkSession.builder().appName("SBase-Lakehouse")
+   .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
+   .config("spark.ui.enabled","false")
+   .config("spark.driver.host",sys.env.getOrElse("SPARK_DRIVER_HOST","127.0.0.1"))
+   .config("spark.sql.extensions","org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+  val enabled=sys.env.getOrElse("SBASE_ICEBERG_ENABLED","true").equalsIgnoreCase("true")
+  if(enabled){
+   builder
+    .config("spark.sql.catalog.sbase","org.apache.iceberg.spark.SparkCatalog")
+    .config("spark.sql.catalog.sbase.type","jdbc")
+    .config("spark.sql.catalog.sbase.uri",sys.env.getOrElse("SBASE_ICEBERG_JDBC_URL",sys.env.getOrElse("SBASE_POSTGRES_URL","jdbc:postgresql://localhost:5432/sbase")))
+    .config("spark.sql.catalog.sbase.jdbc.user",sys.env.getOrElse("SBASE_ICEBERG_JDBC_USER",sys.env.getOrElse("SBASE_POSTGRES_USER","sbase")))
+    .config("spark.sql.catalog.sbase.jdbc.password",sys.env.getOrElse("SBASE_ICEBERG_JDBC_PASSWORD",sys.env.getOrElse("SBASE_POSTGRES_PASSWORD","")))
+    .config("spark.sql.catalog.sbase.jdbc.init-catalog-tables","true")
+    .config("spark.sql.catalog.sbase.warehouse",sys.env.getOrElse("SBASE_ICEBERG_WAREHOUSE","s3://sbase-warehouse/"))
+    .config("spark.sql.catalog.sbase.io-impl","org.apache.iceberg.aws.s3.S3FileIO")
+    .config("spark.sql.catalog.sbase.s3.endpoint",sys.env.getOrElse("S3_ENDPOINT","http://localhost:9000"))
+    .config("spark.sql.catalog.sbase.s3.access-key-id",sys.env.getOrElse("S3_ACCESS_KEY","minioadmin"))
+    .config("spark.sql.catalog.sbase.s3.secret-access-key",sys.env.getOrElse("S3_SECRET_KEY","minioadmin"))
+    .config("spark.sql.catalog.sbase.s3.path-style-access",sys.env.getOrElse("S3_PATH_STYLE_ACCESS","true"))
+    .config("spark.sql.catalog.sbase.client.region",sys.env.getOrElse("S3_REGION","us-east-1"))
+  }
+  builder.getOrCreate()
+ }
  private val calcite=new CalciteSqlEngine()
  private val http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
 
