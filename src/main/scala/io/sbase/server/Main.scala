@@ -321,6 +321,20 @@ path("deployments"/Segment/"runs"){slug=>post{
        case Failure(error)=>system.log.warn("PostgreSQL query rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("query failed"))))
       }
     }}} ~
+    path("catalogs"/"cassandra"/"keyspaces"/Segment/"tables"){keyspace=>get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.cassandraTables(keyspace)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Cassandra table listing failed"))))
+      }
+    }} ~
+    path("catalogs"/"cassandra"/"keyspaces"/Segment/"tables"/Segment){keyspace=>table=>get{
+      onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.cassandraTable(keyspace,table)).parseJson))){
+       case Success(value)=>complete(value)
+       case Failure(_:NoSuchElementException)=>complete(StatusCodes.NotFound)
+       case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Cassandra schema lookup failed"))))
+      }
+    }} ~
     path("catalogs"/"cassandra"/"query"){post{entity(as[CassandraQuery]){request=>
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(catalogs.queryCassandra(request.cql,request.limit)).parseJson))){
        case Success(value)=>complete(value)
