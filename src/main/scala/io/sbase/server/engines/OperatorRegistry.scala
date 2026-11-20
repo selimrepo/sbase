@@ -21,7 +21,12 @@ final class OperatorRegistry(catalogService:Option[CatalogService]) {
    .config("spark.sql.extensions","org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
   val enabled=sys.env.getOrElse("SBASE_ICEBERG_ENABLED","true").equalsIgnoreCase("true")
   if(enabled){
-   builder
+   val icebergJars=Seq(
+    classOf[org.apache.iceberg.spark.SparkCatalog],
+    classOf[org.apache.iceberg.aws.s3.S3FileIO],
+    classOf[org.apache.iceberg.jdbc.JdbcCatalog]
+   ).map(_.getProtectionDomain.getCodeSource.getLocation.toURI.toString).distinct
+   builder.config("spark.jars",icebergJars.mkString(","))
     .config("spark.sql.catalog.sbase","org.apache.iceberg.spark.SparkCatalog")
     .config("spark.sql.catalog.sbase.type","jdbc")
     .config("spark.sql.catalog.sbase.uri",sys.env.getOrElse("SBASE_ICEBERG_JDBC_URL",sys.env.getOrElse("SBASE_POSTGRES_URL","jdbc:postgresql://localhost:5432/sbase")))
