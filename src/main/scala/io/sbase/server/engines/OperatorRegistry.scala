@@ -10,7 +10,8 @@ import java.net.http.{HttpClient,HttpRequest,HttpResponse}
 import java.time.Duration
 import scala.collection.mutable
 
-final class OperatorRegistry(catalogService:Option[CatalogService]=None) {
+final class OperatorRegistry(catalogService:Option[CatalogService]) {
+ def this()=this(None)
  private val supported=Set("dataset-values","dataset-rows","mahout-vector-sum","mahout-cosine-similarity","mahout-euclidean-distance","mahout-dot-product","mahout-manhattan-distance","mahout-normalize","mahout-top-k","cassandra-query","spark-sql","flink-submit","flink-jobs-overview","calcite-sql")
  private lazy val spark=SparkSession.builder().appName("SBase-Workflow-Operator")
   .master(sys.env.getOrElse("SPARK_MASTER","local[*]"))
