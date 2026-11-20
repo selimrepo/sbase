@@ -80,3 +80,38 @@ The next stages should be delivered incrementally, with each stage having integr
 ## Production boundaries
 
 The current Compose deployment is a development topology, not a highly available production cluster. Before production: secure engine REST endpoints on a private network, configure TLS and secrets, persist Spark event logs and Flink checkpoints/savepoints, use shared object storage for artifacts, enforce workspace/tenant isolation, add per-engine resource quotas, and run backup/restore plus failure-injection tests.
+
+## Apache Iceberg lakehouse
+
+The full Compose profile now includes MinIO as an S3-compatible object store and bootstraps the `sbase-warehouse` bucket. Spark uses the Apache Iceberg Spark 4.0 runtime, S3FileIO, and a shared JDBC catalog backed by the existing PostgreSQL control-plane database. Table data and Iceberg metadata files live in the object store; catalog/namespace/table registration is shared through PostgreSQL.
+
+### Lakehouse APIs
+
+- `GET /lakehouse` — catalog, warehouse and namespace status (never returns credentials).
+- `GET /lakehouse/namespaces` — list namespaces.
+- `POST /lakehouse/namespaces` with `{"namespace":"analytics"}` — create a namespace.
+- `GET /lakehouse/namespaces/{namespace}/tables` — list tables.
+- `POST /lakehouse/namespaces/{namespace}/tables/{table}/write` with `{"rows":[{"id":1,"region":"EU"}]}` — create/replace an Iceberg table from a bounded JSON batch (maximum 10,000 rows).
+- `GET /lakehouse/namespaces/{namespace}/tables/{table}?limit=100` — preview rows.
+- `GET /lakehouse/namespaces/{namespace}/tables/{table}/snapshots` — inspect recent Iceberg snapshots.
+
+Example flow:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/lakehouse/namespaces \
+  -H 'Content-Type: application/json' \
+  -d '{"namespace":"analytics"}'
+
+curl -X POST http://localhost:8080/api/v1/lakehouse/namespaces/analytics/tables/orders/write \
+  -H 'Content-Type: application/json' \
+  -d '{"rows":[{"order_id":1,"region":"EU","amount":120.5},{"order_id":2,"region":"US","amount":80.0}]}'
+
+curl 'http://localhost:8080/api/v1/lakehouse/namespaces/analytics/tables/orders?limit=100'
+curl http://localhost:8080/api/v1/lakehouse/namespaces/analytics/tables/orders/snapshots
+```
+
+The REST row writer is intentionally for previews and small batches. Production ingestion should use Spark jobs writing directly to Iceberg so large datasets are not serialized through the API. Use a non-default MinIO root password in `.env`; the example credentials are development-only. The JDBC catalog shares the existing SBase PostgreSQL database but owns its Iceberg catalog tables separately from SBase workflow tables.
+
+### Storage and governance boundary
+
+PostgreSQL is the shared metadata catalog/control plane; MinIO stores Iceberg data, manifests and metadata files. This first stage provides namespace/table discovery, writes, previews and snapshot history. It does not yet provide full Unity-Catalog-style grants, row/column policies, schema/partition evolution workflows, compaction scheduling, retention policies, or cross-tenant authorization. Those must be implemented before exposing the lakehouse to untrusted tenants.
