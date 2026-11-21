@@ -221,6 +221,19 @@ public final class LakehouseApiService implements AutoCloseable {
         } catch(Exception e) { throw failure("Unable to read Iceberg snapshots",e); }
     }
 
+    public Map<String,Object> rollbackSnapshot(Session s,String namespace,String table,long snapshotId) {
+        identifier(namespace);identifier(table);
+        if(snapshotId<=0) throw new IllegalArgumentException("snapshotId must be positive");
+        control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.ALTER);
+        try {
+            String target=namespace+"."+table;
+            List<Map<String,Object>> rows=new ArrayList<>();
+            for(String json:spark.sql("CALL sbase.system.rollback_to_snapshot(table => '"+target+"', snapshot_id => "+snapshotId+")").toJSON().collectAsList())
+                rows.add(JSON.readValue(json,MAP));
+            return Map.of("namespace",namespace,"table",table,"snapshotId",snapshotId,"status","ROLLED_BACK","details",rows);
+        } catch(Exception e) { throw failure("Iceberg snapshot rollback failed",e); }
+    }
+
     public Map<String,Object> compact(Session s,String namespace,String table) {
         identifier(namespace);identifier(table);
         control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.MODIFY);
