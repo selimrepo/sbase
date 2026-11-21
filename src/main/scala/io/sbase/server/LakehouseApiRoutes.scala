@@ -178,6 +178,14 @@ object LakehouseApiRoutes extends Directives {
           }}
         }
       } ~
+      path("lakehouse" / "maintenance" / JavaUUID / "enabled") { policyId =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          post { entity(as[String]) { raw =>
+            val enabled=raw.parseJson.asJsObject.fields.get("enabled").map(_.convertTo[Boolean]).getOrElse(false)
+            run(auth)(s => service.get.setMaintenancePolicyEnabled(s,policyId,enabled))
+          }}
+        }
+      } ~
       path("lakehouse" / "namespaces" / Segment / "lineage") { namespace =>
         optionalHeaderValueByName("Authorization") { auth =>
           get { parameter("limit".as[Int].withDefault(200)) { limit =>
