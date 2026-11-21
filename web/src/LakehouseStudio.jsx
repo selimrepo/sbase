@@ -127,11 +127,117 @@ function LakehouseBrowser() {
 }
 
 function Notebook() {
-  const [cells, setCells] = useState(() => readLocalJson("sbase.notebook.cells", null) || [{ id: 1, type: "sql", source: "SELECT current_timestamp() AS now;", output: null }, { id: 2, type: "markdown", source: "# Lakehouse analysis\\nDescribe your analysis here.", output: null }]);
+  const initialCells = [{ id: 1, type: "sql", source: "SELECT current_timestamp() AS now;", output: null }, { id: 2, type: "markdown", source: "# Lakehouse analysis\nDescribe your analysis here.", output: null }];
+  const [token, setToken] = useState(() => localStorage.getItem("sbase.notebook.token") || "");
+  const [tokenInput, setTokenInput] = useState(() => localStorage.getItem("sbase.notebook.token") || "");
+  const [notebooks, setNotebooks] = useState([]);
+  const [notebookId, setNotebookId] = useState("");
+  const [title, setTitle] = useState("Untitled lakehouse notebook");
+  const [description, setDescription] = useState("");
+  const [cells, setCells] = useState(initialCells);
+  const [version, setVersion] = useState(0);
+  const [permission, setPermission] = useState("OWNER");
+  const [shares, setShares] = useState([]);
+  const [revisions, setRevisions] = useState([]);
+  const [sharePermission, setSharePermission] = useState("READ");
+  const [shareLabel, setShareLabel] = useState("");
+  const [newShareToken, setNewShareToken] = useState("");
+  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => { localStorage.setItem("sbase.notebook.cells", JSON.stringify(cells)); }, [cells]);
-  function update(id, patch) { setCells(current => current.map(c => c.id === id ? { ...c, ...patch } : c)); }
+  const [notice, setNotice] = useState("");
+
+  function authHeaders(value = token) { return value ? { "X-Notebook-Token": value } : {}; }
+  function parseCells(value) {
+    try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : initialCells; }
+    catch { return initialCells; }
+  }
+  async function refreshList(value = token) {
+    if (!value) { setNotebooks([]); return; }
+    const list = await request("/notebooks", { headers: authHeaders(value) });
+    setNotebooks(list);
+  }
+  async function openNotebook(id, value = token) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const [data, history] = await Promise.all([
+        request("/notebooks/" + encodeURIComponent(id), { headers: authHeaders(value) }),
+        request("/notebooks/" + encodeURIComponent(id) + "/revisions", { headers: authHeaders(value) })
+      ]);
+      setNotebookId(data.id); setTitle(data.title); setDescription(data.description || "");
+      setCells(parseCells(data.cells)); setVersion(Number(data.version)); setPermission(data.actor || "SHARE");
+      setRevisions(history); setShares([]);
+      if (data.actor === "OWNER") {
+        try { setShares(await request("/notebooks/" + encodeURIComponent(id) + "/shares", { headers: authHeaders(value) })); } catch {}
+      }
+      setDirty(false);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function connectToken() {
+    const value = tokenInput.trim();
+    if (!value) return;
+    setBusy(true); setError("");
+    try {
+      await refreshList(value);
+      setToken(value); localStorage.setItem("sbase.notebook.token", value);
+      setNotice("Notebook access connected.");
+      setNotebookId("");
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function createNotebook() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await request("/notebooks", { method: "POST", body: JSON.stringify({ title: "Untitled lakehouse notebook", description: "", cells: initialCells.map(({id,type,source}) => ({id,type,source})) }) });
+      const access = result.accessToken;
+      setToken(access); setTokenInput(access); localStorage.setItem("sbase.notebook.token", access);
+      await refreshList(access);
+      const notebook = result.notebook;
+      setNotebookId(notebook.id); setTitle(notebook.title); setDescription(""); setCells(parseCells(notebook.cells));
+      setVersion(Number(notebook.version)); setPermission("OWNER"); setShares([]); setRevisions([]); setDirty(false);
+      setNotice("Notebook created. Your owner access token is stored in this browser; keep a backup before clearing browser data.");
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function saveNotebook() {
+    if (!notebookId || permission === "SHARE" && !token) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const payload = { expectedVersion: version, title, description, cells: cells.map(({id,type,source}) => ({id,type,source})), changeSummary: "Saved from Lakehouse Studio" };
+      const saved = await request("/notebooks/" + encodeURIComponent(notebookId), { method: "PUT", headers: authHeaders(), body: JSON.stringify(payload) });
+      setVersion(Number(saved.version)); setDirty(false); setNotice("Saved as version " + saved.version + ".");
+      await refreshList();
+      await openNotebook(notebookId);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function createShare() {
+    if (!notebookId) return;
+    setBusy(true); setError(""); setNewShareToken("");
+    try {
+      const share = await request("/notebooks/" + encodeURIComponent(notebookId) + "/shares", { method: "POST", headers: authHeaders(), body: JSON.stringify({ permission: sharePermission, label: shareLabel || null }) });
+      setNewShareToken(share.token); setShareLabel("");
+      setShares(await request("/notebooks/" + encodeURIComponent(notebookId) + "/shares", { headers: authHeaders() }));
+      setNotice("Share token created. It is shown only once; copy it and send it securely.");
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function revokeShare(shareId) {
+    if (!window.confirm("Revoke this notebook share?")) return;
+    try {
+      await request("/notebooks/" + encodeURIComponent(notebookId) + "/shares/" + encodeURIComponent(shareId) + "/revoke", { method: "POST", headers: authHeaders() });
+      setShares(await request("/notebooks/" + encodeURIComponent(notebookId) + "/shares", { headers: authHeaders() }));
+    } catch (e) { setError(e.message); }
+  }
+  async function deleteNotebook() {
+    if (!window.confirm("Delete this notebook? Its revisions and share links will also be removed.")) return;
+    try {
+      await request("/notebooks/" + encodeURIComponent(notebookId), { method: "DELETE", headers: authHeaders() });
+      setNotebookId(""); setCells(initialCells); setVersion(0); await refreshList(); setNotice("Notebook deleted.");
+    } catch (e) { setError(e.message); }
+  }
+  function update(id, patch) { setCells(current => current.map(cell => cell.id === id ? { ...cell, ...patch } : cell)); setDirty(true); }
   async function execute(cell) {
     if (cell.type !== "sql") return;
     setBusy(true); setError("");
@@ -147,21 +253,35 @@ function Notebook() {
       if (cell.type !== "sql") continue;
       try {
         const output = await request("/engines/spark/sql", { method: "POST", body: JSON.stringify({ sql: cell.source, limit: 1000 }) });
-        setCells(current => current.map(c => c.id === cell.id ? { ...c, output: { ...output, ranAt: new Date().toISOString() } } : c));
-      } catch (e) { setError("Cell " + cell.id + ": " + e.message); setCells(current => current.map(c => c.id === cell.id ? { ...c, output: { error: e.message } } : c)); break; }
+        setCells(current => current.map(item => item.id === cell.id ? { ...item, output: { ...output, ranAt: new Date().toISOString() } } : item));
+      } catch (e) { setError("Cell " + cell.id + ": " + e.message); break; }
     }
     setBusy(false);
   }
   function move(index, delta) {
     const target = index + delta; if (target < 0 || target >= cells.length) return;
-    const copy = [...cells]; [copy[index], copy[target]] = [copy[target], copy[index]]; setCells(copy);
+    const copy = [...cells]; [copy[index], copy[target]] = [copy[target], copy[index]]; setCells(copy); setDirty(true);
   }
-  function add(type) { setCells(current => [...current, { id: Date.now() + Math.random(), type, source: type === "sql" ? "SELECT * FROM sbase.default.sample_table LIMIT 100;" : "## Notes\nWrite analysis notes here.", output: null }]); }
+  function add(type) { setCells(current => [...current, { id: Date.now() + Math.random(), type, source: type === "sql" ? "SELECT * FROM sbase.default.sample_table LIMIT 100;" : "## Notes\nWrite analysis notes here.", output: null }]); setDirty(true); }
+
   return <div className="studio-panel notebook-panel">
-    <div className="studio-heading"><div><div className="section-title">NOTEBOOK</div><h2>Lakehouse notebook</h2><p>Compose reproducible SQL analysis with explanatory Markdown cells.</p></div><div className="notebook-actions"><button onClick={() => add("markdown")}>+ Markdown</button><button onClick={() => add("sql")}>+ SQL cell</button><button className="studio-primary" onClick={runAll} disabled={busy}>{busy ? "Running…" : "▶ Run all"}</button></div></div>
+    <div className="studio-heading"><div><div className="section-title">PERSISTENT NOTEBOOKS</div><h2>Collaborative lakehouse notebook</h2><p>PostgreSQL persistence · immutable revisions · revocable capability sharing · optimistic concurrency</p></div><div className="notebook-actions"><button onClick={createNotebook} disabled={busy}>+ New notebook</button></div></div>
+    <div className="notebook-connect">
+      <input value={tokenInput} onChange={e => setTokenInput(e.target.value)} placeholder="Paste owner or shared notebook access token"/>
+      <button onClick={connectToken} disabled={busy || !tokenInput.trim()}>Connect</button>
+      <span>{token ? "Access token connected" : "Create a notebook or connect with a shared token"}</span>
+    </div>
+    {notebooks.length > 0 && <div className="notebook-library"><b>MY / SHARED NOTEBOOKS</b>{notebooks.map(item => <button key={item.id} className={notebookId === item.id ? "active" : ""} onClick={() => openNotebook(item.id)}><span>{item.title}</span><small>v{item.version} · {item.permission} · {new Date(item.updatedAt).toLocaleString()}</small></button>)}</div>}
     {error && <div className="studio-error">{error}</div>}
-    {cells.map((cell, index) => <article className="notebook-cell" key={cell.id}><div className="cell-gutter"><b>{String(index + 1).padStart(2, "0")}</b><span>{cell.type.toUpperCase()}</span><button title="Move up" onClick={() => move(index, -1)} disabled={!index}>↑</button><button title="Move down" onClick={() => move(index, 1)} disabled={index === cells.length - 1}>↓</button><button title="Delete cell" onClick={() => setCells(current => current.filter(c => c.id !== cell.id))}>×</button></div><div className="cell-body"><textarea aria-label={cell.type + " cell"} spellCheck={cell.type === "markdown"} value={cell.source} onChange={e => update(cell.id, { source: e.target.value })}/>{cell.type === "sql" && <button className="cell-run" disabled={busy} onClick={() => execute(cell)}>▶ Run cell</button>}{cell.type === "markdown" && <pre className="markdown-preview">{cell.source}</pre>}{cell.output && (cell.output.error ? <div className="studio-error">{cell.output.error}</div> : <Results result={cell.output}/> )}</div></article>)}
-    <div className="notebook-footer">Draft autosaved in this browser · {cells.length} cells · SQL executes on the SBase Spark engine</div>
+    {notice && <div className="notebook-notice">{notice}</div>}
+    {notebookId ? <>
+      <div className="notebook-document-bar"><div><input className="notebook-title-input" value={title} onChange={e => {setTitle(e.target.value);setDirty(true);}}/><input className="notebook-description-input" value={description} onChange={e => {setDescription(e.target.value);setDirty(true);}} placeholder="Description (optional)"/></div><div className="notebook-actions"><span className="engine-pill">{permission} · v{version}</span><button className="studio-primary" onClick={saveNotebook} disabled={busy || !dirty || permission === "SHARE"}>{busy ? "Working…" : dirty ? "Save changes" : "Saved"}</button>{permission === "OWNER" && <button onClick={deleteNotebook}>Delete</button>}</div></div>
+      <div className="notebook-actions notebook-cell-actions"><button onClick={() => add("markdown")}>+ Markdown</button><button onClick={() => add("sql")}>+ SQL cell</button><button className="studio-primary" onClick={runAll} disabled={busy}>▶ Run all</button></div>
+      {cells.map((cell, index) => <article className="notebook-cell" key={cell.id}><div className="cell-gutter"><b>{String(index + 1).padStart(2, "0")}</b><span>{cell.type.toUpperCase()}</span><button title="Move up" onClick={() => move(index, -1)} disabled={!index || permission === "SHARE"}>↑</button><button title="Move down" onClick={() => move(index, 1)} disabled={index === cells.length - 1 || permission === "SHARE"}>↓</button><button title="Delete cell" disabled={permission === "SHARE"} onClick={() => {setCells(current => current.filter(item => item.id !== cell.id));setDirty(true);}}>×</button></div><div className="cell-body"><textarea aria-label={cell.type + " cell"} spellCheck={cell.type === "markdown"} readOnly={permission === "SHARE"} value={cell.source} onChange={e => update(cell.id, { source: e.target.value })}/>{cell.type === "sql" && <button className="cell-run" disabled={busy} onClick={() => execute(cell)}>▶ Run cell</button>}{cell.type === "markdown" && <pre className="markdown-preview">{cell.source}</pre>}{cell.output && (cell.output.error ? <div className="studio-error">{cell.output.error}</div> : <Results result={cell.output}/> )}</div></article>)}
+      {permission === "OWNER" && <div className="notebook-sharing"><div className="section-title">SHARE ACCESS</div><div className="share-create"><select value={sharePermission} onChange={e => setSharePermission(e.target.value)}><option value="READ">Read only</option><option value="WRITE">Can edit</option></select><input value={shareLabel} onChange={e => setShareLabel(e.target.value)} placeholder="Share label (e.g. Analytics team)"/><button onClick={createShare} disabled={busy}>Create share</button></div>{newShareToken && <div className="share-token"><code>{newShareToken}</code><button onClick={() => navigator.clipboard?.writeText(newShareToken)}>Copy token</button></div>}{shares.map(share => <div className="share-row" key={share.shareId}><span>{share.label || "Shared access"} · {share.permission} · {share.revokedAt ? "REVOKED" : "ACTIVE"}</span>{!share.revokedAt && <button onClick={() => revokeShare(share.shareId)}>Revoke</button>}</div>)}</div>}
+      <div className="notebook-revisions"><div className="section-title">VERSION HISTORY</div>{revisions.map(revision => <div key={revision.version}><span>v{revision.version} · {revision.summary || revision.title}</span><small>{new Date(revision.changedAt).toLocaleString()}</small></div>)}</div>
+    </> : <div className="empty-state">Create a notebook or connect with a token to open a notebook shared with you.</div>}
+    <div className="notebook-footer">Notebook content and revision history are stored in PostgreSQL. Access tokens are hashed at rest. SQL execution uses the SBase Spark engine. {dirty ? "Unsaved changes." : ""}</div>
   </div>;
 }
 
