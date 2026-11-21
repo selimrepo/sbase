@@ -71,7 +71,8 @@ function LakehouseBrowser() {
   const [tables, setTables] = useState([]);
   const [selected, setSelected] = useState("");
   const [preview, setPreview] = useState(null);
-  const [schema, setSchema] = useState(null);\n  const [snapshots, setSnapshots] = useState([]);
+  const [schema, setSchema] = useState(null);
+  const [snapshots, setSnapshots] = useState([]);
   const [error, setError] = useState("");
   const [newNamespace, setNewNamespace] = useState("");
   async function load() {
