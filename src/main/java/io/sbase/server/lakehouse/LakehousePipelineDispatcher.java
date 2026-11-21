@@ -111,10 +111,24 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         var principal=new LakehouseControlPlane.Principal(creator,job.workspaceId(),groups,null);
         control.requireNamespace(principal,"sbase",namespace,LakehouseControlPlane.Privilege.USE);
         String target="sbase."+namespace+"."+table;
-        if(spark.catalog().tableExists(target))
+        boolean targetExists=spark.catalog().tableExists(target);
+        if(targetExists)
             control.requireTable(principal,"sbase",namespace,table,LakehouseControlPlane.Privilege.INSERT);
-        else
+        else {
+            if("FLINK".equalsIgnoreCase(Objects.toString(definition.get("engine"),"SPARK")))
+                throw new IllegalStateException("Create the target Iceberg table before starting a Flink streaming pipeline");
             control.requireNamespace(principal,"sbase",namespace,LakehouseControlPlane.Privilege.CREATE);
+        }
+        if("FLINK".equalsIgnoreCase(Objects.toString(definition.get("engine"),"SPARK"))) {
+            Map<String,Object> config=definition.get("configuration") instanceof Map<?,?> m ? objectMap(m) : Map.of();
+            String sourceDdl=required(config,"sourceDdl");
+            String insertSql=required(config,"insertSql");
+            if(sourceDdl.toLowerCase(Locale.ROOT).contains("sbase_iceberg."))
+                throw new SecurityException("Flink source DDL cannot access the shared Iceberg catalog directly");
+            var refs=java.util.regex.Pattern.compile("(?i)\\\\b(?:FROM|JOIN)\\\\s+sbase_iceberg\\\\.([A-Za-z_][\\\\w]*)\\\\.([A-Za-z_][\\\\w]*)").matcher(insertSql);
+            while(refs.find())
+                control.requireTable(principal,"sbase",refs.group(1),refs.group(2),LakehouseControlPlane.Privilege.SELECT);
+        }
     }
 
     @SuppressWarnings("unchecked")
