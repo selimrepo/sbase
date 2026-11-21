@@ -25,7 +25,7 @@ It writes DataFrames into Iceberg tables through Spark's DataFrameWriterV2. Pipe
 
 `FlinkIcebergStreamingJob` enables EXACTLY_ONCE checkpoints and creates an Iceberg JDBC catalog backed by S3FileIO. It accepts an INSERT INTO statement to a registered Iceberg table. The Iceberg Flink runtime and the selected source connector (Kafka, CDC, etc.) must be present on the Flink cluster classpath. Checkpoint storage must be durable and shared by all JobManagers/TaskManagers. Production deployments must also configure checkpoint retention, restart strategy, and monitor failed/expired checkpoints.
 
-The CDC offset repository uses transactional compare-and-set generations so concurrent consumers cannot overwrite a newer committed offset. Dead-letter records are claimed with `FOR UPDATE SKIP LOCKED`, allowing multiple replay workers without double-claiming a record.
+The CDC offset repository uses transactional compare-and-set generations so concurrent consumers cannot overwrite a newer committed offset. Dead-letter records are claimed with `FOR UPDATE SKIP LOCKED` and a five-minute lease token. Expired claims can be recovered; stale workers are fenced from resolving a record after a newer worker has reclaimed it. Claims are capped at ten attempts. The Lakehouse Studio provides manual inspection, claim, resolve and requeue controls; it does not yet re-run the original source connector automatically.
 
 ## Schema evolution
 
@@ -43,10 +43,13 @@ V15/V16 store maintenance policies, run history, due times and leases. A distrib
 
 ## Current integration boundary
 
-The service classes and database contracts are now present, but this is not yet a claim that every operation is wired into public HTTP routes or that production multi-tenant isolation has passed end-to-end tests. Before enabling a public endpoint, the next integration work is:
-1. Construct the control plane from the server's existing authenticated identity and DataSource.
-2. Put mandatory authorization gates around every Spark, Flink and Iceberg catalog entry point.
-3. Register the Spark listener with authenticated workspace/job context.
-4. Persist ingestion pipeline submissions and dispatch them to the Spark/Flink job managers.
-5. Run the Flink connector integration test with a real Kafka source, checkpoint storage and Iceberg JDBC catalog.
-6. Add cross-workspace denial, expired/revoked grant, CDC race/replay, schema evolution and maintenance lease tests.
+The authenticated API is mounted from `Main.scala` and now exposes namespace/table catalog operations, grant management, lineage, schema evolution, snapshots, maintenance policies/history, ingestion pipelines/runs, CDC offsets and dead-letter recovery. The server starts the distributed pipeline dispatcher and maintenance scheduler. The Spark lineage listener is registered at startup and reads the workspace/principal from the request or job execution context.
+
+The React Lakehouse Studio now includes Catalog, Pipeline, Governance/Lineage, Maintenance and Dead-letter workspaces. Flink Kafka connector, JSON, Iceberg runtime, AWS bundle, PostgreSQL JDBC and S3 filesystem artifacts are prebundled into the Flink image with checksum verification.
+
+Remaining production-hardening work:
+1. Replace the best-effort Spark plan-string target extraction with Spark-version-specific logical-plan visitors and integration fixtures; lineage remains table-level, not column-level.
+2. Add automated source replay that reprocesses claimed dead-letter payloads through the original connector/transform pipeline. The current UI supports manual review, resolve and requeue only.
+3. Run the full end-to-end tenant-isolation suite across every route, Spark/Flink execution path, scheduler and connector, including concurrent grant revocation and job lease expiry.
+4. Run a real Kafka → Flink checkpoint → Iceberg commit test against the full Compose stack; CI currently validates compilation and PostgreSQL behavior but does not prove cluster-level exactly-once recovery.
+5. Add schema-compatibility policy enforcement and automatic schema-change audit entries to every ingestion/evolution path.
