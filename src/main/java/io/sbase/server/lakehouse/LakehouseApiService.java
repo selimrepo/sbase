@@ -358,8 +358,30 @@ public final class LakehouseApiService implements AutoCloseable {
         String secretRef=Objects.toString(request.get("secretRef"),"");
         if("JDBC".equals(sourceType) && secretRef.isBlank()) throw new IllegalArgumentException("JDBC source requires secretRef");
         Map<String,Object> config=request.get("configuration") instanceof Map<?,?> m ? stringMap(m) : Map.of();
-        if("FLINK".equals(engine) && Objects.toString(config.get("flinkJarId"),"").isBlank())
-            throw new IllegalArgumentException("Flink streaming requires configuration.flinkJarId");
+        if("FLINK".equals(engine)) {
+            if(!"KAFKA".equals(sourceType))
+                throw new IllegalArgumentException("Flink streaming currently accepts Kafka as its managed source");
+            if(Objects.toString(config.get("flinkJarId"),"").isBlank())
+                throw new IllegalArgumentException("Flink streaming requires configuration.flinkJarId");
+            String sourceDdl=Objects.toString(config.get("sourceDdl"),"").trim();
+            String insertSql=Objects.toString(config.get("insertSql"),"").trim();
+            if(sourceDdl.length()>20000 || insertSql.length()>20000 ||
+               sourceDdl.contains(";") || insertSql.contains(";") ||
+               sourceDdl.contains("--") || insertSql.contains("--") ||
+               sourceDdl.contains("/*") || insertSql.contains("/*"))
+                throw new IllegalArgumentException("Flink SQL must be a single bounded statement without comments or statement separators");
+            if(!sourceDdl.matches("(?is)^CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?[A-Za-z_][A-Za-z0-9_]*\\s*\\(.*\\)\\s*WITH\\s*\\(.*\\)$") ||
+               !sourceDdl.matches("(?is).*['\\\"]connector['\\\"]\\s*=\\s*['\\\"]kafka['\\\"].*"))
+                throw new IllegalArgumentException("Flink source DDL must define one unqualified Kafka source table");
+            if(!insertSql.matches("(?is)^INSERT\\s+INTO\\s+sbase_iceberg\\."+java.util.regex.Pattern.quote(namespace)+"\\."+java.util.regex.Pattern.quote(table)+"(?:\\s|\\().*"))
+                throw new IllegalArgumentException("Flink INSERT must target this pipeline's exact Iceberg table");
+            String sensitive="(?i).*(password|secret|access[._-]?key|token|credential|sasl\\.jaas\\.config).*";
+            if(config.keySet().stream().anyMatch(k->k.matches(sensitive)) ||
+               sourceDdl.matches(sensitive) || insertSql.matches(sensitive))
+                throw new IllegalArgumentException("Do not embed credentials in Flink SQL or pipeline configuration; use cluster secret configuration");
+            if(!Objects.toString(request.getOrDefault("checkpointUri","")).matches("(?i)^s3a?://.+"))
+                throw new IllegalArgumentException("Flink requires a durable s3:// or s3a:// checkpointUri");
+        }
         UUID sourceId=UUID.randomUUID(),pipelineId=UUID.randomUUID();
         Map<String,Object> definition=new LinkedHashMap<>();
         definition.put("sourceType",sourceType);definition.put("source",source);definition.put("secretRef",secretRef);
