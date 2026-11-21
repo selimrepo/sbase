@@ -21,7 +21,7 @@ public final class LakehouseIngestionService {
         if(!uri.startsWith("s3://") && !uri.startsWith("s3a://")) throw new IllegalArgumentException("Only S3-compatible object URIs are accepted");
         String safeFormat=allow(format,"parquet","orc","json","csv","avro");
         var reader=spark.read().format(safeFormat);
-        options.forEach((k,v)->reader.option(k,v));
+        for(var option:options.entrySet()) reader=reader.option(option.getKey(),option.getValue());
         return reader.load(uri);
     }
 
@@ -46,7 +46,7 @@ public final class LakehouseIngestionService {
         return reader.load();
     }
 
-    public void appendIceberg(Dataset<Row> data, String catalog, String namespace, String table) {
+    public void appendIceberg(Dataset<Row> data, String catalog, String namespace, String table) throws Exception {
         String identifier=identifier(catalog,namespace,table);
         if(spark.catalog().tableExists(identifier)) data.writeTo(identifier).append();
         else data.writeTo(identifier).using("iceberg").create();
