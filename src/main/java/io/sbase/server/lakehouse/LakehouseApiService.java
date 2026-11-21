@@ -649,19 +649,19 @@ public final class LakehouseApiService implements AutoCloseable {
             try { item.put("offset",JSON.readTree(d.offsetJson()));item.put("payload",JSON.readTree(d.payloadJson())); }
             catch(Exception e) { throw failure("Dead-letter payload is invalid JSON",e); }
             item.put("recordKey",d.recordKey());item.put("errorClass",d.errorClass());item.put("errorMessage",d.errorMessage());
-            item.put("attempts",d.attempts());out.add(item);
+            item.put("attempts",d.attempts());item.put("leaseToken",d.leaseToken().toString());out.add(item);
         }
         return out;
     }
 
-    public Map<String,Object> finishDeadLetter(Session s,UUID deadLetterId,boolean resolved) {
+    public Map<String,Object> finishDeadLetter(Session s,UUID deadLetterId,UUID leaseToken,boolean resolved) {
         try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
                 "SELECT 1 FROM lakehouse_dead_letter WHERE id=? AND workspace_id=?")) {
             p.setObject(1,deadLetterId);p.setObject(2,s.principal().workspaceId());
             try(ResultSet r=p.executeQuery()) { if(!r.next()) throw new SecurityException("Dead-letter record is outside the active workspace"); }
         } catch(SecurityException e) { throw e; }
         catch(Exception e) { throw failure("Unable to authorize dead-letter update",e); }
-        control.finishDeadLetter(deadLetterId,resolved);
+        control.finishDeadLetter(deadLetterId,leaseToken,resolved);
         return Map.of("id",deadLetterId.toString(),"status",resolved?"RESOLVED":"PENDING");
     }
 
