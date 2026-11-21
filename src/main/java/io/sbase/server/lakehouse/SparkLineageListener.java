@@ -48,11 +48,15 @@ public final class SparkLineageListener implements QueryExecutionListener {
         if(workspaceId==null) return;
         String actor=Objects.toString(principal.get(),"spark");
         for(String relation:relations) {
-            TableId source=TableId.parse(relation);
-            if(source.equals(target)) continue;
-            String details="{\"engine\":\"SPARK\",\"function\":\""+escape(functionName)+"\",\"durationNs\":"+durationNs+"}";
-            controlPlane.recordLineage(workspaceId,source.catalog,source.namespace,source.table,
-                target.catalog,target.namespace,target.table,"DERIVED_FROM",null,null,actor,details);
+            try {
+                TableId source=TableId.parse(relation);
+                if(source.equals(target)) continue;
+                String details="{\"engine\":\"SPARK\",\"function\":\""+escape(functionName)+"\",\"durationNs\":"+durationNs+"}";
+                controlPlane.recordLineage(workspaceId,source.catalog,source.namespace,source.table,
+                    target.catalog,target.namespace,target.table,"DERIVED_FROM",null,null,actor,details);
+            } catch(RuntimeException ignored) {
+                // Best-effort lineage must never fail a successful query.
+            }
         }
     }
 
