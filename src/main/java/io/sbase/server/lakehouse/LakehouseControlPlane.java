@@ -273,6 +273,14 @@ public final class LakehouseControlPlane {
             """;
         try (Connection c=dataSource.getConnection()) {
             c.setAutoCommit(false);
+            try (PreparedStatement expired=c.prepareStatement("""
+                    UPDATE lakehouse_dead_letter
+                    SET status='DISCARDED',lease_token=NULL,lease_until=NULL
+                    WHERE workspace_id=? AND ingestion_run_id=? AND status='REPLAYING'
+                      AND lease_until<now() AND attempts>=10
+                    """)) {
+                expired.setObject(1,workspaceId);expired.setObject(2,runId);expired.executeUpdate();
+            }
             try (PreparedStatement s=c.prepareStatement(sql)) {
                 s.setObject(1,workspaceId); s.setObject(2,runId); s.setInt(3,limit);
                 List<DeadLetter> result=new ArrayList<>();
@@ -285,12 +293,21 @@ public final class LakehouseControlPlane {
         } catch(SQLException e) { throw new IllegalStateException("Unable to claim dead-letter batch",e); }
     }
 
-    public void finishDeadLetter(UUID id, UUID leaseToken, boolean resolved) {
+    public String finishDeadLetter(UUID id, UUID leaseToken, boolean resolved) {
         Objects.requireNonNull(leaseToken,"leaseToken");
-        String sql = "UPDATE lakehouse_dead_letter SET status=?,resolved_at=CASE WHEN ? THEN now() ELSE NULL END,lease_token=NULL,lease_until=NULL WHERE id=? AND status='REPLAYING' AND lease_token=? AND lease_until>now()";
+        String sql = """
+            UPDATE lakehouse_dead_letter
+            SET status=CASE WHEN ? THEN 'RESOLVED' WHEN attempts>=10 THEN 'DISCARDED' ELSE 'PENDING' END,
+                resolved_at=CASE WHEN ? THEN now() ELSE NULL END,lease_token=NULL,lease_until=NULL
+            WHERE id=? AND status='REPLAYING' AND lease_token=? AND lease_until>now()
+            RETURNING status
+            """;
         try(Connection c=dataSource.getConnection();PreparedStatement s=c.prepareStatement(sql)) {
-            s.setString(1,resolved?"RESOLVED":"PENDING"); s.setBoolean(2,resolved); s.setObject(3,id); s.setObject(4,leaseToken);
-            if(s.executeUpdate()!=1) throw new IllegalStateException("Dead-letter replay lease expired or was superseded");
+            s.setBoolean(1,resolved);s.setBoolean(2,resolved);s.setObject(3,id);s.setObject(4,leaseToken);
+            try(ResultSet r=s.executeQuery()) {
+                if(!r.next()) throw new IllegalStateException("Dead-letter replay lease expired or was superseded");
+                return r.getString(1);
+            }
         } catch(SQLException e) { throw new IllegalStateException("Unable to finish dead-letter replay",e); }
     }
 }
