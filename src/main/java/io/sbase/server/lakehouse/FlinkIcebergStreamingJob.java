@@ -38,9 +38,9 @@ public final class FlinkIcebergStreamingJob {
 
         StreamExecutionEnvironment env=StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(config.checkpointIntervalMs(), CheckpointingMode.EXACTLY_ONCE);
-        env.getCheckpointConfig().setCheckpointStorage(config.checkpointUri());
+        env.getCheckpointConfig().setCheckpointStorage(new FileSystemCheckpointStorage(config.checkpointUri()));
         env.getCheckpointConfig().setCheckpointTimeout(config.checkpointTimeoutMs());
-        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(Duration.ofMillis(config.checkpointIntervalMs()/2));
+        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(config.checkpointIntervalMs()/2);
         env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
         env.getCheckpointConfig().setTolerableCheckpointFailureNumber(3);
 
