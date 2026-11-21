@@ -44,7 +44,8 @@ object LakehouseApiRoutes extends Directives {
         optionalHeaderValueByName("Authorization") { auth =>
           get { run(auth)(s => service.get.namespaces(s)) } ~
           post {
-            entity(as[JsObject]) { body =>
+            entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
               val name=body.fields.get("namespace").map(_.convertTo[String]).getOrElse("")
               run(auth)(s => service.get.createNamespace(s,name))
             }
@@ -68,7 +69,8 @@ object LakehouseApiRoutes extends Directives {
       path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "write") { (namespace,table) =>
         optionalHeaderValueByName("Authorization") { auth =>
           post {
-            entity(as[JsObject]) { body =>
+            entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
               val rows=mapper.readValue(body.fields.getOrElse("rows",JsArray()).compactPrint,
                 new TypeReference[java.util.List[java.util.Map[String,Object]]]() {})
               val converted=rows.asScala.map(v=>v.asScala.toMap.asJava).asJava
@@ -82,7 +84,8 @@ object LakehouseApiRoutes extends Directives {
       } ~
       path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "schema" / "evolve") { (namespace,table) =>
         optionalHeaderValueByName("Authorization") { auth =>
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
             run(auth)(s => service.get.evolveSchema(s,namespace,table,request))
           }}
@@ -100,7 +103,8 @@ object LakehouseApiRoutes extends Directives {
       path("lakehouse" / "namespaces" / Segment / "maintenance") { namespace =>
         optionalHeaderValueByName("Authorization") { auth =>
           get { run(auth)(s => service.get.maintenancePolicies(s,namespace)) } ~
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val table=body.fields.get("table").map(_.convertTo[String]).getOrElse("")
             val operation=body.fields.get("operation").map(_.convertTo[String]).getOrElse("COMPACT")
             val interval=body.fields.get("intervalSeconds").map(_.convertTo[Int]).getOrElse(86400)
@@ -113,7 +117,8 @@ object LakehouseApiRoutes extends Directives {
       path("lakehouse" / "namespaces" / Segment / "grants") { namespace =>
         optionalHeaderValueByName("Authorization") { auth =>
           get { run(auth)(s => service.get.grants(s,namespace)) } ~
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
             run(auth)(s => service.get.grantNamespace(s,namespace,request))
           }}
@@ -121,7 +126,8 @@ object LakehouseApiRoutes extends Directives {
       } ~
       path("lakehouse" / "namespaces" / Segment / "grants" / "revoke") { namespace =>
         optionalHeaderValueByName("Authorization") { auth =>
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
             run(auth)(s => service.get.revokeGrant(s,namespace,null,request))
           }}
@@ -129,7 +135,8 @@ object LakehouseApiRoutes extends Directives {
       } ~
       path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "grants") { (namespace,table) =>
         optionalHeaderValueByName("Authorization") { auth =>
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
             run(auth)(s => service.get.grantTable(s,namespace,table,request))
           }}
@@ -137,7 +144,8 @@ object LakehouseApiRoutes extends Directives {
       } ~
       path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "grants" / "revoke") { (namespace,table) =>
         optionalHeaderValueByName("Authorization") { auth =>
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
             run(auth)(s => service.get.revokeGrant(s,namespace,table,request))
           }}
@@ -159,7 +167,8 @@ object LakehouseApiRoutes extends Directives {
       } ~
       path("lakehouse" / "runs" / JavaUUID / "dead-letter" / "claim") { runId =>
         optionalHeaderValueByName("Authorization") { auth =>
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val limit=body.fields.get("limit").map(_.convertTo[Int]).getOrElse(100)
             run(auth)(s => service.get.claimDeadLetters(s,runId,limit))
           }}
@@ -167,7 +176,8 @@ object LakehouseApiRoutes extends Directives {
       } ~
       path("lakehouse" / "dead-letter" / JavaUUID / "finish") { deadLetterId =>
         optionalHeaderValueByName("Authorization") { auth =>
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val resolved=body.fields.get("resolved").exists(_.convertTo[Boolean])
             run(auth)(s => service.get.finishDeadLetter(s,deadLetterId,resolved))
           }}
@@ -175,7 +185,8 @@ object LakehouseApiRoutes extends Directives {
       } ~
       path("lakehouse" / "sources" / JavaUUID / "cdc" / "offsets") { sourceId =>
         optionalHeaderValueByName("Authorization") { auth =>
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val stream=body.fields.get("stream").map(_.convertTo[String]).getOrElse("")
             val partition=body.fields.get("partition").map(_.convertTo[String]).getOrElse("")
             val offset=body.fields.get("offset").map(_.compactPrint).getOrElse("{}")
@@ -187,7 +198,8 @@ object LakehouseApiRoutes extends Directives {
       path("lakehouse" / "pipelines") {
         optionalHeaderValueByName("Authorization") { auth =>
           get { run(auth)(s => service.get.pipelines(s)) } ~
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
             run(auth)(s => service.get.createPipeline(s,request))
           }}
@@ -203,7 +215,8 @@ object LakehouseApiRoutes extends Directives {
           get { parameter("limit".as[Int].withDefault(50)) { limit =>
             run(auth)(s => service.get.pipelineRuns(s,pipelineId,limit))
           }} ~
-          post { entity(as[JsObject]) { body =>
+          post { entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
             val key=body.fields.get("idempotencyKey").map(_.convertTo[String]).getOrElse("")
             run(auth)(s => service.get.runPipeline(s,pipelineId,key))
           }}
@@ -212,7 +225,8 @@ object LakehouseApiRoutes extends Directives {
       path("engines" / "spark" / "sql") {
         optionalHeaderValueByName("Authorization") { auth =>
           post {
-            entity(as[JsObject]) { body =>
+            entity(as[String]) { raw =>
+              val body=raw.parseJson.asJsObject
               val sql=body.fields.get("sql").map(_.convertTo[String]).getOrElse("")
               val limit=body.fields.get("limit").map(_.convertTo[Int]).getOrElse(1000)
               run(auth)(s => service.get.query(s,sql,limit))
