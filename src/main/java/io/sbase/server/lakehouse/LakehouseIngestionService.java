@@ -32,7 +32,7 @@ public final class LakehouseIngestionService {
             .option("dbtable",tableOrQuery).option("user",user)
             .option("password",secrets.resolve(secretRef));
         if(driver!=null && !driver.isBlank()) reader=reader.option("driver",driver);
-        options.forEach((k,v)->reader.option(k,v));
+        for(var option:options.entrySet()) reader=reader.option(option.getKey(),option.getValue());
         return reader.load();
     }
 
@@ -42,7 +42,7 @@ public final class LakehouseIngestionService {
             throw new IllegalArgumentException("Kafka bootstrap servers and topic are required");
         var reader=spark.read().format("kafka").option("kafka.bootstrap.servers",bootstrapServers)
             .option("subscribe",topic).option("startingOffsets",startingOffsets==null?"earliest":startingOffsets);
-        options.forEach((k,v)->reader.option(k,v));
+        for(var option:options.entrySet()) reader=reader.option(option.getKey(),option.getValue());
         return reader.load();
     }
 
