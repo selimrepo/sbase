@@ -484,6 +484,72 @@ function MaintenanceStudio() {
   </div>;
 }
 
+function DeadLetterStudio() {
+  const [runId,setRunId]=useState("");
+  const [records,setRecords]=useState([]);
+  const [claimed,setClaimed]=useState([]);
+  const [limit,setLimit]=useState(100);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [notice,setNotice]=useState("");
+  async function refresh() {
+    if(!runId.trim()) return;
+    setBusy(true);setError("");
+    try {
+      const data=await request("/lakehouse/runs/"+encodeURIComponent(runId.trim())+"/dead-letter?limit=1000");
+      setRecords(Array.isArray(data)?data:[]);
+    } catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+  async function claim() {
+    if(!runId.trim()) return;
+    setBusy(true);setError("");setNotice("");
+    try {
+      const data=await request("/lakehouse/runs/"+encodeURIComponent(runId.trim())+"/dead-letter/claim",{
+        method:"POST",body:JSON.stringify({limit:Number(limit)})
+      });
+      setClaimed(Array.isArray(data)?data:[]);
+      setNotice("Claimed "+(Array.isArray(data)?data.length:0)+" records. Each claim expires after five minutes.");
+      await refresh();
+    } catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+  async function finish(item,resolved) {
+    setBusy(true);setError("");setNotice("");
+    try {
+      await request("/lakehouse/dead-letter/"+encodeURIComponent(item.id)+"/finish",{
+        method:"POST",body:JSON.stringify({resolved,leaseToken:item.leaseToken})
+      });
+      setClaimed(current=>current.filter(x=>x.id!==item.id));
+      setNotice(resolved?"Record marked resolved.":"Record returned to pending for another replay attempt.");
+      await refresh();
+    } catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+  return <div className="studio-panel">
+    <div className="studio-heading"><div><div className="section-title">INGESTION RECOVERY</div><h2>Dead-letter operations</h2><p>Inspect failed records, claim bounded replay batches with expiring fencing tokens, then resolve or safely requeue each record.</p></div><button onClick={refresh} disabled={busy||!runId.trim()}>↻ Refresh</button></div>
+    <div className="pipeline-form">
+      <div className="pipeline-form-grid">
+        <label>Ingestion run ID<input value={runId} onChange={e=>setRunId(e.target.value)} placeholder="UUID from pipeline run history"/></label>
+        <label>Claim batch size<input type="number" min="1" max="1000" value={limit} onChange={e=>setLimit(e.target.value)}/></label>
+      </div>
+      <div className="pipeline-form-actions"><button onClick={refresh} disabled={busy||!runId.trim()}>Load records</button><button className="studio-primary" onClick={claim} disabled={busy||!runId.trim()||Number(limit)<1||Number(limit)>1000}>Claim replay batch</button><span>Claims expire after five minutes; stale workers cannot finish a newer claim. Maximum ten attempts per record.</span></div>
+    </div>
+    {error&&<div className="studio-error">{error}</div>}{notice&&<div className="notebook-notice">{notice}</div>}
+    <section className="pipeline-list"><div className="section-title">CLAIMED RECORDS · {claimed.length}</div>
+      {!claimed.length?<div className="empty-state">No records currently claimed by this session.</div>:claimed.map(item=><article className="pipeline-item" key={item.id}>
+        <div><b>{item.recordKey||item.id} · attempt {item.attempts}</b><small>{item.errorClass}: {item.errorMessage||"No error message"} · partition {item.partition||"—"} · offset {JSON.stringify(item.offset)}</small><pre className="notebook-output">{JSON.stringify(item.payload,null,2)}</pre></div>
+        <div className="pipeline-actions"><button onClick={()=>finish(item,false)} disabled={busy}>Requeue</button><button className="studio-primary" onClick={()=>finish(item,true)} disabled={busy}>Mark resolved</button></div>
+      </article>)}
+    </section>
+    <section className="pipeline-list"><div className="section-title">DEAD-LETTER RECORDS · {records.length}</div>
+      {!records.length?<div className="empty-state">No dead-letter records found for this run.</div>:records.map(item=><article className="pipeline-item" key={item.id}>
+        <div><b>{item.recordKey||item.id} · {item.status} · {item.attempts} attempts</b><small>{item.errorClass}: {item.errorMessage||"No error message"} · partition {item.partition||"—"}</small></div>
+      </article>)}
+    </section>
+  </div>;
+}
+
 function GovernanceStudio() {
   const [namespace,setNamespace]=useState("default");
   const [table,setTable]=useState("");
@@ -564,8 +630,8 @@ export default function LakehouseStudio() {
     else { sessionStorage.removeItem("sbase.lakehouse.jwt"); setAuthNotice("Lakehouse session cleared."); }
   }
   return <section className="lakehouse-studio">
-    <nav className="studio-nav"><div className="studio-brand"><span>◈</span> LAKEHOUSE STUDIO</div>{[["lakehouse","Catalog"],["pipelines","Pipelines"],["maintenance","Maintenance"],["governance","Governance"],["sql","SQL Workspace"],["notebook","Notebook"]].map(([id, label]) => <button key={id} className={view === id ? "selected" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
+    <nav className="studio-nav"><div className="studio-brand"><span>◈</span> LAKEHOUSE STUDIO</div>{[["lakehouse","Catalog"],["pipelines","Pipelines"],["deadletter","Dead letter"],["maintenance","Maintenance"],["governance","Governance"],["sql","SQL Workspace"],["notebook","Notebook"]].map(([id, label]) => <button key={id} className={view === id ? "selected" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
     <div className="lakehouse-auth"><label htmlFor="lakehouse-jwt">Workspace access token (JWT)</label><input id="lakehouse-jwt" type="password" autoComplete="off" value={jwt} onChange={e => setJwt(e.target.value)} placeholder="Paste signed JWT with sub and workspace_id claims"/><button onClick={saveJwt}>{jwt.trim() ? "Save session" : "Clear session"}</button><span>{authNotice || (sessionStorage.getItem("sbase.lakehouse.jwt") ? "Authenticated session configured" : "Authentication required")}</span></div>
-    {view === "lakehouse" ? <LakehouseBrowser/> : view === "pipelines" ? <PipelineStudio/> : view === "maintenance" ? <MaintenanceStudio/> : view === "governance" ? <GovernanceStudio/> : view === "sql" ? <SqlWorkspace/> : <Notebook/>}
+    {view === "lakehouse" ? <LakehouseBrowser/> : view === "pipelines" ? <PipelineStudio/> : view === "deadletter" ? <DeadLetterStudio/> : view === "maintenance" ? <MaintenanceStudio/> : view === "governance" ? <GovernanceStudio/> : view === "sql" ? <SqlWorkspace/> : <Notebook/>}
   </section>;
 }
