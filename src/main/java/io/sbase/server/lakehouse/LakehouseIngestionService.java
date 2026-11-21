@@ -79,12 +79,17 @@ public final class LakehouseIngestionService {
         return validatedIdentifier(catalog)+"."+validatedIdentifier(namespace)+"."+validatedIdentifier(table);
     }
     private static String validatedIdentifier(String value) {
-        if(value==null || !value.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Unsafe SQL identifier: "+value);
-        return "`"+value+"`";
+        if(value==null) throw new IllegalArgumentException("Unsafe SQL identifier");
+        String[] parts=value.split("\\\\.",-1);
+        for(String part:parts) if(!part.matches("[A-Za-z_][A-Za-z0-9_]*"))
+            throw new IllegalArgumentException("Unsafe SQL identifier: "+value);
+        return java.util.Arrays.stream(parts).map(part->"`"+part+"`").collect(java.util.stream.Collectors.joining("."));
     }
     private static String validatedDdl(String value) {
-        if(value==null || value.isBlank() || value.contains(";") || value.contains("--") || value.contains("/*"))
-            throw new IllegalArgumentException("Invalid column DDL");
+        String type="(?:STRING|INT|INTEGER|BIGINT|FLOAT|DOUBLE|BOOLEAN|DATE|TIMESTAMP|DECIMAL\\\\(\\\\d{1,2},\\\\d{1,2}\\\\))";
+        String column="[A-Za-z_][A-Za-z0-9_]*\\\\s+"+type;
+        if(value==null || !value.matches("\\\\s*"+column+"(?:\\\\s*,\\\\s*"+column+")*\\\\s*"))
+            throw new IllegalArgumentException("Column DDL must be a comma-separated list of safe column names and supported types");
         return value;
     }
     private static String allow(String value,String... allowed) {
