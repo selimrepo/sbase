@@ -150,23 +150,31 @@ public final class LakehouseApiService implements AutoCloseable {
         if(!normalized.matches("(?is)^(SELECT|WITH)\\b.*") ||
            normalized.matches("(?is).*\\b(INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|TRUNCATE|CALL|SET|USE|CACHE|UNCACHE)\\b.*"))
             throw new SecurityException("SQL workspace accepts read-only SELECT/WITH statements only");
-        var fromClause=java.util.regex.Pattern.compile("(?is)\\bFROM\\b(.*?)(?=\\bWHERE\\b|\\bGROUP\\s+BY\\b|\\bHAVING\\b|\\bORDER\\s+BY\\b|\\bLIMIT\\b|\\bQUALIFY\\b|\\bUNION\\b|\\bEXCEPT\\b|\\bINTERSECT\\b|$)").matcher(normalized);
+        String authorizationSql=normalized.replaceAll("(?s)/\\*.*?\\*/"," ")
+                .replaceAll("(?m)--.*$"," ").replaceAll("'(?:''|[^'])*'","''");
+        var relationTokens=java.util.regex.Pattern.compile("(?i)\\b(?:FROM|JOIN)\\b").matcher(authorizationSql);
+        int relationCount=0;while(relationTokens.find()) relationCount++;
+        var fromClause=java.util.regex.Pattern.compile("(?is)\\bFROM\\b(.*?)(?=\\bWHERE\\b|\\bGROUP\\s+BY\\b|\\bHAVING\\b|\\bORDER\\s+BY\\b|\\bLIMIT\\b|\\bQUALIFY\\b|\\bUNION\\b|\\bEXCEPT\\b|\\bINTERSECT\\b|$)").matcher(authorizationSql);
         while(fromClause.find()) {
             if(fromClause.group(1).contains(","))
                 throw new SecurityException("Comma-separated FROM relations are not accepted; use explicit JOIN clauses");
         }
         Set<String> ctes=new HashSet<>();
-        var cteMatcher=java.util.regex.Pattern.compile("(?i)(?:WITH|,)\\s*([A-Za-z_][\\w]*)\\s+AS\\s*\\(").matcher(normalized);
+        var cteMatcher=java.util.regex.Pattern.compile("(?i)(?:WITH|,)\\s*([A-Za-z_][\\w]*)\\s+AS\\s*\\(").matcher(authorizationSql);
         while(cteMatcher.find()) ctes.add(cteMatcher.group(1).toLowerCase(Locale.ROOT));
-        var matcher=java.util.regex.Pattern.compile("(?i)\\b(?:FROM|JOIN)\\s+([A-Za-z_][\\w.]*)").matcher(normalized);
+        var matcher=java.util.regex.Pattern.compile("(?i)\\b(?:FROM|JOIN)\\s+([A-Za-z_][\\w.]*)").matcher(authorizationSql);
+        int matchedRelations=0;
         while(matcher.find()) {
+            matchedRelations++;
             String[] id=matcher.group(1).split("\\.");
             if(id.length==1 && ctes.contains(id[0].toLowerCase(Locale.ROOT))) continue;
             if(id.length!=3 || !"sbase".equalsIgnoreCase(id[0]))
                 throw new SecurityException("Every table reference must be a workspace table (sbase.namespace.table) or a declared CTE");
             control.requireTable(s.principal(),"sbase",id[1],id[2],LakehouseControlPlane.Privilege.SELECT);
         }
-        if(normalized.matches("(?is).*\\b(FROM|JOIN)\\s*\\(.*"))
+        if(matchedRelations!=relationCount)
+            throw new SecurityException("Every FROM/JOIN relation must use an unquoted, fully qualified workspace table or a declared CTE");
+        if(authorizationSql.matches("(?is).*\\b(FROM|JOIN)\\s*\\(.*"))
             throw new SecurityException("Inline subqueries in FROM/JOIN are not accepted; use a named CTE");
         int limit=Math.max(1,Math.min(requestedLimit,1000));
         try(LakehouseExecutionContext context=LakehouseExecutionContext.enter(s.principal().workspaceId(),s.subject())) {
