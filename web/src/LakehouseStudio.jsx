@@ -6,10 +6,11 @@ function readLocalJson(key, fallback) {
 }
 const API = "/api/v1";
 
-async function request(path, options) {
+async function request(path, options = {}) {
+  const bearer = sessionStorage.getItem("sbase.lakehouse.jwt") || "";
   const response = await fetch(API + path, {
-    headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
-    ...options
+    ...options,
+    headers: { "Content-Type": "application/json", ...(bearer ? { Authorization: "Bearer " + bearer } : {}), ...(options?.headers || {}) }
   });
   const body = await response.text();
   let data;
@@ -287,8 +288,15 @@ function Notebook() {
 
 export default function LakehouseStudio() {
   const [view, setView] = useState("lakehouse");
+  const [jwt, setJwt] = useState(() => sessionStorage.getItem("sbase.lakehouse.jwt") || "");
+  const [authNotice, setAuthNotice] = useState("");
+  function saveJwt() {
+    if (jwt.trim()) { sessionStorage.setItem("sbase.lakehouse.jwt", jwt.trim()); setJwt(jwt.trim()); setAuthNotice("Session token saved in this browser tab."); }
+    else { sessionStorage.removeItem("sbase.lakehouse.jwt"); setAuthNotice("Lakehouse session cleared."); }
+  }
   return <section className="lakehouse-studio">
     <nav className="studio-nav"><div className="studio-brand"><span>◈</span> LAKEHOUSE STUDIO</div>{[["lakehouse","Catalog"],["sql","SQL Workspace"],["notebook","Notebook"]].map(([id, label]) => <button key={id} className={view === id ? "selected" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
+    <div className="lakehouse-auth"><label htmlFor="lakehouse-jwt">Workspace access token (JWT)</label><input id="lakehouse-jwt" type="password" autoComplete="off" value={jwt} onChange={e => setJwt(e.target.value)} placeholder="Paste signed JWT with sub and workspace_id claims"/><button onClick={saveJwt}>{jwt.trim() ? "Save session" : "Clear session"}</button><span>{authNotice || (sessionStorage.getItem("sbase.lakehouse.jwt") ? "Authenticated session configured" : "Authentication required")}</span></div>
     {view === "lakehouse" ? <LakehouseBrowser/> : view === "sql" ? <SqlWorkspace/> : <Notebook/>}
   </section>;
 }
