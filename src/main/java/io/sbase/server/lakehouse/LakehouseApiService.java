@@ -148,15 +148,19 @@ public final class LakehouseApiService implements AutoCloseable {
         if(!normalized.matches("(?is)^(SELECT|WITH)\\b.*") ||
            normalized.matches("(?is).*\\b(INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|TRUNCATE|CALL|SET|USE|CACHE|UNCACHE)\\b.*"))
             throw new SecurityException("SQL workspace accepts read-only SELECT/WITH statements only");
-        var matcher=java.util.regex.Pattern.compile("(?i)(?:FROM|JOIN)\\s+([a-zA-Z_][\\w]*\\.[a-zA-Z_][\\w]*\\.[a-zA-Z_][\\w]*)").matcher(normalized);
-        int refs=0;
+        Set<String> ctes=new HashSet<>();
+        var cteMatcher=java.util.regex.Pattern.compile("(?i)(?:WITH|,)\\s*([A-Za-z_][\\w]*)\\s+AS\\s*\\(").matcher(normalized);
+        while(cteMatcher.find()) ctes.add(cteMatcher.group(1).toLowerCase(Locale.ROOT));
+        var matcher=java.util.regex.Pattern.compile("(?i)\\b(?:FROM|JOIN)\\s+([A-Za-z_][\\w.]*)").matcher(normalized);
         while(matcher.find()) {
-            refs++;String[] id=matcher.group(1).split("\\.");
-            if(!"sbase".equalsIgnoreCase(id[0])) throw new SecurityException("Only sbase workspace tables are queryable");
+            String[] id=matcher.group(1).split("\\.");
+            if(id.length==1 && ctes.contains(id[0].toLowerCase(Locale.ROOT))) continue;
+            if(id.length!=3 || !"sbase".equalsIgnoreCase(id[0]))
+                throw new SecurityException("Every table reference must be a workspace table (sbase.namespace.table) or a declared CTE");
             control.requireTable(s.principal(),"sbase",id[1],id[2],LakehouseControlPlane.Privilege.SELECT);
         }
-        if(normalized.matches("(?is).*\\b(FROM|JOIN)\\s+.*") && refs==0)
-            throw new SecurityException("Table references must be fully qualified as sbase.namespace.table");
+        if(normalized.matches("(?is).*\\b(FROM|JOIN)\\s*\\(.*"))
+            throw new SecurityException("Inline subqueries in FROM/JOIN are not accepted; use a named CTE");
         int limit=Math.max(1,Math.min(requestedLimit,1000));
         try(LakehouseExecutionContext context=LakehouseExecutionContext.enter(s.principal().workspaceId(),s.subject())) {
             Dataset<Row> frame=spark.sql(normalized).limit(limit);List<Map<String,Object>> rows=new ArrayList<>();
