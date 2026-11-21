@@ -45,6 +45,8 @@ dependencies {
     implementation "org.apache.calcite:calcite-core:${calciteVersion}"
     implementation "com.fasterxml.jackson.core:jackson-databind:2.18.3"
     implementation "org.apache.flink:flink-streaming-java:${flinkVersion}"
+    implementation "org.apache.flink:flink-table-api-java-bridge:${flinkVersion}"
+    implementation "org.apache.iceberg:iceberg-flink-runtime-2.0:${icebergVersion}"
     implementation "com.datastax.oss:java-driver-core:4.17.0"
     implementation "org.apache.solr:solr-solrj:9.8.1"
     compileOnly "org.apache.geode:geode-core:1.15.2"
