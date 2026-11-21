@@ -24,6 +24,7 @@ object LakehouseApiRoutes extends Directives {
           onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(f(session))).parseJson)) {
             case Success(value) => complete(value)
             case Failure(e: SecurityException) => complete(StatusCodes.Forbidden -> JsObject("error" -> JsString(Option(e.getMessage).getOrElse("Access denied"))))
+            case Failure(e: NoSuchElementException) => complete(StatusCodes.NotFound -> JsObject("error" -> JsString(Option(e.getMessage).getOrElse("Not found"))))
             case Failure(e: IllegalArgumentException) => complete(StatusCodes.BadRequest -> JsObject("error" -> JsString(Option(e.getMessage).getOrElse("Invalid request"))))
             case Failure(e) => complete(StatusCodes.BadGateway -> JsObject("error" -> JsString(Option(e.getMessage).getOrElse("Lakehouse operation failed"))))
           }
@@ -95,6 +96,26 @@ object LakehouseApiRoutes extends Directives {
             val retention=body.fields.get("retentionDays").map(_.convertTo[Int]).getOrElse(7)
             val orphan=body.fields.get("orphanOlderThanHours").map(_.convertTo[Int]).getOrElse(72)
             run(auth)(s => service.get.createMaintenancePolicy(s,namespace,table,operation,interval,retention,orphan))
+          }}
+        }
+      } ~
+      path("lakehouse" / "pipelines") {
+        optionalHeaderValueByName("Authorization") { auth =>
+          get { run(auth)(s => service.get.pipelines(s)) } ~
+          post { entity(as[JsObject]) { body =>
+            val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
+            run(auth)(s => service.get.createPipeline(s,request))
+          }}
+        }
+      } ~
+      path("lakehouse" / "pipelines" / JavaUUID / "runs") { pipelineId =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          get { parameter("limit".as[Int].withDefault(50)) { limit =>
+            run(auth)(s => service.get.pipelineRuns(s,pipelineId,limit))
+          }} ~
+          post { entity(as[JsObject]) { body =>
+            val key=body.fields.get("idempotencyKey").map(_.convertTo[String]).getOrElse("")
+            run(auth)(s => service.get.runPipeline(s,pipelineId,key))
           }}
         }
       } ~
