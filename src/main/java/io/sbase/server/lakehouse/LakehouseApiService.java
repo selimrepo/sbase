@@ -274,7 +274,7 @@ public final class LakehouseApiService implements AutoCloseable {
                     p.setString(9,JSON.writeValueAsString(config));p.setString(10,Objects.toString(request.get("checkpointUri"),null));
                     p.setInt(11,Math.max(0,Math.min(100,((Number)request.getOrDefault("maxRetries",5)).intValue())));p.setString(12,s.subject());p.executeUpdate();
                 }
-                try(PreparedStatement p=c.prepareStatement("INSERT INTO lakehouse_pipeline_version(pipeline_id,version,definition,checksum,created_by) VALUES(?,1,?::jsonb,?,?,?)")) {
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO lakehouse_pipeline_version(pipeline_id,version,definition,checksum,created_by) VALUES(?,1,?::jsonb,?,?)")) {
                     p.setObject(1,pipelineId);p.setString(2,definitionJson);p.setString(3,checksum);p.setString(4,s.subject());p.executeUpdate();
                 }
                 c.commit();
@@ -322,8 +322,8 @@ public final class LakehouseApiService implements AutoCloseable {
                 }
             }
             UUID runId=UUID.randomUUID();
-            try(PreparedStatement p=c.prepareStatement("INSERT INTO lakehouse_ingestion_run(id,workspace_id,pipeline_id,pipeline_attempt_id,target_namespace,target_table,engine,status) SELECT ?,workspace_id,id,?,?,target_namespace,target_table,engine,'QUEUED' FROM lakehouse_ingestion_pipeline WHERE id=?")) {
-                p.setObject(1,runId);p.setObject(2,attempt);p.setObject(3,pipelineId);p.setObject(4,pipelineId);p.executeUpdate();
+            try(PreparedStatement p=c.prepareStatement("INSERT INTO lakehouse_ingestion_run(id,workspace_id,pipeline_id,pipeline_attempt_id,target_namespace,target_table,engine,status) SELECT ?,workspace_id,id,?,target_namespace,target_table,engine,'QUEUED' FROM lakehouse_ingestion_pipeline WHERE id=?")) {
+                p.setObject(1,runId);p.setObject(2,attempt);p.setObject(3,pipelineId);p.executeUpdate();
             }
             try(PreparedStatement p=c.prepareStatement("UPDATE lakehouse_pipeline_attempt SET ingestion_run_id=? WHERE id=?")) {
                 p.setObject(1,runId);p.setObject(2,attempt);p.executeUpdate();
