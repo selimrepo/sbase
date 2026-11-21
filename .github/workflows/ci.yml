@@ -120,19 +120,36 @@ jobs:
             fi
             sleep 10
           done
-      - name: Verify Iceberg catalog, object storage writes, table reads and snapshots
+      - name: Verify authenticated Iceberg catalog, object storage writes, table reads and snapshots
         shell: bash
         run: |
           set -euo pipefail
+          WORKSPACE_ID="00000000-0000-4000-8000-000000000017"
+          docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T postgres \
+            psql -U sbase -d sbase -v ON_ERROR_STOP=1 \
+            -c "INSERT INTO workspace(id,name) VALUES ('$WORKSPACE_ID','Lakehouse CI workspace') ON CONFLICT (id) DO NOTHING"
+          JWT="$(python3 - <<'PY'
+          import base64, hashlib, hmac, json, time
+          secret=b'dev-only-sbase-jwt-secret-change-me-please'
+          enc=lambda value: base64.urlsafe_b64encode(value).rstrip(b'=').decode()
+          header=enc(json.dumps({'alg':'HS256','typ':'JWT'},separators=(',',':')).encode())
+          payload=enc(json.dumps({'sub':'ci-runner','workspace_id':'00000000-0000-4000-8000-000000000017','groups':['ci'],'iat':int(time.time()),'exp':int(time.time())+900},separators=(',',':')).encode())
+          signature=enc(hmac.new(secret,(header+'.'+payload).encode(),hashlib.sha256).digest())
+          print(header+'.'+payload+'.'+signature)
+          PY
+          )"
+          AUTH=(-H "Authorization: Bearer $JWT")
+          UNAUTH_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:8080/api/v1/lakehouse/namespaces)"
+          test "$UNAUTH_STATUS" = "401"
           curl --fail --silent -X POST http://localhost:8080/api/v1/lakehouse/namespaces \
-            -H 'Content-Type: application/json' -d '{"namespace":"ci_lakehouse"}'
+            "${AUTH[@]}" -H 'Content-Type: application/json' -d '{"namespace":"ci_lakehouse"}'
           curl --fail --silent -X POST http://localhost:8080/api/v1/lakehouse/namespaces/ci_lakehouse/tables/orders/write \
-            -H 'Content-Type: application/json' \
+            "${AUTH[@]}" -H 'Content-Type: application/json' \
             -d '{"rows":[{"order_id":1,"region":"EU","amount":120.5},{"order_id":2,"region":"US","amount":80.0}]}'
           curl --fail --silent 'http://localhost:8080/api/v1/lakehouse/namespaces/ci_lakehouse/tables/orders?limit=10' \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["rowCount"] == 2 and d["format"] == "iceberg"'
+            "${AUTH[@]}" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["rowCount"] == 2 and d["format"] == "iceberg"'
           curl --fail --silent http://localhost:8080/api/v1/lakehouse/namespaces/ci_lakehouse/tables/orders/snapshots \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d) >= 1, "Iceberg snapshot was not committed"'
+            "${AUTH[@]}" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d) >= 1, "Iceberg snapshot was not committed"'
       - name: Verify Spark worker registration and Flink TaskManager
         shell: bash
         run: |
