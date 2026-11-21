@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import LakehouseStudio from "./LakehouseStudio";
 import { ReactFlow, Background, Controls, MiniMap, addEdge, useEdgesState, useNodesState } from "@xyflow/react";
 
 const initialNodes = [
@@ -16,6 +17,7 @@ export default function App() {
   const [output, setOutput] = useState("");
   const [apiBase, setApiBase] = useState("/api/v1");
   const [flinkJarId, setFlinkJarId] = useState("");
+  const [workspace, setWorkspace] = useState("workflow");
   const onConnect = useCallback((connection) => setEdges((eds) => addEdge(connection, eds)), [setEdges]);
   const definition = useMemo(() => ({ nodes: nodes.map((node) => ({ id: node.id, operator: node.data.operator, config: node.data.config })), edges: edges.map((edge) => ({ source: edge.source, target: edge.target })) }), [nodes, edges]);
 
