@@ -411,6 +411,69 @@ function PipelineStudio() {
   </div>;
 }
 
+function MaintenanceStudio() {
+  const [namespace,setNamespace]=useState("default");
+  const [table,setTable]=useState("");
+  const [operation,setOperation]=useState("COMPACT");
+  const [intervalSeconds,setIntervalSeconds]=useState(86400);
+  const [retentionDays,setRetentionDays]=useState(7);
+  const [orphanOlderThanHours,setOrphanOlderThanHours]=useState(72);
+  const [policies,setPolicies]=useState([]);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [notice,setNotice]=useState("");
+  async function refresh() {
+    if(!namespace.trim()) return;
+    setBusy(true);setError("");
+    try {
+      const data=await request("/lakehouse/namespaces/"+encodeURIComponent(namespace)+"/maintenance");
+      setPolicies(Array.isArray(data)?data:[]);
+    } catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+  async function create() {
+    setBusy(true);setError("");setNotice("");
+    try {
+      await request("/lakehouse/namespaces/"+encodeURIComponent(namespace)+"/maintenance",{
+        method:"POST",body:JSON.stringify({table,operation,intervalSeconds:Number(intervalSeconds),retentionDays:Number(retentionDays),orphanOlderThanHours:Number(orphanOlderThanHours)})
+      });
+      setNotice("Maintenance policy created and scheduled.");await refresh();
+    } catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+  async function toggle(policy) {
+    const enabled=!policy.enabled;
+    if(!window.confirm((enabled?"Resume":"Pause")+" maintenance for "+policy.table+"?")) return;
+    setBusy(true);setError("");setNotice("");
+    try {
+      await request("/lakehouse/maintenance/"+encodeURIComponent(policy.id)+"/enabled",{method:"POST",body:JSON.stringify({enabled})});
+      setNotice("Policy "+(enabled?"resumed":"paused")+".");await refresh();
+    } catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+  return <div className="studio-panel">
+    <div className="studio-heading"><div><div className="section-title">ICEBERG OPERATIONS</div><h2>Maintenance scheduler</h2><p>Distributed compaction, manifest rewrite, snapshot retention and orphan-file cleanup with PostgreSQL leases and fencing.</p></div><button onClick={refresh} disabled={busy}>↻ Refresh</button></div>
+    <div className="pipeline-form">
+      <div className="pipeline-form-grid">
+        <label>Namespace<input value={namespace} onChange={e=>setNamespace(e.target.value)}/></label>
+        <label>Table<input value={table} onChange={e=>setTable(e.target.value)} placeholder="Iceberg table name"/></label>
+        <label>Operation<select value={operation} onChange={e=>setOperation(e.target.value)}><option value="COMPACT">Compact data files</option><option value="REWRITE_MANIFESTS">Rewrite manifests</option><option value="EXPIRE_SNAPSHOTS">Expire snapshots</option><option value="REMOVE_ORPHAN_FILES">Remove orphan files</option></select></label>
+        <label>Interval (seconds)<input type="number" min="60" max="31536000" value={intervalSeconds} onChange={e=>setIntervalSeconds(e.target.value)}/></label>
+        <label>Snapshot retention (days)<input type="number" min="1" value={retentionDays} onChange={e=>setRetentionDays(e.target.value)}/></label>
+        <label>Orphan minimum age (hours)<input type="number" min="24" value={orphanOlderThanHours} onChange={e=>setOrphanOlderThanHours(e.target.value)}/></label>
+      </div>
+      <div className="pipeline-form-actions"><button className="studio-primary" onClick={create} disabled={busy||!namespace.trim()||!table.trim()||Number(intervalSeconds)<60||Number(retentionDays)<1||Number(orphanOlderThanHours)<24}>Create maintenance policy</button><span>Orphan cleanup is restricted to files at least 24 hours old. Table MODIFY permission is required.</span></div>
+    </div>
+    {error&&<div className="studio-error">{error}</div>}{notice&&<div className="notebook-notice">{notice}</div>}
+    <section className="pipeline-list"><div className="section-title">SCHEDULED POLICIES · {namespace}</div>
+      {!policies.length?<div className="empty-state">No maintenance policies found.</div>:policies.map(p=><article className="pipeline-item" key={p.id}>
+        <div><b>{p.table} · {p.operation}</b><small>Every {p.intervalSeconds}s · snapshot retention {p.retentionDays}d · orphan age {p.orphanOlderThanHours}h · next {p.nextRunAt||"pending"}</small></div>
+        <div className="pipeline-actions"><span className={p.enabled?"status-running":"status-muted"}>{p.enabled?"ENABLED":"PAUSED"}</span><button onClick={()=>toggle(p)} disabled={busy}>{p.enabled?"Pause":"Resume"}</button></div>
+      </article>)}
+    </section>
+  </div>;
+}
+
 function GovernanceStudio() {
   const [namespace,setNamespace]=useState("default");
   const [table,setTable]=useState("");
@@ -491,8 +554,8 @@ export default function LakehouseStudio() {
     else { sessionStorage.removeItem("sbase.lakehouse.jwt"); setAuthNotice("Lakehouse session cleared."); }
   }
   return <section className="lakehouse-studio">
-    <nav className="studio-nav"><div className="studio-brand"><span>◈</span> LAKEHOUSE STUDIO</div>{[["lakehouse","Catalog"],["pipelines","Pipelines"],["governance","Governance"],["sql","SQL Workspace"],["notebook","Notebook"]].map(([id, label]) => <button key={id} className={view === id ? "selected" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
+    <nav className="studio-nav"><div className="studio-brand"><span>◈</span> LAKEHOUSE STUDIO</div>{[["lakehouse","Catalog"],["pipelines","Pipelines"],["maintenance","Maintenance"],["governance","Governance"],["sql","SQL Workspace"],["notebook","Notebook"]].map(([id, label]) => <button key={id} className={view === id ? "selected" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
     <div className="lakehouse-auth"><label htmlFor="lakehouse-jwt">Workspace access token (JWT)</label><input id="lakehouse-jwt" type="password" autoComplete="off" value={jwt} onChange={e => setJwt(e.target.value)} placeholder="Paste signed JWT with sub and workspace_id claims"/><button onClick={saveJwt}>{jwt.trim() ? "Save session" : "Clear session"}</button><span>{authNotice || (sessionStorage.getItem("sbase.lakehouse.jwt") ? "Authenticated session configured" : "Authentication required")}</span></div>
-    {view === "lakehouse" ? <LakehouseBrowser/> : view === "pipelines" ? <PipelineStudio/> : view === "governance" ? <GovernanceStudio/> : view === "sql" ? <SqlWorkspace/> : <Notebook/>}
+    {view === "lakehouse" ? <LakehouseBrowser/> : view === "pipelines" ? <PipelineStudio/> : view === "maintenance" ? <MaintenanceStudio/> : view === "governance" ? <GovernanceStudio/> : view === "sql" ? <SqlWorkspace/> : <Notebook/>}
   </section>;
 }
