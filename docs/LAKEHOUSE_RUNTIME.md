@@ -97,17 +97,24 @@ RUNNING after successful submission because it represents a long-lived stream.
 
 ### Flink connector runtime
 
-The Compose profile builds `flink/Dockerfile`. Put the Kafka SQL connector and any
-other source connector JARs in `flink/lib/`, then rebuild/restart the Flink cluster:
+The Compose profile builds `flink/Dockerfile` against Flink 1.20.2 and Iceberg 1.10.0,
+matching the Gradle runtime dependencies. The image downloads the Kafka SQL connector,
+Flink JSON format, Iceberg Flink runtime, Iceberg AWS bundle, PostgreSQL JDBC driver,
+and Flink S3 filesystem plugin from Maven Central. Each downloaded artifact's published
+SHA-256 checksum is verified during the image build. The Kafka connector is therefore
+available on both JobManager and TaskManager without a manual JAR copy.
 
 ```bash
 docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d flink-jobmanager flink-taskmanager
 ```
 
+For a different source connector, add its JAR and compatible transitive dependencies to
+the Flink image (or the mounted `flink/lib/` directory), rebuild the image, and deploy
+the same image to every JobManager and TaskManager node.
+
 Upload the SBase all-in-one JAR (the `*-all.jar` from `gradle shadowJar`) through
-the Flink Web UI JAR upload page, then use the returned 32-character JAR ID in the
-pipeline configuration. Connector JARs must be present on every JobManager and
-TaskManager node before submission. The application JAR is not uploaded automatically
+the Flink Web UI JAR upload page, then use the returned JAR ID in
+`configuration.flinkJarId`. The application JAR is not uploaded automatically
 by the pipeline API.
 
 ## Distributed maintenance
