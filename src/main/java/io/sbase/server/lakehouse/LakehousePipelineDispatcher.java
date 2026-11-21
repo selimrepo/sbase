@@ -45,7 +45,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
     }
 
     private void tickSafely() {
-        try { for(Job job:claim(4)) process(job); }
+        try { for(Job job:claim(4)) process(job); monitorFlink(); }
         catch(Throwable e) { System.err.println("Lakehouse pipeline dispatch cycle failed: "+e); }
     }
 
@@ -85,17 +85,18 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
 
     private void process(Job job) {
         boolean longRunning=false;
+        Map<String,Object> result=Map.of("engine","SPARK");
         try {
             Map<String,Object> definition=JSON.readValue(job.definition(),MAP);
             authorizeTarget(job,definition);
             String engine=Objects.toString(definition.get("engine"),"SPARK");
             if("FLINK".equalsIgnoreCase(engine)) {
-                submitFlink(definition);
+                result=submitFlink(definition);
                 longRunning=true;
             } else {
                 runSpark(job,definition);
             }
-            finish(job,longRunning? "RUNNING":"SUCCEEDED",null,longRunning);
+            finish(job,longRunning? "RUNNING":"SUCCEEDED",null,longRunning,result);
         } catch(Throwable e) {
             fail(job,e);
         }
@@ -148,7 +149,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
                     source.getOrDefault("startingOffsets","earliest"),options);
             default -> throw new IllegalArgumentException("Unsupported Spark ingestion source "+sourceType);
         }
-        ingestion.appendIceberg(data,"sbase",required(definition,"targetNamespace"),required(definition,"targetTable"));\n        }\n    }\n\n    private void submitFlink(Map<String,Object> definition) throws Exception {
+        ingestion.appendIceberg(data,"sbase",required(definition,"targetNamespace"),required(definition,"targetTable"));\n        }\n    }\n\n    private Map<String,Object> submitFlink(Map<String,Object> definition) throws Exception {
         Map<String,Object> config=definition.get("configuration") instanceof Map<?,?> m ? objectMap(m) : new LinkedHashMap<>();
         String jarId=required(config,"flinkJarId");
         String sourceDdl=required(config,"sourceDdl");
@@ -166,22 +167,70 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         Map<String,Object> args=Map.of("checkpointUri",checkpoint,"sourceDdl",sourceDdl,"insertSql",insertSql);
         Map<String,Object> submit=Map.of("entryClass","io.sbase.server.lakehouse.FlinkIcebergStreamingJob",
                 "parallelism",config.getOrDefault("parallelism",1),"programArgs",JSON.writeValueAsString(args));
-        new PlatformRuntimeService(spark).flinkSubmit(jarId,submit);
+        Map<String,Object> response=new PlatformRuntimeService(spark).flinkSubmit(jarId,submit);
+        String jobId=Objects.toString(response.getOrDefault("jobid",response.get("jobId")),"");
+        if(!jobId.matches("[A-Fa-f0-9]{32}")) throw new IllegalStateException("Flink submission response did not contain a valid job id");
+        return response;
     }
 
-    private void finish(Job job,String status,String error,boolean keepRunning) throws SQLException {
+    private void finish(Job job,String status,String error,boolean keepRunning,Map<String,Object> result) throws SQLException {
         try(Connection c=ds.getConnection()) {
             c.setAutoCommit(false);
             if(!ownsLease(c,job)) { c.rollback();return; }
+            String flinkJobId=Objects.toString(result.getOrDefault("jobid",result.get("jobId")),"");
+            if(flinkJobId.isBlank()) flinkJobId=null;
             try(PreparedStatement p=c.prepareStatement(
-                    "UPDATE lakehouse_pipeline_attempt SET status=?,finished_at=?,lease_owner=NULL,lease_until=NULL,heartbeat_at=NULL,error_class=?,error_message=? WHERE id=? AND lease_owner=? AND fencing_token=?")) {
+                    "UPDATE lakehouse_pipeline_attempt SET status=?,finished_at=?,lease_owner=NULL,lease_until=NULL,heartbeat_at=NULL,error_class=?,error_message=?,runtime_job_id=?,result=?::jsonb WHERE id=? AND lease_owner=? AND fencing_token=?")) {
                 p.setString(1,status);p.setTimestamp(2,keepRunning?null:new Timestamp(System.currentTimeMillis()));
-                p.setString(3,error);p.setString(4,error);p.setObject(5,job.attemptId());p.setObject(6,job.owner());p.setLong(7,job.fence());p.executeUpdate();
+                p.setString(3,error);p.setString(4,error);p.setString(5,flinkJobId);p.setString(6,JSON.writeValueAsString(result));
+                p.setObject(7,job.attemptId());p.setObject(8,job.owner());p.setLong(9,job.fence());p.executeUpdate();
             }
-            try(PreparedStatement p=c.prepareStatement("UPDATE lakehouse_ingestion_run SET status=?,started_at=COALESCE(started_at,now()),finished_at=? WHERE id=? AND workspace_id=?")) {
-                p.setString(1,status);p.setTimestamp(2,keepRunning?null:new Timestamp(System.currentTimeMillis()));p.setObject(3,job.runId());p.setObject(4,job.workspaceId());p.executeUpdate();
+            try(PreparedStatement p=c.prepareStatement("UPDATE lakehouse_ingestion_run SET status=?,started_at=COALESCE(started_at,now()),finished_at=?,flink_job_id=? WHERE id=? AND workspace_id=?")) {
+                p.setString(1,status);p.setTimestamp(2,keepRunning?null:new Timestamp(System.currentTimeMillis()));
+                p.setString(3,flinkJobId);p.setObject(4,job.runId());p.setObject(5,job.workspaceId());p.executeUpdate();
             }
             c.commit();
+        }
+    }
+
+    private void monitorFlink() throws Exception {
+        record Active(UUID attemptId,UUID runId,UUID workspaceId,String jobId) {}
+        List<Active> active=new ArrayList<>();
+        try(Connection c=ds.getConnection();PreparedStatement p=c.prepareStatement(
+                "SELECT a.id,a.ingestion_run_id,p.workspace_id,a.runtime_job_id FROM lakehouse_pipeline_attempt a JOIN lakehouse_ingestion_pipeline p ON p.id=a.pipeline_id WHERE a.status='RUNNING' AND a.runtime_job_id IS NOT NULL AND a.lease_owner IS NULL ORDER BY a.started_at LIMIT 25");
+            ResultSet r=p.executeQuery()) {
+            while(r.next()) active.add(new Active(r.getObject(1,UUID.class),r.getObject(2,UUID.class),r.getObject(3,UUID.class),r.getString(4)));
+        }
+        PlatformRuntimeService runtime=new PlatformRuntimeService(spark);
+        for(Active job:active) {
+            try {
+                Map<String,Object> details=runtime.flinkJob(job.jobId());
+                String state=Objects.toString(details.get("state"),"").toUpperCase(Locale.ROOT);
+                String terminal=switch(state) {
+                    case "FINISHED" -> "SUCCEEDED";
+                    case "FAILED" -> "FAILED";
+                    case "CANCELED","CANCELLED" -> "CANCELLED";
+                    default -> null;
+                };
+                if(terminal==null) continue;
+                String error=terminal.equals("FAILED")?Objects.toString(details.get("failure-cause"),"Flink job failed"):null;
+                try(Connection c=ds.getConnection()) {
+                    c.setAutoCommit(false);
+                    try(PreparedStatement p=c.prepareStatement("UPDATE lakehouse_pipeline_attempt SET status=?,finished_at=now(),result=?::jsonb,error_message=? WHERE id=? AND status='RUNNING' AND runtime_job_id=?")) {
+                        p.setString(1,terminal);p.setString(2,JSON.writeValueAsString(details));p.setString(3,error);p.setObject(4,job.attemptId());p.setString(5,job.jobId());
+                        if(p.executeUpdate()==0) { c.rollback();continue; }
+                    }
+                    try(PreparedStatement p=c.prepareStatement("UPDATE lakehouse_ingestion_run SET status=?,finished_at=now(),error_message=? WHERE id=? AND workspace_id=?")) {
+                        p.setString(1,terminal);p.setString(2,error);p.setObject(3,job.runId());p.setObject(4,job.workspaceId());p.executeUpdate();
+                    }
+                    c.commit();
+                }
+                if("FAILED".equals(terminal)) {
+                    control.enqueueDeadLetter(job.workspaceId(),job.runId(),"flink",
+                            JSON.writeValueAsString(Map.of("jobId",job.jobId())),
+                            job.jobId(),JSON.writeValueAsString(details),"FLINK_JOB_FAILED",Objects.toString(error,"Flink job failed"));
+                }
+            } catch(Exception e) { System.err.println("Flink job monitor failed for "+job.jobId()+": "+e); }
         }
     }
 
