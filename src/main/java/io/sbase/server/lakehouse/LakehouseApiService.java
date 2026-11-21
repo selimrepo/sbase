@@ -357,6 +357,103 @@ public final class LakehouseApiService implements AutoCloseable {
         Map<String,Object> out=new LinkedHashMap<>();raw.forEach((k,v)->{if(k instanceof String key)out.put(key,v);});return out;
     }
 
+    public Map<String,Object> grantNamespace(Session s,String namespace,Map<String,Object> body) {
+        control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.OWNERSHIP);
+        var type=LakehouseControlPlane.PrincipalType.valueOf(Objects.toString(body.get("principalType"),"USER").toUpperCase(Locale.ROOT));
+        var privilege=LakehouseControlPlane.Privilege.valueOf(Objects.toString(body.get("privilege"),"USE").toUpperCase(Locale.ROOT));
+        String principalId=required(body,"principalId");
+        Instant expires=body.get("expiresAt") instanceof String v && !v.isBlank()?Instant.parse(v):null;
+        control.grantNamespace("sbase",namespace,type,principalId,privilege,s.subject(),expires);
+        return Map.of("namespace",namespace,"principalType",type.name(),"principalId",principalId,"privilege",privilege.name(),"status","GRANTED");
+    }
+
+    public Map<String,Object> grantTable(Session s,String namespace,String table,Map<String,Object> body) {
+        control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.OWNERSHIP);
+        identifier(table);
+        var type=LakehouseControlPlane.PrincipalType.valueOf(Objects.toString(body.get("principalType"),"USER").toUpperCase(Locale.ROOT));
+        var privilege=LakehouseControlPlane.Privilege.valueOf(Objects.toString(body.get("privilege"),"SELECT").toUpperCase(Locale.ROOT));
+        String principalId=required(body,"principalId");
+        Instant expires=body.get("expiresAt") instanceof String v && !v.isBlank()?Instant.parse(v):null;
+        control.grantTable("sbase",namespace,table,type,principalId,privilege,s.subject(),expires);
+        return Map.of("namespace",namespace,"table",table,"principalType",type.name(),"principalId",principalId,"privilege",privilege.name(),"status","GRANTED");
+    }
+
+    public Map<String,Object> revokeGrant(Session s,String namespace,String table,Map<String,Object> body) {
+        control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.OWNERSHIP);
+        var type=LakehouseControlPlane.PrincipalType.valueOf(Objects.toString(body.get("principalType"),"USER").toUpperCase(Locale.ROOT));
+        var privilege=LakehouseControlPlane.Privilege.valueOf(Objects.toString(body.get("privilege"),"SELECT").toUpperCase(Locale.ROOT));
+        String principalId=required(body,"principalId");
+        boolean changed;
+        if(table==null || table.isBlank()) changed=control.revokeNamespace("sbase",namespace,type,principalId,privilege);
+        else changed=control.revokeTable("sbase",namespace,identifier(table),type,principalId,privilege);
+        return Map.of("revoked",changed,"namespace",namespace,"table",Objects.toString(table,""));
+    }
+
+    public List<Map<String,Object>> grants(Session s,String namespace) {
+        control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.OWNERSHIP);
+        String sql="""
+          SELECT principal_type,principal_id,privilege,'NAMESPACE' AS scope,NULL AS table_name,
+                 granted_at,expires_at,revoked_at FROM lakehouse_namespace_grant
+          WHERE catalog_name='sbase' AND namespace_name=?
+          UNION ALL
+          SELECT principal_type,principal_id,privilege,'TABLE' AS scope,table_name,
+                 granted_at,expires_at,revoked_at FROM lakehouse_table_grant
+          WHERE catalog_name='sbase' AND namespace_name=?
+          ORDER BY scope,table_name,principal_type,principal_id,privilege
+        """;
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(sql)) {
+            p.setString(1,namespace);p.setString(2,namespace);
+            try(ResultSet r=p.executeQuery()) {
+                List<Map<String,Object>> out=new ArrayList<>();
+                while(r.next()) {
+                    Map<String,Object> item=new LinkedHashMap<>();
+                    item.put("principalType",r.getString(1));item.put("principalId",r.getString(2));
+                    item.put("privilege",r.getString(3));item.put("scope",r.getString(4));item.put("table",r.getString(5));
+                    item.put("grantedAt",r.getTimestamp(6).toInstant().toString());
+                    item.put("expiresAt",r.getTimestamp(7)==null?null:r.getTimestamp(7).toInstant().toString());
+                    item.put("revokedAt",r.getTimestamp(8)==null?null:r.getTimestamp(8).toInstant().toString());out.add(item);
+                }
+                return out;
+            }
+        } catch(Exception e) { throw failure("Unable to list namespace grants",e); }
+    }
+
+    public List<Map<String,Object>> lineage(Session s,String namespace,int requestedLimit) {
+        control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.USE);
+        int limit=Math.max(1,Math.min(requestedLimit,1000));
+        String sql="SELECT source_catalog,source_namespace,source_table,target_catalog,target_namespace,target_table,relation_type,recorded_by,recorded_at,details::text FROM lakehouse_lineage_edge WHERE workspace_id=? AND (source_namespace=? OR target_namespace=?) ORDER BY recorded_at DESC LIMIT ?";
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(sql)) {
+            p.setObject(1,s.principal().workspaceId());p.setString(2,namespace);p.setString(3,namespace);p.setInt(4,limit);
+            try(ResultSet r=p.executeQuery()) {
+                List<Map<String,Object>> out=new ArrayList<>();
+                while(r.next()) out.add(Map.of("source",r.getString(1)+"."+r.getString(2)+"."+r.getString(3),
+                        "target",r.getString(4)+"."+r.getString(5)+"."+r.getString(6),"relation",r.getString(7),
+                        "recordedBy",r.getString(8),"recordedAt",r.getTimestamp(9).toInstant().toString(),"details",JSON.readTree(r.getString(10))));
+                return out;
+            }
+        } catch(Exception e) { throw failure("Unable to list workspace lineage",e); }
+    }
+
+    public Map<String,Object> commitCdcOffset(Session s,UUID sourceId,String stream,String partition,String offsetJson,long expectedGeneration) {
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
+                "SELECT 1 FROM lakehouse_data_source WHERE id=? AND workspace_id=? AND enabled=true")) {
+            p.setObject(1,sourceId);p.setObject(2,s.principal().workspaceId());
+            try(ResultSet r=p.executeQuery()) { if(!r.next()) throw new SecurityException("Data source is outside the active workspace"); }
+        } catch(SecurityException e) { throw e; }
+        catch(Exception e) { throw failure("Unable to authorize CDC source",e); }
+        try {
+            JSON.readTree(offsetJson);
+            boolean committed=control.commitCdcOffset(s.principal().workspaceId(),sourceId,stream,partition,offsetJson,expectedGeneration);
+            return Map.of("committed",committed,"sourceId",sourceId.toString(),"stream",stream,"partition",partition);
+        } catch(Exception e) { throw failure("Unable to commit CDC offset",e); }
+    }
+
+    private static String required(Map<String,?> body,String key) {
+        String value=Objects.toString(body.get(key),"").trim();
+        if(value.isEmpty() || value.length()>500) throw new IllegalArgumentException(key+" is required (max 500 chars)");
+        return value;
+    }
+
     private static byte[] decode(String v) { return Base64.getUrlDecoder().decode(v); }
     private static long number(Object v,long fallback) { return v instanceof Number n?n.longValue():fallback; }
     private static String identifier(String v) {
