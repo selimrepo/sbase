@@ -165,6 +165,39 @@ public final class LakehouseApiService implements AutoCloseable {
         } catch(Exception e) { throw failure("Lakehouse SQL query failed",e); }
     }
 
+    public Map<String,Object> evolveSchema(Session s,String namespace,String table,Map<String,Object> body) {
+        identifier(namespace);identifier(table);
+        control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.ALTER);
+        String operation=Objects.toString(body.get("operation"),"").toUpperCase(Locale.ROOT);
+        String identifier="sbase."+namespace+"."+table;
+        LakehouseIngestionService ingestion=new LakehouseIngestionService(spark,ref->resolveSecret(ref));
+        Map<String,Object> payload=new LinkedHashMap<>();
+        String compatibility="BACKWARD";
+        switch(operation) {
+            case "ADD_COLUMN" -> {
+                String ddl=required(body,"columnsDdl");
+                ingestion.addColumns(identifier,ddl);payload.put("columnsDdl",ddl);
+            }
+            case "RENAME_COLUMN" -> {
+                String oldName=identifier(Objects.toString(body.get("oldName"),""));
+                String newName=identifier(Objects.toString(body.get("newName"),""));
+                ingestion.renameColumn(identifier,oldName,newName);payload.put("oldName",oldName);payload.put("newName",newName);
+            }
+            case "TYPE_WIDEN" -> {
+                String column=identifier(Objects.toString(body.get("column"),""));
+                String targetType=required(body,"targetType").toUpperCase(Locale.ROOT);
+                ingestion.widenColumnType(identifier,column,targetType);payload.put("column",column);payload.put("targetType",targetType);
+            }
+            default -> throw new IllegalArgumentException("Supported schema operations: ADD_COLUMN, RENAME_COLUMN, TYPE_WIDEN");
+        }
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
+                "INSERT INTO lakehouse_schema_change(id,workspace_id,catalog_name,namespace_name,table_name,change_type,change_payload,compatibility,recorded_by) VALUES(?,?,'sbase',?,?,?,?::jsonb,?,?)")) {
+            p.setObject(1,UUID.randomUUID());p.setObject(2,s.principal().workspaceId());p.setString(3,namespace);p.setString(4,table);
+            p.setString(5,operation);p.setString(6,JSON.writeValueAsString(payload));p.setString(7,compatibility);p.setString(8,s.subject());p.executeUpdate();
+        } catch(Exception e) { throw failure("Schema changed but history persistence failed",e); }
+        return Map.of("namespace",namespace,"table",table,"operation",operation,"compatibility",compatibility,"status","APPLIED");
+    }
+
     public Map<String,Object> schema(Session s,String namespace,String table) {
         identifier(namespace);identifier(table);
         control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.SELECT);
