@@ -108,9 +108,9 @@ available on both JobManager and TaskManager without a manual JAR copy.
 docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d flink-jobmanager flink-taskmanager
 ```
 
-For a different source connector, add its JAR and compatible transitive dependencies to
-the Flink image (or the mounted `flink/lib/` directory), rebuild the image, and deploy
-the same image to every JobManager and TaskManager node.
+For a different source connector, extend `flink/Dockerfile` to download the connector and
+its compatible transitive dependencies into `/opt/flink/lib`, rebuild the image, and
+deploy the same image to every JobManager and TaskManager node.
 
 Upload the SBase all-in-one JAR (the `*-all.jar` from `gradle shadowJar`) through
 the Flink Web UI JAR upload page, then use the returned JAR ID in
