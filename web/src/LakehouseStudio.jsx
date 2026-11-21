@@ -418,7 +418,8 @@ function MaintenanceStudio() {
   const [intervalSeconds,setIntervalSeconds]=useState(86400);
   const [retentionDays,setRetentionDays]=useState(7);
   const [orphanOlderThanHours,setOrphanOlderThanHours]=useState(72);
-  const [policies,setPolicies]=useState([]);\n  const [history,setHistory]=useState([]);
+  const [policies,setPolicies]=useState([]);
+  const [history,setHistory]=useState([]);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
