@@ -286,6 +286,113 @@ function Notebook() {
   </div>;
 }
 
+function PipelineStudio() {
+  const [items, setItems] = useState([]);
+  const [runs, setRuns] = useState({});
+  const [name, setName] = useState("New ingestion pipeline");
+  const [sourceType, setSourceType] = useState("S3");
+  const [engine, setEngine] = useState("SPARK");
+  const [mode, setMode] = useState("BATCH");
+  const [namespace, setNamespace] = useState("default");
+  const [table, setTable] = useState("ingested_data");
+  const [uri, setUri] = useState("s3a://sbase-warehouse/incoming/");
+  const [format, setFormat] = useState("parquet");
+  const [jdbcUrl, setJdbcUrl] = useState("jdbc:postgresql://postgres:5432/source");
+  const [tableOrQuery, setTableOrQuery] = useState("public.events");
+  const [dbUser, setDbUser] = useState("");
+  const [secretRef, setSecretRef] = useState("");
+  const [bootstrapServers, setBootstrapServers] = useState("kafka:9092");
+  const [topic, setTopic] = useState("events");
+  const [checkpointUri, setCheckpointUri] = useState("s3://sbase-warehouse/checkpoints/events");
+  const [flinkJarId, setFlinkJarId] = useState("");
+  const [sourceDdl, setSourceDdl] = useState("CREATE TABLE source_events (...) WITH ('connector' = 'kafka', ...)");
+  const [insertSql, setInsertSql] = useState("INSERT INTO sbase_iceberg.analytics.events SELECT * FROM source_events");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    try { setItems(await request("/lakehouse/pipelines")); }
+    catch (e) { setError(e.message); }
+  }
+  useEffect(() => { refresh(); }, []);
+
+  function sourceConfig() {
+    if (sourceType === "S3") return { uri, format };
+    if (sourceType === "JDBC") return { jdbcUrl, tableOrQuery, user: dbUser };
+    return { bootstrapServers, topic, startingOffsets: "earliest" };
+  }
+  async function create() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const configuration = engine === "FLINK" ? { flinkJarId, sourceDdl, insertSql, parallelism: 1 } : {};
+      const payload = { name, sourceType, source: sourceConfig(), secretRef, targetNamespace: namespace, targetTable: table, engine, mode, checkpointUri, configuration, maxRetries: 5 };
+      const created = await request("/lakehouse/pipelines", { method: "POST", body: JSON.stringify(payload) });
+      setNotice("Pipeline created: " + created.pipelineId);
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function run(item) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await request("/lakehouse/pipelines/" + encodeURIComponent(item.id) + "/runs", {
+        method: "POST", body: JSON.stringify({ idempotencyKey: crypto.randomUUID() })
+      });
+      setNotice("Run queued: " + (result.ingestionRunId || result.attemptId));
+      const history = await request("/lakehouse/pipelines/" + encodeURIComponent(item.id) + "/runs");
+      setRuns(current => ({ ...current, [item.id]: history }));
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function loadRuns(item) {
+    try { setRuns(current => ({ ...current, [item.id]: await request("/lakehouse/pipelines/" + encodeURIComponent(item.id) + "/runs") })); }
+    catch (e) { setError(e.message); }
+  }
+
+  return <div className="studio-panel pipeline-panel">
+    <div className="studio-heading"><div><div className="section-title">INGESTION CONTROL PLANE</div><h2>Pipeline Studio</h2><p>Versioned S3, JDBC and Kafka ingestion with durable runs, retries and Spark/Flink execution.</p></div><button onClick={refresh}>↻ Refresh</button></div>
+    {error && <div className="studio-error">{error}</div>}{notice && <div className="notebook-notice">{notice}</div>}
+    <div className="pipeline-form">
+      <div className="pipeline-form-grid">
+        <label>Pipeline name<input value={name} onChange={e => setName(e.target.value)}/></label>
+        <label>Source type<select value={sourceType} onChange={e => setSourceType(e.target.value)}><option>S3</option><option>JDBC</option><option>KAFKA</option></select></label>
+        <label>Execution engine<select value={engine} onChange={e => {setEngine(e.target.value);setMode(e.target.value === "FLINK" ? "STREAMING" : "BATCH");}}><option>SPARK</option><option>FLINK</option></select></label>
+        <label>Mode<select value={mode} onChange={e => setMode(e.target.value)}><option>BATCH</option><option>STREAMING</option><option>CDC</option></select></label>
+        <label>Target namespace<input value={namespace} onChange={e => setNamespace(e.target.value)}/></label>
+        <label>Target table<input value={table} onChange={e => setTable(e.target.value)}/></label>
+        {sourceType === "S3" ? <>
+          <label className="wide">S3 URI<input value={uri} onChange={e => setUri(e.target.value)}/></label>
+          <label>Format<select value={format} onChange={e => setFormat(e.target.value)}><option>parquet</option><option>orc</option><option>json</option><option>csv</option><option>avro</option></select></label>
+        </> : sourceType === "JDBC" ? <>
+          <label className="wide">JDBC URL<input value={jdbcUrl} onChange={e => setJdbcUrl(e.target.value)}/></label>
+          <label>Table / query<input value={tableOrQuery} onChange={e => setTableOrQuery(e.target.value)}/></label>
+          <label>Database user<input value={dbUser} onChange={e => setDbUser(e.target.value)}/></label>
+          <label>Secret reference<input value={secretRef} onChange={e => setSecretRef(e.target.value)} placeholder="e.g. warehouse-db"/></label>
+        </> : <>
+          <label>Kafka bootstrap servers<input value={bootstrapServers} onChange={e => setBootstrapServers(e.target.value)}/></label>
+          <label>Kafka topic<input value={topic} onChange={e => setTopic(e.target.value)}/></label>
+        </>}
+        {engine === "FLINK" && <>
+          <label>Uploaded Flink job JAR ID<input value={flinkJarId} onChange={e => setFlinkJarId(e.target.value)} placeholder="32-character Flink JAR id"/></label>
+          <label className="wide">Checkpoint URI<input value={checkpointUri} onChange={e => setCheckpointUri(e.target.value)}/></label>
+          <label className="wide">Source DDL<textarea value={sourceDdl} onChange={e => setSourceDdl(e.target.value)}/></label>
+          <label className="wide">Insert SQL<textarea value={insertSql} onChange={e => setInsertSql(e.target.value)}/></label>
+        </>}
+      </div>
+      <div className="pipeline-form-actions"><button className="studio-primary" onClick={create} disabled={busy || !name.trim() || !namespace.trim() || !table.trim() || (engine === "FLINK" && (!flinkJarId.trim() || !checkpointUri.trim()))}>{busy ? "Working…" : "Create pipeline"}</button><span>Secrets are referenced by name and resolved by the worker; passwords are not stored in pipeline definitions.</span></div>
+    </div>
+    <div className="pipeline-list"><div className="section-title">WORKSPACE PIPELINES</div>
+      {items.length === 0 ? <div className="empty-state">No pipelines in this workspace yet.</div> : items.map(item => <article className="pipeline-item" key={item.id}>
+        <div><b>{item.name}</b><small>{item.sourceId} · {item.engine} / {item.mode} · sbase.{item.targetNamespace}.{item.targetTable} · v{item.version}</small></div>
+        <div className="pipeline-actions"><button onClick={() => run(item)} disabled={busy || !item.enabled}>▶ Run</button><button onClick={() => loadRuns(item)}>Runs</button></div>
+        {runs[item.id] && <pre>{JSON.stringify(runs[item.id], null, 2)}</pre>}
+      </article>)}
+    </div>
+    <p className="notebook-footer">Spark batch ingestion is at-least-once. Flink streaming uses checkpointed EXACTLY_ONCE when the uploaded job JAR and source connector JARs are installed on every Flink node.</p>
+  </div>;
+}
+
 export default function LakehouseStudio() {
   const [view, setView] = useState("lakehouse");
   const [jwt, setJwt] = useState(() => sessionStorage.getItem("sbase.lakehouse.jwt") || "");
@@ -295,8 +402,8 @@ export default function LakehouseStudio() {
     else { sessionStorage.removeItem("sbase.lakehouse.jwt"); setAuthNotice("Lakehouse session cleared."); }
   }
   return <section className="lakehouse-studio">
-    <nav className="studio-nav"><div className="studio-brand"><span>◈</span> LAKEHOUSE STUDIO</div>{[["lakehouse","Catalog"],["sql","SQL Workspace"],["notebook","Notebook"]].map(([id, label]) => <button key={id} className={view === id ? "selected" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
+    <nav className="studio-nav"><div className="studio-brand"><span>◈</span> LAKEHOUSE STUDIO</div>{[["lakehouse","Catalog"],["pipelines","Pipelines"],["sql","SQL Workspace"],["notebook","Notebook"]].map(([id, label]) => <button key={id} className={view === id ? "selected" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
     <div className="lakehouse-auth"><label htmlFor="lakehouse-jwt">Workspace access token (JWT)</label><input id="lakehouse-jwt" type="password" autoComplete="off" value={jwt} onChange={e => setJwt(e.target.value)} placeholder="Paste signed JWT with sub and workspace_id claims"/><button onClick={saveJwt}>{jwt.trim() ? "Save session" : "Clear session"}</button><span>{authNotice || (sessionStorage.getItem("sbase.lakehouse.jwt") ? "Authenticated session configured" : "Authentication required")}</span></div>
-    {view === "lakehouse" ? <LakehouseBrowser/> : view === "sql" ? <SqlWorkspace/> : <Notebook/>}
+    {view === "lakehouse" ? <LakehouseBrowser/> : view === "pipelines" ? <PipelineStudio/> : view === "sql" ? <SqlWorkspace/> : <Notebook/>}
   </section>;
 }
