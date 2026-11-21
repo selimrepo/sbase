@@ -85,9 +85,9 @@ The React Studio includes a Lakehouse workspace alongside Workflow Studio:
 
 - **Catalog browser:** Iceberg namespace/table navigation, schema and DDL inspection, bounded data preview, snapshot history, rollback and file compaction.
 - **SQL Workspace:** Spark SQL editor with result grids, execution timing, error display and browser-local recent query history.
-- **Notebook:** reorderable SQL and Markdown cells, per-cell execution, sequential run-all and browser-local autosaved drafts.
+- **Notebook:** PostgreSQL-backed SQL/Markdown notebooks, immutable revisions, optimistic concurrency, owner and shared access tokens, read-only/read-write shares, revocation and optional expiry.
 
-All SQL editor and notebook queries use the read-only `POST /api/v1/engines/spark/sql` endpoint. Notebook drafts and SQL history are local to the browser; server-side notebook sharing, scheduling and multi-user collaboration are future work. See [Lakehouse architecture and API guide](docs/LAKEHOUSE_ARCHITECTURE.md).
+Notebook content and revisions are persisted in PostgreSQL. Access is capability-token based via `X-Notebook-Token`; only token hashes are stored. SQL execution uses the read-only `POST /api/v1/engines/spark/sql` endpoint. Live co-editing, SSO/tenant RBAC, revision restore and scheduled notebook execution remain future work. See [Lakehouse architecture and API guide](docs/LAKEHOUSE_ARCHITECTURE.md).
 
 ## Workflow API
 
