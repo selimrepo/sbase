@@ -2,8 +2,8 @@
 # Start with:
 # docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d
 #
-# Tune *_MEMORY / *_CORES values in .env for the host. Values below are
-# deliberately conservative defaults, not hard caps on the host machine.
+# The profile includes a three-node Kafka KRaft quorum and a Flink cluster.
+# Tune *_MEMORY / *_CORES values in .env for the host.
 
 services:
   app:
@@ -43,7 +43,105 @@ services:
         condition: service_started
       spark-master:
         condition: service_started
+      flink-jobmanager:
+        condition: service_started
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
       kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-200}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-16MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-256MB}
+    shm_size: ${POSTGRES_SHM_SIZE:-1gb}
+    restart: unless-stopped
+
+  cassandra:
+    profiles: ["full"]
+    environment:
+      MAX_HEAP_SIZE: ${CASSANDRA_MAX_HEAP_SIZE:-2G}
+      HEAP_NEWSIZE: ${CASSANDRA_HEAP_NEWSIZE:-512M}
+    mem_limit: ${CASSANDRA_MEMORY_LIMIT:-4g}
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
+      interval: 30s
+      timeout: 15s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  solr:
+    profiles: ["full"]
+    command: ["solr", "-f"]
+    environment:
+      SOLR_JAVA_MEM: ${SOLR_JAVA_MEM:--Xms1g -Xmx2g}
+      SOLR_HEAP: ${SOLR_HEAP:-2g}
+    mem_limit: ${SOLR_MEMORY_LIMIT:-3g}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/admin/info/system >/dev/null"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+    restart: unless-stopped
+
+  spark-master:
+    profiles: ["full"]
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8081"
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: "7077"
+      SPARK_MASTER_WEBUI_PORT: "8081"
+    mem_limit: ${SPARK_MASTER_MEMORY_LIMIT:-2g}
+    restart: unless-stopped
+
+  spark-worker:
+    profiles: ["full"]
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - --cores
+      - ${SPARK_WORKER_CORES:-4}
+      - --memory
+      - ${SPARK_WORKER_MEMORY:-8g}
+      - spark://spark-master:7077
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_LOCAL_DIRS: /tmp
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-8g}
+    mem_limit: ${SPARK_WORKER_MEMORY_LIMIT:-10g}
+    depends_on:
+      - spark-master
+    restart: unless-stopped
+
+  kafka:
     image: apache/kafka:3.9.1
     profiles: ["full"]
     hostname: kafka
@@ -145,110 +243,18 @@ services:
     restart: unless-stopped
 
   flink-jobmanager:
-        condition: service_started
-      minio:
-        condition: service_started
-      minio-init:
-        condition: service_completed_successfully
-      kafka:
-        condition: service_healthy
-      kafka-2:
-        condition: service_healthy
-      kafka-3:
-        condition: service_healthy
-    restart: unless-stopped
-
-  postgres:
-    command:
-      - postgres
-      - -c
-      - max_connections=${POSTGRES_MAX_CONNECTIONS:-200}
-      - -c
-      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
-      - -c
-      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}
-      - -c
-      - work_mem=${POSTGRES_WORK_MEM:-16MB}
-      - -c
-      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-256MB}
-    shm_size: ${POSTGRES_SHM_SIZE:-1gb}
-    restart: unless-stopped
-
-  cassandra:
-    profiles: ["full"]
-    environment:
-      MAX_HEAP_SIZE: ${CASSANDRA_MAX_HEAP_SIZE:-2G}
-      HEAP_NEWSIZE: ${CASSANDRA_HEAP_NEWSIZE:-512M}
-    mem_limit: ${CASSANDRA_MEMORY_LIMIT:-4g}
-    healthcheck:
-      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
-      interval: 30s
-      timeout: 15s
-      retries: 30
-      start_period: 120s
-    restart: unless-stopped
-
-  solr:
-    profiles: ["full"]
-    command: ["solr", "-f"]
-    environment:
-      SOLR_JAVA_MEM: ${SOLR_JAVA_MEM:--Xms1g -Xmx2g}
-      SOLR_HEAP: ${SOLR_HEAP:-2g}
-    mem_limit: ${SOLR_MEMORY_LIMIT:-3g}
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/admin/info/system >/dev/null"]
-      interval: 20s
-      timeout: 10s
-      retries: 20
-      start_period: 45s
-    restart: unless-stopped
-
-  spark-master:
-    profiles: ["full"]
-    command:
-      - /opt/spark/bin/spark-class
-      - org.apache.spark.deploy.master.Master
-      - --host
-      - spark-master
-      - --port
-      - "7077"
-      - --webui-port
-      - "8081"
-    environment:
-      SPARK_NO_DAEMONIZE: "true"
-      SPARK_MASTER_HOST: spark-master
-      SPARK_MASTER_PORT: "7077"
-      SPARK_MASTER_WEBUI_PORT: "8081"
-    mem_limit: ${SPARK_MASTER_MEMORY_LIMIT:-2g}
-    restart: unless-stopped
-
-  spark-worker:
-    profiles: ["full"]
-    command:
-      - /opt/spark/bin/spark-class
-      - org.apache.spark.deploy.worker.Worker
-      - --cores
-      - ${SPARK_WORKER_CORES:-4}
-      - --memory
-      - ${SPARK_WORKER_MEMORY:-8g}
-      - spark://spark-master:7077
-    environment:
-      SPARK_NO_DAEMONIZE: "true"
-      SPARK_LOCAL_DIRS: /tmp
-      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
-      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-8g}
-    mem_limit: ${SPARK_WORKER_MEMORY_LIMIT:-10g}
-    depends_on:
-      - spark-master
-    restart: unless-stopped
-
-  flink-jobmanager:
     image: sbase-flink:1.20.2
     build: ./flink
     profiles: ["full"]
     command: ["jobmanager"]
     depends_on:
+      postgres:
+        condition: service_healthy
       kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
@@ -271,8 +277,39 @@ services:
     mem_limit: ${FLINK_JOBMANAGER_MEMORY_LIMIT:-2g}
     restart: unless-stopped
 
+  flink-taskmanager:
+    image: sbase-flink:1.20.2
+    build: ./flink
+    profiles: ["full"]
+    command: ["taskmanager"]
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS:-4}
+        taskmanager.memory.process.size: ${FLINK_TASKMANAGER_MEMORY:-4g}
+      SBASE_ICEBERG_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
+      SBASE_ICEBERG_JDBC_USER: ${POSTGRES_USER:-sbase}
+      SBASE_ICEBERG_JDBC_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      SBASE_ICEBERG_WAREHOUSE: ${SBASE_ICEBERG_WAREHOUSE:-s3://sbase-warehouse/}
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_PATH_STYLE_ACCESS: "true"
+      SBASE_FLINK_CHECKPOINT_INTERVAL_MS: ${SBASE_FLINK_CHECKPOINT_INTERVAL_MS:-30000}
+      SBASE_FLINK_CHECKPOINT_TIMEOUT_MS: ${SBASE_FLINK_CHECKPOINT_TIMEOUT_MS:-120000}
+    mem_limit: ${FLINK_TASKMANAGER_MEMORY_LIMIT:-5g}
+    restart: unless-stopped
 
-  # S3-compatible object storage for Iceberg table data and metadata files.
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     profiles: ["full"]
@@ -304,41 +341,6 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     restart: "no"
-
-  flink-taskmanager:
-    image: sbase-flink:1.20.2
-    build: ./flink
-    profiles: ["full"]
-    command: ["taskmanager"]
-    depends_on:
-      flink-jobmanager:
-        condition: service_started
-      kafka:
-        condition: service_healthy
-    environment:
-      FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS:-4}
-        taskmanager.memory.process.size: ${FLINK_TASKMANAGER_MEMORY:-4g}
-      SBASE_ICEBERG_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
-      SBASE_ICEBERG_JDBC_USER: ${POSTGRES_USER:-sbase}
-      SBASE_ICEBERG_JDBC_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-      SBASE_ICEBERG_WAREHOUSE: ${SBASE_ICEBERG_WAREHOUSE:-s3://sbase-warehouse/}
-      S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      S3_REGION: ${S3_REGION:-us-east-1}
-      S3_PATH_STYLE_ACCESS: "true"
-      SBASE_FLINK_CHECKPOINT_INTERVAL_MS: ${SBASE_FLINK_CHECKPOINT_INTERVAL_MS:-30000}
-      SBASE_FLINK_CHECKPOINT_TIMEOUT_MS: ${SBASE_FLINK_CHECKPOINT_TIMEOUT_MS:-120000}
-    mem_limit: ${FLINK_TASKMANAGER_MEMORY_LIMIT:-5g}
-    depends_on:
-      - flink-jobmanager
-    restart: unless-stopped
-
-# Persist engine state and Spark spill across restarts. The application model
-# registry, PostgreSQL, Cassandra, Solr and Spark scratch volumes are declared
-# by compose.yaml and reused by this overlay.
 
 volumes:
   minio_data:
