@@ -175,9 +175,16 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         String table=required(definition,"targetTable");
         String expectedTarget=("sbase_iceberg."+namespace+"."+table).toLowerCase(Locale.ROOT);
         String normalizedInsert=insertSql.replace("`","").trim().toLowerCase(Locale.ROOT);
-        if(!sourceDdl.stripLeading().toUpperCase(Locale.ROOT).startsWith("CREATE TABLE") ||
-           !normalizedInsert.matches("(?s)^insert\\s+into\\s+"+java.util.regex.Pattern.quote(expectedTarget)+"(?:\\s|\\().*"))
-            throw new IllegalArgumentException("Flink sink must INSERT INTO the pipeline's exact Iceberg target");
+        if(sourceDdl.length()>20000 || insertSql.length()>20000 ||
+           sourceDdl.contains(";") || insertSql.contains(";") ||
+           sourceDdl.contains("--") || insertSql.contains("--") ||
+           sourceDdl.contains("/*") || insertSql.contains("/*") ||
+           !sourceDdl.matches("(?is)^CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?[A-Za-z_][A-Za-z0-9_]*\\s*\\(.*\\)\\s*WITH\\s*\\(.*\\)$") ||
+           !sourceDdl.matches("(?is).*['\\\"]connector['\\\"]\\s*=\\s*['\\\"]kafka['\\\"].*") ||
+           !normalizedInsert.matches("(?s)^insert\\s+into\\s+"+java.util.regex.Pattern.quote(expectedTarget)+"(?:\\s|\\().*") ||
+           sourceDdl.matches("(?is).*(password|secret|access[._-]?key|token|credential|sasl\\.jaas\\.config).*") ||
+           insertSql.matches("(?is).*(password|secret|access[._-]?key|token|credential|sasl\\.jaas\\.config).*"))
+            throw new IllegalArgumentException("Flink requires one credential-free Kafka source DDL and an INSERT into this pipeline's exact Iceberg target");
         String checkpoint=required(definition,"checkpointUri");
         if(!checkpoint.startsWith("s3://") && !checkpoint.startsWith("s3a://"))
             throw new IllegalArgumentException("Flink checkpointUri must use durable S3-compatible storage");
