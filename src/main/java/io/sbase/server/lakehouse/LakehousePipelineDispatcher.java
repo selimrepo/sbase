@@ -144,7 +144,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         String expectedTarget=("sbase_iceberg."+namespace+"."+table).toLowerCase(Locale.ROOT);
         String normalizedInsert=insertSql.replace("`","").trim().toLowerCase(Locale.ROOT);
         if(!sourceDdl.stripLeading().toUpperCase(Locale.ROOT).startsWith("CREATE TABLE") ||
-           !normalizedInsert.matches("(?s)^insert\\\\s+into\\\\s+"+java.util.regex.Pattern.quote(expectedTarget)+"(?:\\\\s|\\\\().*"))
+           !normalizedInsert.matches("(?s)^insert\\s+into\\s+"+java.util.regex.Pattern.quote(expectedTarget)+"(?:\\s|\\().*"))
             throw new IllegalArgumentException("Flink sink must INSERT INTO the pipeline's exact Iceberg target");
         String checkpoint=required(definition,"checkpointUri");
         if(!checkpoint.startsWith("s3://") && !checkpoint.startsWith("s3a://"))
