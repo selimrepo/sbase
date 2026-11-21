@@ -418,7 +418,7 @@ function MaintenanceStudio() {
   const [intervalSeconds,setIntervalSeconds]=useState(86400);
   const [retentionDays,setRetentionDays]=useState(7);
   const [orphanOlderThanHours,setOrphanOlderThanHours]=useState(72);
-  const [policies,setPolicies]=useState([]);
+  const [policies,setPolicies]=useState([]);\n  const [history,setHistory]=useState([]);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
@@ -426,8 +426,11 @@ function MaintenanceStudio() {
     if(!namespace.trim()) return;
     setBusy(true);setError("");
     try {
-      const data=await request("/lakehouse/namespaces/"+encodeURIComponent(namespace)+"/maintenance");
-      setPolicies(Array.isArray(data)?data:[]);
+      const [data,runs]=await Promise.all([
+        request("/lakehouse/namespaces/"+encodeURIComponent(namespace)+"/maintenance"),
+        request("/lakehouse/namespaces/"+encodeURIComponent(namespace)+"/maintenance/history?limit=100")
+      ]);
+      setPolicies(Array.isArray(data)?data:[]);setHistory(Array.isArray(runs)?runs:[]);
     } catch(e){setError(e.message);}
     finally{setBusy(false);}
   }
@@ -469,6 +472,12 @@ function MaintenanceStudio() {
       {!policies.length?<div className="empty-state">No maintenance policies found.</div>:policies.map(p=><article className="pipeline-item" key={p.id}>
         <div><b>{p.table} · {p.operation}</b><small>Every {p.intervalSeconds}s · snapshot retention {p.retentionDays}d · orphan age {p.orphanOlderThanHours}h · next {p.nextRunAt||"pending"}</small></div>
         <div className="pipeline-actions"><span className={p.enabled?"status-running":"status-muted"}>{p.enabled?"ENABLED":"PAUSED"}</span><button onClick={()=>toggle(p)} disabled={busy}>{p.enabled?"Pause":"Resume"}</button></div>
+      </article>)}
+    </section>
+    <section className="pipeline-list"><div className="section-title">MAINTENANCE EXECUTION HISTORY</div>
+      {!history.length?<div className="empty-state">No maintenance executions recorded yet.</div>:history.map(run=><article className="pipeline-item" key={run.id}>
+        <div><b>{run.table} · {run.operation} · {run.status}</b><small>Started {run.startedAt} · Finished {run.finishedAt||"running"}{run.error?" · "+run.error:""}</small></div>
+        <small>{run.summary?.fencingToken?("Fence "+run.summary.fencingToken):""}</small>
       </article>)}
     </section>
   </div>;
