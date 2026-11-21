@@ -166,7 +166,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
             throw new IllegalArgumentException("Flink checkpointUri must use durable S3-compatible storage");
         Map<String,Object> args=Map.of("checkpointUri",checkpoint,"sourceDdl",sourceDdl,"insertSql",insertSql);
         Map<String,Object> submit=Map.of("entryClass","io.sbase.server.lakehouse.FlinkIcebergStreamingJob",
-                "parallelism",config.getOrDefault("parallelism",1),"programArgs",JSON.writeValueAsString(args));
+                "parallelism",config.getOrDefault("parallelism",1),"programArgs",Base64.getUrlEncoder().withoutPadding().encodeToString(JSON.writeValueAsBytes(args)));
         Map<String,Object> response=new PlatformRuntimeService(spark).flinkSubmit(jarId,submit);
         String jobId=Objects.toString(response.getOrDefault("jobid",response.get("jobId")),"");
         if(!jobId.matches("[A-Fa-f0-9]{32}")) throw new IllegalStateException("Flink submission response did not contain a valid job id");
