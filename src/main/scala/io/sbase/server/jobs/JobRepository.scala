@@ -538,6 +538,167 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
   p.setObject(1,workspaceId);p.setObject(2,workflowId);p.setString(3,eventType);p.setString(4,details);p.executeUpdate();p.close()
  }
 
+
+ private def notebookTokenHash(token:String):String =
+  java.security.MessageDigest.getInstance("SHA-256")
+   .digest(Option(token).getOrElse("").getBytes("UTF-8"))
+   .map(b=>f"${b & 0xff}%02x").mkString
+
+ private def newNotebookToken():String = UUID.randomUUID().toString.replace("-","") + UUID.randomUUID().toString.replace("-","")
+
+ private def notebookAccess(c:Connection,id:UUID,token:String,write:Boolean,ownerOnly:Boolean=false):String = {
+  require(token!=null && token.trim.nonEmpty,"Notebook access token required")
+  val hash=notebookTokenHash(token.trim)
+  val p=c.prepareStatement("""SELECT CASE WHEN n.owner_token_hash=? THEN 'OWNER' ELSE 'SHARE' END AS actor,
+   | CASE WHEN n.owner_token_hash=? THEN 'WRITE' ELSE s.permission END AS permission
+   | FROM lakehouse_notebook n LEFT JOIN lakehouse_notebook_share s
+   | ON s.notebook_id=n.id AND s.token_hash=? AND s.revoked_at IS NULL
+   | AND (s.expires_at IS NULL OR s.expires_at>now())
+   | WHERE n.id=? AND n.deleted_at IS NULL
+   | AND (n.owner_token_hash=? OR s.id IS NOT NULL)""".stripMargin)
+  p.setString(1,hash);p.setString(2,hash);p.setString(3,hash);p.setObject(4,id);p.setString(5,hash)
+  val rs=p.executeQuery()
+  val actor=if(rs.next()) {
+   val a=rs.getString("actor");val permission=rs.getString("permission")
+   if(ownerOnly && a!="OWNER"){rs.close();p.close();throw new SecurityException("Notebook owner permission required")}
+   if(write && permission!="WRITE"){rs.close();p.close();throw new SecurityException("Notebook write permission required")}
+   a
+  } else {rs.close();p.close();throw new SecurityException("Notebook not found or access denied")}
+  rs.close();p.close();actor
+ }
+
+ private def notebookEvent(c:Connection,id:UUID,event:String,actor:String,details:String):Unit = {
+  val p=c.prepareStatement("INSERT INTO lakehouse_notebook_event(notebook_id,event_type,actor_kind,details) VALUES (?,?,?,?::jsonb)")
+  p.setObject(1,id);p.setString(2,event);p.setString(3,actor);p.setString(4,details);p.executeUpdate();p.close()
+ }
+
+ def createNotebook(title:String,description:String,cellsJson:String):(Map[String,Object],String) = {
+  require(title!=null && title.trim.nonEmpty && title.trim.length<=200,"Notebook title must contain 1..200 characters")
+  val cells=Option(cellsJson).filter(_.trim.nonEmpty).getOrElse("[]")
+  val id=UUID.randomUUID();val token=newNotebookToken();val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false)
+   val p=c.prepareStatement("INSERT INTO lakehouse_notebook(id,title,description,cells,owner_token_hash) VALUES (?,?,?,?::jsonb,?)")
+   p.setObject(1,id);p.setString(2,title.trim);p.setString(3,Option(description).orNull);p.setString(4,cells);p.setString(5,notebookTokenHash(token));p.executeUpdate();p.close()
+   val rev=c.prepareStatement("INSERT INTO lakehouse_notebook_revision(notebook_id,version,title,description,cells,change_summary) VALUES (?,1,?,?,?::jsonb,'Notebook created')")
+   rev.setObject(1,id);rev.setString(2,title.trim);rev.setString(3,Option(description).orNull);rev.setString(4,cells);rev.executeUpdate();rev.close()
+   notebookEvent(c,id,"CREATED","OWNER","{}");c.commit()
+   (Map[String,Object]("id"->id.toString,"title"->title.trim,"description"->Option(description).orNull,"cells"->cells,"version"->Long.box(1L),"permission"->"OWNER","createdAt"->java.time.Instant.now().toString,"updatedAt"->java.time.Instant.now().toString),token)
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ def listNotebooks(token:String):Seq[Map[String,Object]] = {
+  val hash=notebookTokenHash(token);val c=dataSource.getConnection
+  try {
+   val p=c.prepareStatement("""SELECT n.id,n.title,n.description,n.version,n.updated_at,
+    | CASE WHEN n.owner_token_hash=? THEN 'OWNER' ELSE 'SHARE' END AS actor,
+    | CASE WHEN n.owner_token_hash=? THEN 'WRITE' ELSE s.permission END AS permission
+    | FROM lakehouse_notebook n LEFT JOIN lakehouse_notebook_share s
+    | ON s.notebook_id=n.id AND s.token_hash=? AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at>now())
+    | WHERE n.deleted_at IS NULL AND (n.owner_token_hash=? OR s.id IS NOT NULL)
+    | ORDER BY n.updated_at DESC""")
+   (1 to 4).foreach(i=>p.setString(i,hash));val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next())out+=Map[String,Object]("id"->rs.getString("id"),"title"->rs.getString("title"),
+    "description"->Option(rs.getString("description")).orNull,"version"->Long.box(rs.getLong("version")),
+    "updatedAt"->rs.getTimestamp("updated_at").toInstant.toString,"actor"->rs.getString("actor"),
+    "permission"->rs.getString("permission"))
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
+ def getNotebook(id:UUID,token:String):Map[String,Object] = {
+  val c=dataSource.getConnection
+  try {
+   val actor=notebookAccess(c,id,token,false)
+   val p=c.prepareStatement("SELECT id,title,description,cells::text,version,created_at,updated_at FROM lakehouse_notebook WHERE id=? AND deleted_at IS NULL")
+   p.setObject(1,id);val rs=p.executeQuery()
+   if(!rs.next())throw new NoSuchElementException("Notebook not found")
+   val result=Map[String,Object]("id"->rs.getString("id"),"title"->rs.getString("title"),
+    "description"->Option(rs.getString("description")).orNull,"cells"->rs.getString("cells"),
+    "version"->Long.box(rs.getLong("version")),"createdAt"->rs.getTimestamp("created_at").toInstant.toString,
+    "updatedAt"->rs.getTimestamp("updated_at").toInstant.toString,"actor"->actor)
+   rs.close();p.close();result
+  } finally c.close()
+ }
+
+ def updateNotebook(id:UUID,token:String,expectedVersion:Long,title:String,description:String,cellsJson:String,summary:String):Long = {
+  require(title!=null && title.trim.nonEmpty && title.trim.length<=200,"Notebook title must contain 1..200 characters")
+  require(expectedVersion>0,"expectedVersion must be positive")
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false);val actor=notebookAccess(c,id,token,true)
+   val cells=Option(cellsJson).filter(_.trim.nonEmpty).getOrElse("[]")
+   val p=c.prepareStatement("UPDATE lakehouse_notebook SET title=?,description=?,cells=?::jsonb,version=version+1,updated_at=now() WHERE id=? AND version=? AND deleted_at IS NULL RETURNING version")
+   p.setString(1,title.trim);p.setString(2,Option(description).orNull);p.setString(3,cells);p.setObject(4,id);p.setLong(5,expectedVersion)
+   val rs=p.executeQuery()
+   if(!rs.next()){rs.close();p.close();throw new IllegalStateException("NOTEBOOK_VERSION_CONFLICT: reload the latest version before saving")}
+   val version=rs.getLong(1);rs.close();p.close()
+   val rev=c.prepareStatement("INSERT INTO lakehouse_notebook_revision(notebook_id,version,title,description,cells,change_summary) VALUES (?,?,?,?,?::jsonb,?)")
+   rev.setObject(1,id);rev.setLong(2,version);rev.setString(3,title.trim);rev.setString(4,Option(description).orNull);rev.setString(5,cells);rev.setString(6,Option(summary).filter(_.trim.nonEmpty).getOrElse("Notebook updated"));rev.executeUpdate();rev.close()
+   notebookEvent(c,id,"UPDATED",actor,"{""version"":"+version+"}");c.commit();version
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ def deleteNotebook(id:UUID,token:String):Boolean = {
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false);notebookAccess(c,id,token,true,true)
+   val p=c.prepareStatement("UPDATE lakehouse_notebook SET deleted_at=now(),updated_at=now() WHERE id=? AND deleted_at IS NULL")
+   p.setObject(1,id);val changed=p.executeUpdate();p.close()
+   if(changed==1)notebookEvent(c,id,"DELETED","OWNER","{}")
+   c.commit();changed==1
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ def createNotebookShare(id:UUID,ownerToken:String,permission:String,label:String,expiresAt:Option[String]):Map[String,Object] = {
+  val role=Option(permission).getOrElse("READ").toUpperCase(java.util.Locale.ROOT)
+  require(Set("READ","WRITE").contains(role),"permission must be READ or WRITE")
+  val token=newNotebookToken();val shareId=UUID.randomUUID();val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false);notebookAccess(c,id,ownerToken,true,true)
+   val p=c.prepareStatement("INSERT INTO lakehouse_notebook_share(id,notebook_id,token_hash,permission,label,expires_at) VALUES (?,?,?,?,?,?::timestamptz)")
+   p.setObject(1,shareId);p.setObject(2,id);p.setString(3,notebookTokenHash(token));p.setString(4,role);p.setString(5,Option(label).orNull);p.setString(6,expiresAt.orNull);p.executeUpdate();p.close()
+   notebookEvent(c,id,"SHARE_CREATED","OWNER","{""shareId"":"""+shareId+""",""permission"":"""+role+"""}");c.commit()
+   Map[String,Object]("shareId"->shareId.toString,"permission"->role,"label"->Option(label).orNull,"token"->token)
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ def listNotebookShares(id:UUID,ownerToken:String):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   notebookAccess(c,id,ownerToken,true,true)
+   val p=c.prepareStatement("SELECT id,permission,label,expires_at,revoked_at,created_at FROM lakehouse_notebook_share WHERE notebook_id=? ORDER BY created_at DESC")
+   p.setObject(1,id);val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next())out+=Map[String,Object]("shareId"->rs.getString(1),"permission"->rs.getString(2),
+    "label"->Option(rs.getString(3)).orNull,"expiresAt"->Option(rs.getString(4)).orNull,
+    "revokedAt"->Option(rs.getString(5)).orNull,"createdAt"->rs.getTimestamp(6).toInstant.toString)
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
+ def revokeNotebookShare(id:UUID,shareId:UUID,ownerToken:String):Boolean = {
+  val c=dataSource.getConnection
+  try {
+   c.setAutoCommit(false);notebookAccess(c,id,ownerToken,true,true)
+   val p=c.prepareStatement("UPDATE lakehouse_notebook_share SET revoked_at=now() WHERE id=? AND notebook_id=? AND revoked_at IS NULL")
+   p.setObject(1,shareId);p.setObject(2,id);val changed=p.executeUpdate();p.close()
+   if(changed==1)notebookEvent(c,id,"SHARE_REVOKED","OWNER","{""shareId"":"""+shareId+"""}")
+   c.commit();changed==1
+  } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
+ }
+
+ def notebookRevisions(id:UUID,token:String):Seq[Map[String,Object]] = {
+  val c=dataSource.getConnection
+  try {
+   notebookAccess(c,id,token,false)
+   val p=c.prepareStatement("SELECT version,title,change_summary,changed_at FROM lakehouse_notebook_revision WHERE notebook_id=? ORDER BY version DESC LIMIT 100")
+   p.setObject(1,id);val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
+   while(rs.next())out+=Map[String,Object]("version"->Long.box(rs.getLong(1)),"title"->rs.getString(2),
+    "summary"->Option(rs.getString(3)).orNull,"changedAt"->rs.getTimestamp(4).toInstant.toString)
+   rs.close();p.close();out.toSeq
+  } finally c.close()
+ }
+
  def isHealthy:Boolean = {
   val c=dataSource.getConnection
   try { val s=c.createStatement(); val rs=s.executeQuery("SELECT 1"); val ok=rs.next();rs.close();s.close();ok } finally c.close()
