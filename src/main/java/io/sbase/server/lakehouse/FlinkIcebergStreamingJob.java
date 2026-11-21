@@ -1,6 +1,7 @@
 package io.sbase.server.lakehouse;
 
 import org.apache.flink.streaming.api.CheckpointingMode;
+import org.apache.flink.runtime.state.storage.FileSystemCheckpointStorage;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
@@ -67,9 +68,9 @@ public final class FlinkIcebergStreamingJob {
             throw new IllegalArgumentException("Only CREATE TABLE source DDL is accepted");
         StreamExecutionEnvironment env=StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(config.checkpointIntervalMs(),CheckpointingMode.EXACTLY_ONCE);
-        env.getCheckpointConfig().setCheckpointStorage(config.checkpointUri());
+        env.getCheckpointConfig().setCheckpointStorage(new FileSystemCheckpointStorage(config.checkpointUri()));
         env.getCheckpointConfig().setCheckpointTimeout(config.checkpointTimeoutMs());
-        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(Duration.ofMillis(config.checkpointIntervalMs()/2));
+        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(config.checkpointIntervalMs()/2);
         env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
         env.getCheckpointConfig().setTolerableCheckpointFailureNumber(3);
         StreamTableEnvironment tables=StreamTableEnvironment.create(env);
