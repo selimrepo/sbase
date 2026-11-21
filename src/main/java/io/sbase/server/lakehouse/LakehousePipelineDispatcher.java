@@ -79,7 +79,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
                             r.getObject(7,UUID.class),r.getLong(8),r.getString(9)));
                 }
                 c.commit();return out;
-            } catch(Exception e) { c.rollback();throw e; }
+            } catch(SQLException e) { c.rollback();throw e; }
         }
     }
 
@@ -178,7 +178,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         return response;
     }
 
-    private void finish(Job job,String status,String error,boolean keepRunning,Map<String,Object> result) throws SQLException {
+    private void finish(Job job,String status,String error,boolean keepRunning,Map<String,Object> result) throws Exception {
         try(Connection c=ds.getConnection()) {
             c.setAutoCommit(false);
             if(!ownsLease(c,job)) { c.rollback();return; }
