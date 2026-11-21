@@ -89,19 +89,30 @@ public final class LakehouseApiService implements AutoCloseable {
     }
 
     public Map<String,Object> createNamespace(Session s,String namespace) {
-        identifier(namespace);spark.sql("CREATE NAMESPACE IF NOT EXISTS sbase."+namespace);
+        identifier(namespace);
+        boolean reserved=false;
         String sql="INSERT INTO lakehouse_namespace_owner(catalog_name,namespace_name,workspace_id,owner_principal) VALUES('sbase',?,?,?) ON CONFLICT(catalog_name,namespace_name) DO NOTHING";
         try(var c=dataSource.getConnection();var p=c.prepareStatement(sql)) {
             p.setString(1,namespace);p.setObject(2,s.principal().workspaceId());p.setString(3,s.subject());
-            if(p.executeUpdate()==0) try(var q=c.prepareStatement("SELECT workspace_id FROM lakehouse_namespace_owner WHERE catalog_name='sbase' AND namespace_name=?")) {
+            reserved=p.executeUpdate()==1;
+            if(!reserved) try(var q=c.prepareStatement("SELECT workspace_id FROM lakehouse_namespace_owner WHERE catalog_name='sbase' AND namespace_name=?")) {
                 q.setString(1,namespace);try(var r=q.executeQuery()) {
                     if(!r.next() || !s.principal().workspaceId().equals(r.getObject(1,UUID.class)))
                         throw new SecurityException("Namespace already belongs to another workspace");
                 }
             }
-            return Map.of("catalog","sbase","namespace",namespace,"status","AVAILABLE");
         } catch(SecurityException e) { throw e; }
-        catch(Exception e) { throw failure("Unable to register namespace ownership",e); }
+        catch(Exception e) { throw failure("Unable to reserve namespace ownership",e); }
+        try {
+            spark.sql("CREATE NAMESPACE IF NOT EXISTS sbase."+namespace);
+            return Map.of("catalog","sbase","namespace",namespace,"status","AVAILABLE");
+        } catch(Exception e) {
+            if(reserved) try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
+                    "DELETE FROM lakehouse_namespace_owner WHERE catalog_name='sbase' AND namespace_name=? AND workspace_id=?")) {
+                p.setString(1,namespace);p.setObject(2,s.principal().workspaceId());p.executeUpdate();
+            } catch(Exception cleanup) { e.addSuppressed(cleanup); }
+            throw failure("Unable to create Iceberg namespace",e);
+        }
     }
 
     public List<Map<String,Object>> tables(Session s,String namespace) {
