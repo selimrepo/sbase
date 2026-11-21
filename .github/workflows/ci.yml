@@ -108,8 +108,9 @@ jobs:
               && curl --fail --silent 'http://localhost:8983/solr/admin/info/system?wt=json' >/dev/null \
               && curl --fail --silent http://localhost:8081/json/ >/dev/null \
               && curl --fail --silent http://localhost:8082/overview >/dev/null \
-              && curl --fail --silent http://localhost:9000/minio/health/ready >/dev/null; then
-              echo "API, Studio, PostgreSQL, Cassandra, Solr, Spark, Flink and MinIO are ready."
+              && curl --fail --silent http://localhost:9000/minio/health/ready >/dev/null \
+              && docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 >/dev/null 2>&1; then
+              echo "API, Studio, PostgreSQL, Cassandra, Solr, Spark, Flink, Kafka and MinIO are ready."
               break
             fi
             if [ "$attempt" -eq 90 ]; then
@@ -150,6 +151,71 @@ jobs:
             "${AUTH[@]}" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["rowCount"] == 2 and d["format"] == "iceberg"'
           curl --fail --silent http://localhost:8080/api/v1/lakehouse/namespaces/ci_lakehouse/tables/orders/snapshots \
             "${AUTH[@]}" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d) >= 1, "Iceberg snapshot was not committed"'
+
+          # Exercise the real Kafka -> Flink SQL -> Iceberg -> MinIO path.
+          docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka \
+            /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic sbase-ci-orders --partitions 3 --replication-factor 1
+          docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager sh -c 'cat > /tmp/sbase-kafka-iceberg.sql <<EOF
+          SET execution.checkpointing.interval = 10s;
+          SET execution.checkpointing.mode = EXACTLY_ONCE;
+          CREATE CATALOG sbase_iceberg WITH (
+            'type'='iceberg',
+            'catalog-type'='jdbc',
+            'uri'='jdbc:postgresql://postgres:5432/sbase',
+            'jdbc.user'='sbase',
+            'jdbc.password'='sbase-test',
+            'warehouse'='s3://sbase-warehouse/',
+            'io-impl'='org.apache.iceberg.aws.s3.S3FileIO',
+            'client.region'='us-east-1',
+            's3.endpoint'='http://minio:9000',
+            's3.access-key-id'='minioadmin',
+            's3.secret-access-key'='minioadmin',
+            's3.path-style-access'='true'
+          );
+          CREATE TABLE kafka_ci_orders (
+            order_id BIGINT,
+            region STRING,
+            amount DOUBLE
+          ) WITH (
+            'connector'='kafka',
+            'topic'='sbase-ci-orders',
+            'properties.bootstrap.servers'='kafka:9092',
+            'properties.group.id'='sbase-ci-flink-iceberg',
+            'scan.startup.mode'='earliest-offset',
+            'format'='json'
+          );
+          INSERT INTO sbase_iceberg.ci_lakehouse.orders
+          SELECT order_id, region, amount FROM kafka_ci_orders;
+          EOF
+          nohup /opt/flink/bin/sql-client.sh -f /tmp/sbase-kafka-iceberg.sql >/tmp/sbase-kafka-iceberg.log 2>&1 </dev/null &'
+          for attempt in {1..30}; do
+            if docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager \
+              sh -c 'grep -q -E "Job has been submitted|JobID|Job ID" /tmp/sbase-kafka-iceberg.log'; then break; fi
+            if [ "$attempt" -eq 30 ]; then
+              docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager cat /tmp/sbase-kafka-iceberg.log
+              exit 1
+            fi
+            sleep 2
+          done
+          printf '%s\\n' \
+            '{"order_id":900001,"region":"EU","amount":41.25}' \
+            '{"order_id":900002,"region":"APAC","amount":99.5}' | \
+            docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka \
+              /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 --topic sbase-ci-orders
+          for attempt in {1..60}; do
+            COUNT="$(curl --fail --silent "http://localhost:8080/api/v1/lakehouse/namespaces/ci_lakehouse/tables/orders?limit=100" \
+              "${AUTH[@]}" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("rowCount",0))')"
+            if [ "$COUNT" -ge 4 ]; then
+              echo "Kafka -> Flink -> Iceberg -> MinIO committed records; visible row count: $COUNT"
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager cat /tmp/sbase-kafka-iceberg.log
+              exit 1
+            fi
+            sleep 5
+          done
       - name: Verify Spark worker registration and Flink TaskManager
         shell: bash
         run: |
