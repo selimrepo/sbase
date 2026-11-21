@@ -221,7 +221,9 @@ object LakehouseApiRoutes extends Directives {
           post { entity(as[String]) { raw =>
               val body=raw.parseJson.asJsObject
             val resolved=body.fields.get("resolved").exists(_.convertTo[Boolean])
-            run(auth)(s => service.get.finishDeadLetter(s,deadLetterId,resolved))
+            val leaseToken=body.fields.get("leaseToken").map(_.convertTo[String]).map(UUID.fromString)
+              .getOrElse(throw new IllegalArgumentException("leaseToken is required"))
+            run(auth)(s => service.get.finishDeadLetter(s,deadLetterId,leaseToken,resolved))
           }}
         }
       } ~
