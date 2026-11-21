@@ -45,6 +45,7 @@ public final class SparkLineageListener implements QueryExecutionListener {
         if(!targetMatcher.find()) return;
         TableId target=TableId.parse(normalize(targetMatcher.group(1)));
         UUID workspaceId=workspace.get();
+        if(workspaceId==null) return;
         String actor=Objects.toString(principal.get(),"spark");
         for(String relation:relations) {
             TableId source=TableId.parse(relation);
