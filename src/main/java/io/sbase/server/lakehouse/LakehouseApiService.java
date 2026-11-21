@@ -142,13 +142,16 @@ public final class LakehouseApiService implements AutoCloseable {
 
     public Map<String,Object> writeRows(Session s,String namespace,String table,List<Map<String,Object>> rows) {
         identifier(namespace);identifier(table);
-        control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.INSERT);
+        control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.USE);
         if(rows==null || rows.isEmpty() || rows.size()>10000) throw new IllegalArgumentException("rows must contain 1..10000 records");
         try(LakehouseExecutionContext context=LakehouseExecutionContext.enter(s.principal().workspaceId(),s.subject())) {
+            String id="sbase."+namespace+"."+table;
+            boolean exists=spark.catalog().tableExists(id);
+            if(exists) control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.INSERT);
+            else control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.CREATE);
             List<String> json=new ArrayList<>();for(Map<String,Object> row:rows) json.add(JSON.writeValueAsString(row));
             var rdd=new org.apache.spark.api.java.JavaSparkContext(spark.sparkContext()).parallelize(json,Math.min(8,json.size()));
-            Dataset<Row> frame=spark.read().json(rdd);String id="sbase."+namespace+"."+table;
-            boolean exists=spark.catalog().tableExists(id);
+            Dataset<Row> frame=spark.read().json(rdd);
             if(exists) frame.writeTo(id).append();else frame.writeTo(id).using("iceberg").create();
             return Map.of("namespace",namespace,"table",table,"rowsWritten",rows.size(),"format","iceberg","mode",exists?"append":"create");
         } catch(Exception e) { throw failure("Iceberg write failed",e); }
