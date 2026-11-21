@@ -34,7 +34,7 @@ public final class LakehouseApiService implements AutoCloseable {
         config.setPassword(env("SBASE_POSTGRES_PASSWORD","change-me"));
         config.setMaximumPoolSize(Integer.parseInt(env("SBASE_LAKEHOUSE_DB_POOL_SIZE","8")));
         config.setMinimumIdle(1);config.setPoolName("sbase-lakehouse-api");
-        dataSource=new HikariDataSource(config);control=new LakehouseControlPlane(dataSource);
+        dataSource=new HikariDataSource(config);control=new LakehouseControlPlane(dataSource);\n        SparkLineageListener.install(spark,control,LakehouseExecutionContext::workspaceId,LakehouseExecutionContext::principal);
     }
 
     public Session authenticate(String authorization) {
@@ -131,7 +131,7 @@ public final class LakehouseApiService implements AutoCloseable {
         identifier(namespace);identifier(table);
         control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.INSERT);
         if(rows==null || rows.isEmpty() || rows.size()>10000) throw new IllegalArgumentException("rows must contain 1..10000 records");
-        try {
+        try(LakehouseExecutionContext context=LakehouseExecutionContext.enter(s.principal().workspaceId(),s.subject())) {
             List<String> json=new ArrayList<>();for(Map<String,Object> row:rows) json.add(JSON.writeValueAsString(row));
             var rdd=new org.apache.spark.api.java.JavaSparkContext(spark.sparkContext()).parallelize(json,Math.min(8,json.size()));
             Dataset<Row> frame=spark.read().json(rdd);String id="sbase."+namespace+"."+table;
@@ -158,7 +158,7 @@ public final class LakehouseApiService implements AutoCloseable {
         if(normalized.matches("(?is).*\\b(FROM|JOIN)\\s+.*") && refs==0)
             throw new SecurityException("Table references must be fully qualified as sbase.namespace.table");
         int limit=Math.max(1,Math.min(requestedLimit,1000));
-        try {
+        try(LakehouseExecutionContext context=LakehouseExecutionContext.enter(s.principal().workspaceId(),s.subject())) {
             Dataset<Row> frame=spark.sql(normalized).limit(limit);List<Map<String,Object>> rows=new ArrayList<>();
             for(String json:frame.toJSON().collectAsList()) rows.add(JSON.readValue(json,MAP));
             return Map.of("engine","Spark SQL / Iceberg","columns",Arrays.asList(frame.schema().fieldNames()),"rows",rows,"rowCount",rows.size(),"limit",limit);
