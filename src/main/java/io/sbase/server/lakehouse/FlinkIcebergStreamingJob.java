@@ -88,7 +88,8 @@ public final class FlinkIcebergStreamingJob {
     public static void main(String[] args) throws Exception {
         if(args.length!=1) throw new IllegalArgumentException("Expected one JSON job configuration argument");
         com.fasterxml.jackson.databind.ObjectMapper json=new com.fasterxml.jackson.databind.ObjectMapper();
-        String payload=new String(java.util.Base64.getUrlDecoder().decode(args[0]),java.nio.charset.StandardCharsets.UTF_8);\n        java.util.Map<?,?> values=json.readValue(payload,java.util.Map.class);
+        String payload=new String(java.util.Base64.getUrlDecoder().decode(args[0]),java.nio.charset.StandardCharsets.UTF_8);
+        java.util.Map<?,?> values=json.readValue(payload,java.util.Map.class);
         String checkpoint=Objects.toString(values.get("checkpointUri"),"");
         String sourceDdl=Objects.toString(values.get("sourceDdl"),"");
         String insertSql=Objects.toString(values.get("insertSql"),"");
