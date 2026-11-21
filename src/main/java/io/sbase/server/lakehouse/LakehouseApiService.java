@@ -683,5 +683,10 @@ public final class LakehouseApiService implements AutoCloseable {
     private static String env(String k,String d) { return Optional.ofNullable(System.getenv(k)).filter(v->!v.isBlank()).orElse(d); }
     private static String requiredEnv(String k) { String v=System.getenv(k);if(v==null||v.length()<32)throw new IllegalStateException(k+" must be configured with at least 32 characters");return v; }
     private static IllegalStateException failure(String m,Exception e) { return new IllegalStateException(m+": "+e.getMessage(),e); }
+    /** Registers one Spark listener that inherits the authenticated request/job identity. */
+    public void installLineageListener() {
+        SparkLineageListener.install(spark,control,LakehouseExecutionContext::workspaceId,LakehouseExecutionContext::principal);
+    }
+
     @Override public void close() { dataSource.close(); }
 }
