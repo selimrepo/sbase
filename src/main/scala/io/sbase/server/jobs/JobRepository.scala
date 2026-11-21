@@ -682,7 +682,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
    c.setAutoCommit(false);notebookAccess(c,id,ownerToken,true,true)
    val p=c.prepareStatement("UPDATE lakehouse_notebook_share SET revoked_at=now() WHERE id=? AND notebook_id=? AND revoked_at IS NULL")
    p.setObject(1,shareId);p.setObject(2,id);val changed=p.executeUpdate();p.close()
-   if(changed==1)notebookEvent(c,id,"SHARE_REVOKED","OWNER","{""shareId"":"""+shareId+"""}")
+   if(changed==1)notebookEvent(c,id,"SHARE_REVOKED","OWNER",s"""{"shareId":"$shareId"}""")
    c.commit();changed==1
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
  }
