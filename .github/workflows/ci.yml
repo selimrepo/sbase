@@ -82,6 +82,23 @@ jobs:
     runs-on: ubuntu-latest
     needs: [backend, workflow-studio, python-test-tool]
     timeout-minutes: 45
+    env:
+      CASSANDRA_MAX_HEAP_SIZE: 768M
+      CASSANDRA_HEAP_NEWSIZE: 256M
+      CASSANDRA_MEMORY_LIMIT: 1g
+      SOLR_JAVA_MEM: "-Xms256m -Xmx768m"
+      SOLR_HEAP: 768m
+      SOLR_MEMORY_LIMIT: 1g
+      SPARK_MASTER_MEMORY_LIMIT: 768m
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 1g
+      SPARK_WORKER_MEMORY_LIMIT: 1500m
+      FLINK_JOBMANAGER_MEMORY: 768m
+      FLINK_JOBMANAGER_MEMORY_LIMIT: 1g
+      FLINK_TASKMANAGER_MEMORY: 1200m
+      FLINK_TASKMANAGER_MEMORY_LIMIT: 1500m
+      FLINK_TASK_SLOTS: 2
+      KAFKA_MEMORY_LIMIT: 768m
     steps:
       - uses: actions/checkout@v4
       - name: Validate full platform Compose configuration
@@ -224,11 +241,18 @@ jobs:
           curl --fail --silent http://localhost:8081/json/ | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d.get("workers", [])) >= 1, "Spark has no registered workers"'
           curl --fail --silent http://localhost:8082/taskmanagers | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d.get("taskmanagers", [])) >= 2, "Flink has fewer than two registered TaskManagers"'
           for service in flink-jobmanager flink-taskmanager; do
-            docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T "$service" sh -ec '
-              test -n "$(find /opt/flink/lib -maxdepth 1 -name "flink-sql-connector-kafka-*.jar" -print -quit)"
-              test -n "$(find /opt/flink/lib -maxdepth 1 -name "iceberg-flink-runtime-1.20-*.jar" -print -quit)"
-              test -n "$(find /opt/flink/plugins/s3-fs-hadoop -maxdepth 1 -name "flink-s3-fs-hadoop-*.jar" -print -quit)"
-            '
+            if [ "$service" = "flink-taskmanager" ]; then
+              containers="$(docker compose -f compose.yaml -f compose.full.yaml --profile full ps -q "$service")"
+            else
+              containers="$(docker compose -f compose.yaml -f compose.full.yaml --profile full ps -q "$service")"
+            fi
+            for container in $containers; do
+              docker exec "$container" sh -ec '
+                test -n "$(find /opt/flink/lib -maxdepth 1 -name "flink-sql-connector-kafka-*.jar" -print -quit)"
+                test -n "$(find /opt/flink/lib -maxdepth 1 -name "iceberg-flink-runtime-1.20-*.jar" -print -quit)"
+                test -n "$(find /opt/flink/plugins/s3-fs-hadoop -maxdepth 1 -name "flink-s3-fs-hadoop-*.jar" -print -quit)"
+              '
+            done
           done
       - name: Show full platform logs on failure
         if: failure()
