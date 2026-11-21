@@ -20,15 +20,15 @@ The Docker build downloads exact Maven Central coordinates and verifies each JAR
 
 ```bash
 docker compose -f compose.yaml -f compose.full.yaml --profile full build flink-jobmanager flink-taskmanager
-docker compose -f compose.yaml -f compose.full.yaml --profile full up -d kafka flink-jobmanager flink-taskmanager
+docker compose -f compose.yaml -f compose.full.yaml --profile full up -d kafka kafka-2 kafka-3 flink-jobmanager flink-taskmanager
 ```
 
 To add another connector, pin its Maven coordinate in flink/Dockerfile, add it to the compatibility matrix above, and add a CI classpath assertion. Never copy a JAR manually into a running container: rebuild and roll the whole Flink cluster.
 
 ## Production notes
 
-- Use a Kafka cluster with replication factor 3, TLS/SASL, ACLs, and a dedicated service identity; the single-broker Compose topology is for integration testing.
+- Use a Kafka cluster with replication factor 3, TLS/SASL, ACLs, and a dedicated service identity; the three-broker Compose topology is for integration testing and development; production should use managed or independently operated brokers.
 - Use a durable, versioned S3-compatible bucket for checkpoints and Iceberg data. Configure bucket lifecycle/versioning and separate credentials for data and checkpoints in production.
 - Keep Flink, connector, Iceberg, and Java versions aligned across all nodes. Upgrade them as one tested compatibility unit.
-- CI sends Kafka JSON records through a running Flink SQL job into an Iceberg table and checks visibility through the SBase Lakehouse API. This is a single-host integration environment, not a substitute for multi-host network-partition, broker-rebalance, failover, and recovery testing.
+- CI sends Kafka JSON records through a running Flink SQL job into an Iceberg table and checks visibility through the SBase Lakehouse API. This runs three Kafka brokers and two Flink TaskManagers as separate containers on one CI host. It is a distributed-process integration test, not a substitute for multi-host network-partition, broker-rebalance, failover, and recovery testing.
 - Development Compose credentials are intentionally insecure. Override every credential and enable transport encryption before exposing any service.
