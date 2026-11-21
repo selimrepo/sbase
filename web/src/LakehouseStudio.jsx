@@ -509,7 +509,7 @@ function DeadLetterStudio() {
         method:"POST",body:JSON.stringify({limit:Number(limit)})
       });
       setClaimed(Array.isArray(data)?data:[]);
-      setNotice("Claimed "+(Array.isArray(data)?data.length:0)+" records. Each claim expires after five minutes.");
+      setNotice("Claimed "+(Array.isArray(data)?data.length:0)+" records for manual recovery. Each claim expires after five minutes.");
       await refresh();
     } catch(e){setError(e.message);}
     finally{setBusy(false);}
@@ -527,19 +527,19 @@ function DeadLetterStudio() {
     finally{setBusy(false);}
   }
   return <div className="studio-panel">
-    <div className="studio-heading"><div><div className="section-title">INGESTION RECOVERY</div><h2>Dead-letter operations</h2><p>Inspect failed records, claim bounded replay batches with expiring fencing tokens, then resolve or safely requeue each record.</p></div><button onClick={refresh} disabled={busy||!runId.trim()}>↻ Refresh</button></div>
+    <div className="studio-heading"><div><div className="section-title">INGESTION RECOVERY</div><h2>Dead-letter operations</h2><p>Inspect failed records, claim bounded recovery batches with expiring fencing tokens, then resolve or safely return each record to the pending queue.</p></div><button onClick={refresh} disabled={busy||!runId.trim()}>↻ Refresh</button></div>
     <div className="pipeline-form">
       <div className="pipeline-form-grid">
         <label>Ingestion run ID<input value={runId} onChange={e=>setRunId(e.target.value)} placeholder="UUID from pipeline run history"/></label>
         <label>Claim batch size<input type="number" min="1" max="1000" value={limit} onChange={e=>setLimit(e.target.value)}/></label>
       </div>
-      <div className="pipeline-form-actions"><button onClick={refresh} disabled={busy||!runId.trim()}>Load records</button><button className="studio-primary" onClick={claim} disabled={busy||!runId.trim()||Number(limit)<1||Number(limit)>1000}>Claim replay batch</button><span>Claims expire after five minutes; stale workers cannot finish a newer claim. Maximum ten attempts per record.</span></div>
+      <div className="pipeline-form-actions"><button onClick={refresh} disabled={busy||!runId.trim()}>Load records</button><button className="studio-primary" onClick={claim} disabled={busy||!runId.trim()||Number(limit)<1||Number(limit)>1000}>Claim recovery batch</button><span>Claims expire after five minutes; stale workers cannot finish a newer claim. Maximum ten attempts per record.</span></div>
     </div>
     {error&&<div className="studio-error">{error}</div>}{notice&&<div className="notebook-notice">{notice}</div>}
     <section className="pipeline-list"><div className="section-title">CLAIMED RECORDS · {claimed.length}</div>
       {!claimed.length?<div className="empty-state">No records currently claimed by this session.</div>:claimed.map(item=><article className="pipeline-item" key={item.id}>
         <div><b>{item.recordKey||item.id} · attempt {item.attempts}</b><small>{item.errorClass}: {item.errorMessage||"No error message"} · partition {item.partition||"—"} · offset {JSON.stringify(item.offset)}</small><pre className="notebook-output">{JSON.stringify(item.payload,null,2)}</pre></div>
-        <div className="pipeline-actions"><button onClick={()=>finish(item,false)} disabled={busy}>Requeue</button><button className="studio-primary" onClick={()=>finish(item,true)} disabled={busy}>Mark resolved</button></div>
+        <div className="pipeline-actions"><button onClick={()=>finish(item,false)} disabled={busy}>Return to pending</button><button className="studio-primary" onClick={()=>finish(item,true)} disabled={busy}>Mark resolved</button></div>
       </article>)}
     </section>
     <section className="pipeline-list"><div className="section-title">DEAD-LETTER RECORDS · {records.length}</div>
