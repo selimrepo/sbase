@@ -206,6 +206,17 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
                 p.setTimestamp(3,retry?null:new Timestamp(System.currentTimeMillis()));p.setObject(4,job.runId());p.setObject(5,job.workspaceId());p.executeUpdate();
             }
             c.commit();
+            if(!retry) {
+                try {
+                    String payload=JSON.writeValueAsString(Map.of("pipelineId",job.pipelineId().toString(),
+                            "attemptId",job.attemptId().toString(),"pipelineDefinition",JSON.readTree(job.definition())));
+                    control.enqueueDeadLetter(job.workspaceId(),job.runId(),"pipeline",
+                            JSON.writeValueAsString(Map.of("attempt",job.attempt())),"pipeline:"+job.pipelineId(),
+                            payload,error.getClass().getName(),message);
+                } catch(Exception deadLetterError) {
+                    System.err.println("Could not persist terminal pipeline dead-letter: "+deadLetterError);
+                }
+            }
         } catch(SQLException e) { System.err.println("Could not persist pipeline failure: "+e); }
     }
 
