@@ -15,6 +15,32 @@ import scala.jdk.CollectionConverters._
 
 /** Authenticated HTTP surface for the Iceberg catalog and SQL workspace. */
 object LakehouseApiRoutes extends Directives {
+  // Keep primitive JSON readers explicit so the route module does not depend on
+  // wildcard implicit discovery across Spray JSON / Pekko HTTP versions.
+  private implicit val lakehouseStringReader: JsonReader[String] = new JsonReader[String] {
+    override def read(value: JsValue): String = value match {
+      case JsString(v) => v
+      case _ => deserializationError("Expected JSON string")
+    }
+  }
+  private implicit val lakehouseIntReader: JsonReader[Int] = new JsonReader[Int] {
+    override def read(value: JsValue): Int = value match {
+      case JsNumber(v) if v.isValidInt => v.toInt
+      case _ => deserializationError("Expected JSON integer")
+    }
+  }
+  private implicit val lakehouseLongReader: JsonReader[Long] = new JsonReader[Long] {
+    override def read(value: JsValue): Long = value match {
+      case JsNumber(v) if v.isValidLong => v.toLong
+      case _ => deserializationError("Expected JSON long")
+    }
+  }
+  private implicit val lakehouseBooleanReader: JsonReader[Boolean] = new JsonReader[Boolean] {
+    override def read(value: JsValue): Boolean = value match {
+      case JsBoolean(v) => v
+      case _ => deserializationError("Expected JSON boolean")
+    }
+  }
   def route(service: Option[LakehouseApiService], mapper: ObjectMapper)(implicit ec: ExecutionContext): Route = {
     def unavailable: Route = complete(StatusCodes.ServiceUnavailable -> JsObject("error" -> JsString("Lakehouse JWT authentication is not configured; set SBASE_JWT_SECRET (32+ characters)")))
     def run(auth: Option[String])(f: LakehouseApiService.Session => Any): Route = service match {
