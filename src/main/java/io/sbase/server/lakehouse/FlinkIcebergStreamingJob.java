@@ -34,8 +34,7 @@ public final class FlinkIcebergStreamingJob {
 
     public static TableResult submit(Config config, String insertSql) {
         Objects.requireNonNull(config);
-        if(insertSql==null || !insertSql.stripLeading().toUpperCase().startsWith("INSERT INTO"))
-            throw new IllegalArgumentException("Only INSERT INTO streaming statements are accepted");
+        validateSinkTarget(insertSql);
 
         StreamExecutionEnvironment env=StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(config.checkpointIntervalMs(), CheckpointingMode.EXACTLY_ONCE);
@@ -64,8 +63,8 @@ public final class FlinkIcebergStreamingJob {
 
     public static TableResult submit(Config config,String sourceDdl,String insertSql) {
         Objects.requireNonNull(sourceDdl,"sourceDdl");
-        if(!sourceDdl.stripLeading().toUpperCase().startsWith("CREATE TABLE"))
-            throw new IllegalArgumentException("Only CREATE TABLE source DDL is accepted");
+        String[] target=validateSinkTarget(insertSql);
+        FlinkSqlGuard.validate(target[0],target[1],sourceDdl,insertSql);
         StreamExecutionEnvironment env=StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(config.checkpointIntervalMs(),CheckpointingMode.EXACTLY_ONCE);
         env.getCheckpointConfig().setCheckpointStorage(new FileSystemCheckpointStorage(config.checkpointUri()));
@@ -103,6 +102,16 @@ public final class FlinkIcebergStreamingJob {
             System.getenv("S3_ACCESS_KEY"),System.getenv("S3_SECRET_KEY"),
             Boolean.parseBoolean(System.getenv().getOrDefault("S3_PATH_STYLE_ACCESS","true")));
         submit(config,sourceDdl,insertSql).await();
+    }
+
+    private static String[] validateSinkTarget(String insertSql) {
+        if(insertSql==null || insertSql.length()>20000 || insertSql.contains(";") ||
+           insertSql.contains("--") || insertSql.contains("/*"))
+            throw new IllegalArgumentException("Flink requires one bounded INSERT statement without comments or separators");
+        java.util.regex.Matcher matcher=java.util.regex.Pattern.compile(
+            "(?is)^\\s*INSERT\\s+INTO\\s+sbase_iceberg\\.([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)(?:\\s|\\().*").matcher(insertSql);
+        if(!matcher.matches()) throw new IllegalArgumentException("Flink sink must be a fully qualified SBase Iceberg table");
+        return new String[]{matcher.group(1),matcher.group(2)};
     }
 
     private static String sql(String value) {
