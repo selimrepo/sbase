@@ -9,7 +9,7 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.StandardCharsets;\nimport java.sql.*;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
@@ -536,6 +536,14 @@ public final class LakehouseApiService implements AutoCloseable {
             boolean committed=control.commitCdcOffset(s.principal().workspaceId(),sourceId,stream,partition,offsetJson,expectedGeneration);
             return Map.of("committed",committed,"sourceId",sourceId.toString(),"stream",stream,"partition",partition);
         } catch(Exception e) { throw failure("Unable to commit CDC offset",e); }
+    }
+
+    private static String resolveSecret(String ref) {
+        if(ref==null || ref.isBlank()) throw new IllegalArgumentException("secretRef is required");
+        String envKey="SBASE_SECRET_"+ref.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]","_");
+        String value=System.getenv(envKey);
+        if(value==null) throw new IllegalStateException("Secret provider did not resolve "+ref+" (expected "+envKey+")");
+        return value;
     }
 
     private static String required(Map<String,?> body,String key) {
