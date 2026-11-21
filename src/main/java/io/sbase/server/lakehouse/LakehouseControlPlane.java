@@ -260,7 +260,7 @@ public final class LakehouseControlPlane {
             WITH picked AS (
               SELECT id FROM lakehouse_dead_letter
               WHERE workspace_id=? AND ingestion_run_id=? AND status='PENDING'
-              ORDER BY first_seen_at FOR UPDATE SKIP LOCKED LIMIT ?
+              ORDER BY first_seen_at LIMIT ? FOR UPDATE SKIP LOCKED
             )
             UPDATE lakehouse_dead_letter d SET status='REPLAYING', attempts=attempts+1, last_seen_at=now()
             FROM picked WHERE d.id=picked.id
