@@ -51,7 +51,7 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
             WHERE enabled=true AND next_run_at<=now()
               AND (lease_until IS NULL OR lease_until<now())
             ORDER BY next_run_at
-            FOR UPDATE SKIP LOCKED LIMIT ?
+            LIMIT ? FOR UPDATE SKIP LOCKED
           )
           UPDATE lakehouse_maintenance_policy p
           SET lease_owner=?, lease_until=now()+interval '5 minutes',
