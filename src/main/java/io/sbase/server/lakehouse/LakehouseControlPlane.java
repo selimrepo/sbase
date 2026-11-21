@@ -205,7 +205,7 @@ public final class LakehouseControlPlane {
                                    String offsetJson, long expectedGeneration) {
         String sql = """
             INSERT INTO lakehouse_cdc_offset(workspace_id,source_id,stream_name,partition_key,committed_offset,generation)
-            VALUES (?,?,?, ?,CAST(? AS jsonb),1)
+            SELECT ?,?,?,?,CAST(? AS jsonb),1 WHERE ?=0
             ON CONFLICT (workspace_id,source_id,stream_name,partition_key)
             DO UPDATE SET committed_offset=EXCLUDED.committed_offset,
               generation=lakehouse_cdc_offset.generation+1, updated_at=now()
@@ -213,7 +213,7 @@ public final class LakehouseControlPlane {
             """;
         try (Connection c=dataSource.getConnection(); PreparedStatement s=c.prepareStatement(sql)) {
             s.setObject(1,workspaceId); s.setObject(2,sourceId); s.setString(3,stream);
-            s.setString(4,partition); s.setString(5,offsetJson); s.setLong(6,expectedGeneration);
+            s.setString(4,partition); s.setString(5,offsetJson); s.setLong(6,expectedGeneration); s.setLong(7,expectedGeneration);
             return s.executeUpdate()==1;
         } catch (SQLException e) { throw new IllegalStateException("Unable to commit CDC offset",e); }
     }
