@@ -26,7 +26,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
     private final HikariDataSource ds;
     private final SparkSession spark;
     private final LakehouseControlPlane control;
-    private final ScheduledExecutorService executor;
+    private final ScheduledExecutorService executor;\n    private final ScheduledExecutorService heartbeatExecutor;
     private final UUID owner=UUID.randomUUID();
     private final AtomicBoolean started=new AtomicBoolean();
 
@@ -38,6 +38,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         c.setMaximumPoolSize(4);c.setMinimumIdle(1);c.setPoolName("sbase-lakehouse-pipeline-dispatcher");
         ds=new HikariDataSource(c);control=new LakehouseControlPlane(ds);
         executor=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"sbase-lakehouse-pipeline-dispatcher");t.setDaemon(true);return t;});
+        heartbeatExecutor=Executors.newScheduledThreadPool(2,r->{Thread t=new Thread(r,"sbase-lakehouse-pipeline-heartbeat");t.setDaemon(true);return t;});
     }
 
     public void start() {
@@ -84,22 +85,33 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
     }
 
     private void process(Job job) {
-        boolean longRunning=false;
-        Map<String,Object> result=Map.of("engine","SPARK");
+        ScheduledFuture<?> heartbeat=heartbeatExecutor.scheduleAtFixedRate(()->renewLease(job),30,30,TimeUnit.SECONDS);
         try {
-            Map<String,Object> definition=JSON.readValue(job.definition(),MAP);
-            authorizeTarget(job,definition);
-            String engine=Objects.toString(definition.get("engine"),"SPARK");
-            if("FLINK".equalsIgnoreCase(engine)) {
-                result=submitFlink(definition);
-                longRunning=true;
-            } else {
-                runSpark(job,definition);
+            boolean longRunning=false;
+            Map<String,Object> result=Map.of("engine","SPARK");
+            try {
+                Map<String,Object> definition=JSON.readValue(job.definition(),MAP);
+                authorizeTarget(job,definition);
+                String engine=Objects.toString(definition.get("engine"),"SPARK");
+                if("FLINK".equalsIgnoreCase(engine)) {
+                    result=submitFlink(definition);
+                    longRunning=true;
+                } else {
+                    runSpark(job,definition);
+                }
+                finish(job,longRunning? "RUNNING":"SUCCEEDED",null,longRunning,result);
+            } catch(Throwable e) {
+                fail(job,e);
             }
-            finish(job,longRunning? "RUNNING":"SUCCEEDED",null,longRunning,result);
-        } catch(Throwable e) {
-            fail(job,e);
-        }
+        } finally { heartbeat.cancel(false); }
+    }
+
+    private void renewLease(Job job) {
+        try(Connection c=ds.getConnection();PreparedStatement p=c.prepareStatement(
+                "UPDATE lakehouse_pipeline_attempt SET lease_until=now()+interval '2 hours',heartbeat_at=now() WHERE id=? AND status='RUNNING' AND lease_owner=? AND fencing_token=? AND lease_until>now()")) {
+            p.setObject(1,job.attemptId());p.setObject(2,job.owner());p.setLong(3,job.fence());
+            if(p.executeUpdate()==0) System.err.println("Lakehouse pipeline lease lost for attempt "+job.attemptId());
+        } catch(SQLException e) { System.err.println("Lakehouse pipeline heartbeat failed for "+job.attemptId()+": "+e); }
     }
 
     private void authorizeTarget(Job job,Map<String,Object> definition) {
@@ -300,5 +312,5 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         return value;
     }
     private static String env(String k,String d) { return Optional.ofNullable(System.getenv(k)).filter(v->!v.isBlank()).orElse(d); }
-    @Override public void close() { executor.shutdownNow();ds.close(); }
+    @Override public void close() { executor.shutdownNow();heartbeatExecutor.shutdownNow();ds.close(); }
 }
