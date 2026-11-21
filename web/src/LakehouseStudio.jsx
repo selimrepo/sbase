@@ -411,6 +411,77 @@ function PipelineStudio() {
   </div>;
 }
 
+function GovernanceStudio() {
+  const [namespace,setNamespace]=useState("default");
+  const [table,setTable]=useState("");
+  const [principalType,setPrincipalType]=useState("USER");
+  const [principalId,setPrincipalId]=useState("");
+  const [privilege,setPrivilege]=useState("SELECT");
+  const [expiresAt,setExpiresAt]=useState("");
+  const [grants,setGrants]=useState([]);
+  const [lineage,setLineage]=useState([]);
+  const [error,setError]=useState("");
+  const [notice,setNotice]=useState("");
+  const [busy,setBusy]=useState(false);
+  async function refresh() {
+    if(!namespace.trim()) return;
+    setBusy(true);setError("");
+    try {
+      const [g,l]=await Promise.all([
+        request("/lakehouse/namespaces/"+encodeURIComponent(namespace)+"/grants"),
+        request("/lakehouse/namespaces/"+encodeURIComponent(namespace)+"/lineage?limit=300")
+      ]);
+      setGrants(Array.isArray(g)?g:[]);setLineage(Array.isArray(l)?l:[]);
+    } catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+  async function grant() {
+    if(!principalId.trim()) return;
+    setBusy(true);setError("");setNotice("");
+    try {
+      const body={principalType,principalId:principalId.trim(),privilege,...(expiresAt?{expiresAt:new Date(expiresAt).toISOString()}:{})};
+      const path="/lakehouse/namespaces/"+encodeURIComponent(namespace)+(table.trim()?"/tables/"+encodeURIComponent(table.trim()):"")+"/grants";
+      await request(path,{method:"POST",body:JSON.stringify(body)});
+      setNotice("Privilege granted.");await refresh();
+    } catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+  async function revoke(item) {
+    if(!window.confirm("Revoke "+item.privilege+" for "+item.principalId+"?")) return;
+    setBusy(true);setError("");
+    try {
+      const path="/lakehouse/namespaces/"+encodeURIComponent(namespace)+(item.scope==="TABLE"?"/tables/"+encodeURIComponent(item.table):"")+"/grants/revoke";
+      await request(path,{method:"POST",body:JSON.stringify({principalType:item.principalType,principalId:item.principalId,privilege:item.privilege})});
+      setNotice("Grant revoked.");await refresh();
+    } catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+  return <div className="studio-panel">
+    <div className="studio-heading"><div><div className="section-title">GOVERNANCE & LINEAGE</div><h2>Access control</h2><p>Workspace-scoped namespace and table grants, expiry, revocation and Spark query lineage.</p></div><button onClick={refresh} disabled={busy}>↻ Refresh</button></div>
+    <div className="pipeline-form">
+      <div className="pipeline-form-grid">
+        <label>Namespace<input value={namespace} onChange={e=>setNamespace(e.target.value)}/></label>
+        <label>Table (blank = namespace)<input value={table} onChange={e=>setTable(e.target.value)} placeholder="Optional table name"/></label>
+        <label>Principal type<select value={principalType} onChange={e=>setPrincipalType(e.target.value)}><option>USER</option><option>GROUP</option><option>WORKSPACE</option><option>SERVICE</option></select></label>
+        <label>Principal ID<input value={principalId} onChange={e=>setPrincipalId(e.target.value)} placeholder="user / group / workspace / service id"/></label>
+        <label>Privilege<select value={privilege} onChange={e=>setPrivilege(e.target.value)}>{(table.trim()?["SELECT","INSERT","UPDATE","DELETE","ALTER","DROP","OWNERSHIP"]:["USE","CREATE","SELECT","MODIFY","OWNERSHIP"]).map(v=><option key={v}>{v}</option>)}</select></label>
+        <label>Expires at (optional)<input type="datetime-local" value={expiresAt} onChange={e=>setExpiresAt(e.target.value)}/></label>
+      </div>
+      <div className="pipeline-form-actions"><button className="studio-primary" onClick={grant} disabled={busy||!namespace.trim()||!principalId.trim()}>Grant privilege</button><span>Only namespace/table owners can manage grants. Workspace identity comes from the signed JWT.</span></div>
+    </div>
+    {error&&<div className="studio-error">{error}</div>}{notice&&<div className="notebook-notice">{notice}</div>}
+    <section className="pipeline-list"><div className="section-title">ACTIVE & REVOKED GRANTS · {namespace}</div>
+      {!grants.length?<div className="empty-state">No grants found, or you do not have ownership permission.</div>:grants.map((g,i)=><article className="pipeline-item" key={g.scope+"-"+g.principalType+"-"+g.principalId+"-"+g.privilege+"-"+i}>
+        <div><b>{g.principalType} · {g.principalId}</b><small>{g.scope}{g.table?" · "+g.table:""} · {g.privilege} · expires {g.expiresAt||"never"} · {g.revokedAt?"REVOKED":"ACTIVE"}</small></div>
+        {!g.revokedAt&&<div className="pipeline-actions"><button onClick={()=>revoke(g)} disabled={busy}>Revoke</button></div>}
+      </article>)}
+    </section>
+    <section className="pipeline-list"><div className="section-title">SPARK TABLE LINEAGE</div>
+      {!lineage.length?<div className="empty-state">No lineage edges recorded for this namespace yet.</div>:lineage.map((edge,i)=><article className="pipeline-item" key={edge.source+"-"+edge.target+"-"+i}><div><b>{edge.source} → {edge.target}</b><small>{edge.relation} · {edge.recordedBy} · {edge.recordedAt}</small></div></article>)}
+    </section>
+  </div>;
+}
+
 export default function LakehouseStudio() {
   const [view, setView] = useState("lakehouse");
   const [jwt, setJwt] = useState(() => sessionStorage.getItem("sbase.lakehouse.jwt") || "");
@@ -420,8 +491,8 @@ export default function LakehouseStudio() {
     else { sessionStorage.removeItem("sbase.lakehouse.jwt"); setAuthNotice("Lakehouse session cleared."); }
   }
   return <section className="lakehouse-studio">
-    <nav className="studio-nav"><div className="studio-brand"><span>◈</span> LAKEHOUSE STUDIO</div>{[["lakehouse","Catalog"],["pipelines","Pipelines"],["sql","SQL Workspace"],["notebook","Notebook"]].map(([id, label]) => <button key={id} className={view === id ? "selected" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
+    <nav className="studio-nav"><div className="studio-brand"><span>◈</span> LAKEHOUSE STUDIO</div>{[["lakehouse","Catalog"],["pipelines","Pipelines"],["governance","Governance"],["sql","SQL Workspace"],["notebook","Notebook"]].map(([id, label]) => <button key={id} className={view === id ? "selected" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
     <div className="lakehouse-auth"><label htmlFor="lakehouse-jwt">Workspace access token (JWT)</label><input id="lakehouse-jwt" type="password" autoComplete="off" value={jwt} onChange={e => setJwt(e.target.value)} placeholder="Paste signed JWT with sub and workspace_id claims"/><button onClick={saveJwt}>{jwt.trim() ? "Save session" : "Clear session"}</button><span>{authNotice || (sessionStorage.getItem("sbase.lakehouse.jwt") ? "Authenticated session configured" : "Authentication required")}</span></div>
-    {view === "lakehouse" ? <LakehouseBrowser/> : view === "pipelines" ? <PipelineStudio/> : view === "sql" ? <SqlWorkspace/> : <Notebook/>}
+    {view === "lakehouse" ? <LakehouseBrowser/> : view === "pipelines" ? <PipelineStudio/> : view === "governance" ? <GovernanceStudio/> : view === "sql" ? <SqlWorkspace/> : <Notebook/>}
   </section>;
 }
