@@ -48,6 +48,42 @@ class LakehouseControlPlanePostgresTest {
         } finally { dataSource.close(); }
     }
 
+    @Test void deadLetterReplayLeaseFencesExpiredWorkers() throws Exception {
+        UUID runId=UUID.randomUUID();
+        try(var connection=dataSource.getConnection();
+            var statement=connection.prepareStatement("""
+                INSERT INTO lakehouse_ingestion_run(id,workspace_id,target_namespace,target_table,engine,status)
+                VALUES(?,?,?,'dead_letter_test','SPARK','FAILED')
+                """)) {
+            statement.setObject(1,runId);statement.setObject(2,workspace);statement.setString(3,namespace);
+            statement.executeUpdate();
+        }
+        UUID recordId=control.enqueueDeadLetter(workspace,runId,"0","{\"offset\":1}","key-1",
+                "{\"value\":42}","TestFailure","simulated failure");
+        var first=control.claimDeadLetters(workspace,runId,10);
+        assertEquals(1,first.size());
+        var oldLease=first.get(0);
+        assertNotNull(oldLease.leaseToken());
+        try(var connection=dataSource.getConnection();
+            var statement=connection.prepareStatement(
+                "UPDATE lakehouse_dead_letter SET lease_until=now()-interval '1 second' WHERE id=?")) {
+            statement.setObject(1,recordId);assertEquals(1,statement.executeUpdate());
+        }
+        var second=control.claimDeadLetters(workspace,runId,10);
+        assertEquals(1,second.size(),"expired claims should be recoverable");
+        var newLease=second.get(0);
+        assertNotEquals(oldLease.leaseToken(),newLease.leaseToken(),"reclaimed work must receive a new fencing token");
+        assertEquals(2,newLease.attempts());
+        assertThrows(IllegalStateException.class,
+                ()->control.finishDeadLetter(recordId,oldLease.leaseToken(),true));
+        control.finishDeadLetter(recordId,newLease.leaseToken(),true);
+        try(var connection=dataSource.getConnection();
+            var statement=connection.prepareStatement("SELECT status FROM lakehouse_dead_letter WHERE id=?")) {
+            statement.setObject(1,recordId);
+            try(var rows=statement.executeQuery()) { assertTrue(rows.next());assertEquals("RESOLVED",rows.getString(1)); }
+        }
+    }
+
     @Test void groupAndTableGrantsAreEnforcedAndRevocable() {
         var analyst=new LakehouseControlPlane.Principal("analyst-1",workspace,Set.of("analytics"),null);
         assertThrows(SecurityException.class,()->control.requireNamespace(analyst,"sbase",namespace,LakehouseControlPlane.Privilege.USE));
