@@ -78,7 +78,7 @@ function LakehouseBrowser() {
   const [schema, setSchema] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
   const [error, setError] = useState("");
-  const [newNamespace, setNewNamespace] = useState("");
+  const [newNamespace, setNewNamespace] = useState("");\n  const [maintenance, setMaintenance] = useState([]);\n  const [maintenanceNotice, setMaintenanceNotice] = useState("");
   async function load() {
     setError("");
     try {
@@ -103,6 +103,22 @@ function LakehouseBrowser() {
       setPreview(p); setSchema(s); setSnapshots(Array.isArray(history) ? history : history.snapshots || []);
     } catch (e) { setError(e.message); }
   }
+  async function loadMaintenance(ns = namespace) {
+    if (!ns) return;
+    try { setMaintenance(await request("/lakehouse/namespaces/" + encodeURIComponent(ns) + "/maintenance")); }
+    catch (e) { setMaintenance([]); }
+  }
+  async function scheduleMaintenance() {
+    if (!namespace || !selected) return;
+    setMaintenanceNotice("");
+    try {
+      const created = await request("/lakehouse/namespaces/" + encodeURIComponent(namespace) + "/maintenance", {
+        method: "POST", body: JSON.stringify({ table: selected, operation: "COMPACT", intervalSeconds: 86400, retentionDays: 7, orphanOlderThanHours: 72 })
+      });
+      setMaintenanceNotice("Daily compaction policy created: " + created.policyId);
+      await loadMaintenance();
+    } catch (e) { setError(e.message); }
+  }
   async function compactTable() {
     try { await request("/lakehouse/namespaces/" + encodeURIComponent(namespace) + "/tables/" + encodeURIComponent(selected) + "/compact", { method: "POST" }); await inspect(selected); }
     catch (e) { setError(e.message); }
@@ -121,8 +137,8 @@ function LakehouseBrowser() {
     <div className="studio-heading"><div><div className="section-title">LAKEHOUSE EXPLORER</div><h2>Catalog browser</h2><p>Explore Iceberg namespaces, table metadata, schemas and sample records.</p></div><button onClick={load}>↻ Refresh</button></div>
     {status && <div className="lakehouse-status"><span className={status.status === "UP" ? "health-dot" : "health-dot warning"}/><b>{status.status || "UNKNOWN"}</b><span>Catalog: {status.catalogStatus || "—"}</span><span>Object store: {status.objectStoreStatus || "—"}</span></div>}
     {error && <div className="studio-error">{error}</div>}
-    <div className="catalog-layout"><aside className="catalog-tree"><div className="section-title">NAMESPACES</div>{namespaces.map(n => <button className={namespace === n ? "tree-item active" : "tree-item"} key={n} onClick={() => { setNamespace(n); setSelected(""); setPreview(null); }}>▸ {n}</button>)}<div className="new-namespace"><input value={newNamespace} onChange={e => setNewNamespace(e.target.value)} placeholder="New namespace"/><button onClick={createNamespace}>+</button></div>{namespace && <><div className="section-title table-title">TABLES</div>{tables.map(t => <button className={selected === t ? "tree-item active" : "tree-item"} key={t} onClick={() => inspect(t)}>▤ {t}</button>)}</>}</aside>
-      <div className="catalog-detail">{selected ? <><div className="detail-title"><h3>{namespace}.{selected}</h3><span>Apache Iceberg</span><button onClick={compactTable}>Compact files</button></div><div className="detail-tabs"><section><div className="section-title">SCHEMA / DDL</div><pre>{schema ? JSON.stringify(schema, null, 2) : "Loading schema…"}</pre></section><section><div className="section-title">DATA PREVIEW</div><DataGrid rows={preview?.rows || preview?.data || []} columns={preview?.columns || []}/></section></div><section className="snapshot-panel"><div className="section-title">SNAPSHOT HISTORY</div>{snapshots.length ? snapshots.map((snap, i) => <div className="snapshot-row" key={snap.snapshotId || snap.id || i}><code>{snap.snapshotId || snap.id || JSON.stringify(snap)}</code><span>{snap.timestamp || snap.committedAt || ""}</span><button onClick={() => rollback(snap.snapshotId || snap.id)}>Restore</button></div>) : <div className="empty-state">No snapshots reported for this table.</div>}</section></> : <div className="empty-state">Select a namespace and table to inspect its schema and records.</div>}</div>
+    <div className="catalog-layout"><aside className="catalog-tree"><div className="section-title">NAMESPACES</div>{namespaces.map(n => <button className={namespace === n ? "tree-item active" : "tree-item"} key={n} onClick={() => { setNamespace(n); setSelected(""); setPreview(null); loadMaintenance(n); }}>▸ {n}</button>)}<div className="new-namespace"><input value={newNamespace} onChange={e => setNewNamespace(e.target.value)} placeholder="New namespace"/><button onClick={createNamespace}>+</button></div>{namespace && <><div className="section-title table-title">TABLES</div>{tables.map(t => <button className={selected === t ? "tree-item active" : "tree-item"} key={t} onClick={() => inspect(t)}>▤ {t}</button>)}</>}</aside>
+      <div className="catalog-detail">{selected ? <><div className="detail-title"><h3>{namespace}.{selected}</h3><span>Apache Iceberg</span><button onClick={compactTable}>Compact files</button><button onClick={scheduleMaintenance}>Schedule daily compaction</button></div>{maintenanceNotice && <div className="notebook-notice">{maintenanceNotice}</div>}{maintenance.length > 0 && <div className="maintenance-policy-list"><b>Scheduled maintenance</b>{maintenance.filter(p => p.table === selected).map(p => <span key={p.id}>{p.operation} · every {Math.round(p.intervalSeconds / 3600)}h · next {p.nextRunAt || "pending"}</span>)}</div>}<div className="detail-tabs"><section><div className="section-title">SCHEMA / DDL</div><pre>{schema ? JSON.stringify(schema, null, 2) : "Loading schema…"}</pre></section><section><div className="section-title">DATA PREVIEW</div><DataGrid rows={preview?.rows || preview?.data || []} columns={preview?.columns || []}/></section></div><section className="snapshot-panel"><div className="section-title">SNAPSHOT HISTORY</div>{snapshots.length ? snapshots.map((snap, i) => <div className="snapshot-row" key={snap.snapshotId || snap.id || i}><code>{snap.snapshotId || snap.id || JSON.stringify(snap)}</code><span>{snap.timestamp || snap.committedAt || ""}</span><button onClick={() => rollback(snap.snapshotId || snap.id)}>Restore</button></div>) : <div className="empty-state">No snapshots reported for this table.</div>}</section></> : <div className="empty-state">Select a namespace and table to inspect its schema and records.</div>}</div>
     </div>
   </div>;
 }
