@@ -84,6 +84,8 @@ object Main {
   val lakehouseApi = try { Some(new io.sbase.server.lakehouse.LakehouseApiService(operators.sparkSession)) } catch { case error:Throwable => system.log.error("Authenticated Lakehouse API disabled: {}",error.getMessage); None }
   val lakehouseMaintenance = new io.sbase.server.lakehouse.LakehouseMaintenanceScheduler(operators.sparkSession)
   lakehouseMaintenance.start()
+  val lakehousePipelineDispatcher = new io.sbase.server.lakehouse.LakehousePipelineDispatcher(operators.sparkSession)
+  lakehousePipelineDispatcher.start()
 
   val deploymentRoutes =
   optionalHeaderValueByName("X-SBase-Admin-Token"){provided=>
