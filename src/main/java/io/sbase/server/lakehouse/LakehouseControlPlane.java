@@ -47,7 +47,8 @@ public final class LakehouseControlPlane {
                     AND (
                       (g.principal_type='USER' AND g.principal_id=?) OR
                       (g.principal_type='WORKSPACE' AND g.principal_id=?) OR
-                      (g.principal_type='SERVICE' AND g.principal_id=?)
+                      (g.principal_type='SERVICE' AND g.principal_id=?) OR
+                      (g.principal_type='GROUP' AND g.principal_id = ANY(?))
                     )
                 ))
             )
