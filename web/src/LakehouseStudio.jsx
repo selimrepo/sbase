@@ -95,8 +95,8 @@ function LakehouseBrowser() {
     setSelected(table); setError(""); setPreview(null); setSchema(null); setSnapshots([]);
     const base = "/lakehouse/namespaces/" + encodeURIComponent(namespace) + "/tables/" + encodeURIComponent(table);
     try {
-      const [p, s] = await Promise.all([request(base + "?limit=100"), request(base + "/schema")]);
-      setPreview(p); setSchema(s);
+      const [p, s, history] = await Promise.all([request(base + "?limit=100"), request(base + "/schema"), request(base + "/snapshots")]);
+      setPreview(p); setSchema(s); setSnapshots(Array.isArray(history) ? history : history.snapshots || []);
     } catch (e) { setError(e.message); }
   }
   async function compactTable() {
