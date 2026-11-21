@@ -273,7 +273,7 @@ public final class LakehouseApiService implements AutoCloseable {
         String mode=Objects.toString(request.getOrDefault("mode","BATCH")).toUpperCase(Locale.ROOT);
         if(!Set.of("SPARK","FLINK").contains(engine) || !Set.of("BATCH","STREAMING","CDC").contains(mode))
             throw new IllegalArgumentException("Unsupported engine or ingestion mode");
-        if("FLINK".equals(engine) && "BATCH".equals(mode)) throw new IllegalArgumentException("Flink pipelines must use STREAMING or CDC mode");
+        if("FLINK".equals(engine) && "BATCH".equals(mode)) throw new IllegalArgumentException("Flink pipelines must use STREAMING or CDC mode");\n        if("SPARK".equals(engine) && !"BATCH".equals(mode)) throw new IllegalArgumentException("Spark ingestion currently supports BATCH mode; use Flink for STREAMING or CDC");
         control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.CREATE);
         Object sourceObject=request.get("source");
         if(!(sourceObject instanceof Map<?,?> sourceRaw)) throw new IllegalArgumentException("source object is required");
@@ -293,7 +293,7 @@ public final class LakehouseApiService implements AutoCloseable {
         Map<String,Object> definition=new LinkedHashMap<>();
         definition.put("sourceType",sourceType);definition.put("source",source);definition.put("secretRef",secretRef);
         definition.put("targetCatalog","sbase");definition.put("targetNamespace",namespace);definition.put("targetTable",table);
-        definition.put("engine",engine);definition.put("mode",mode);definition.put("configuration",config);
+        definition.put("engine",engine);definition.put("mode",mode);definition.put("configuration",config);\n        definition.put("createdBy",s.subject());definition.put("creatorGroups",new ArrayList<>(s.principal().groups()));
         definition.put("checkpointUri",Objects.toString(request.getOrDefault("checkpointUri","")));
         try {
             String sourceJson=JSON.writeValueAsString(source);
