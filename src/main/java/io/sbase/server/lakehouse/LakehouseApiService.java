@@ -225,6 +225,138 @@ public final class LakehouseApiService implements AutoCloseable {
         } catch(Exception e) { throw failure("Unable to list maintenance policies",e); }
     }
 
+    public Map<String,Object> createPipeline(Session s,Map<String,Object> request) {
+        String name=Objects.toString(request.get("name"),"").trim();
+        if(name.isEmpty() || name.length()>200) throw new IllegalArgumentException("Pipeline name is required (max 200 chars)");
+        String sourceType=Objects.toString(request.get("sourceType"),"").toUpperCase(Locale.ROOT);
+        if(!Set.of("S3","JDBC","KAFKA").contains(sourceType)) throw new IllegalArgumentException("sourceType must be S3, JDBC or KAFKA");
+        String namespace=identifier(Objects.toString(request.get("targetNamespace"),""));
+        String table=identifier(Objects.toString(request.get("targetTable"),""));
+        String engine=Objects.toString(request.getOrDefault("engine","SPARK")).toUpperCase(Locale.ROOT);
+        String mode=Objects.toString(request.getOrDefault("mode","BATCH")).toUpperCase(Locale.ROOT);
+        if(!Set.of("SPARK","FLINK").contains(engine) || !Set.of("BATCH","STREAMING","CDC").contains(mode))
+            throw new IllegalArgumentException("Unsupported engine or ingestion mode");
+        if("FLINK".equals(engine) && "BATCH".equals(mode)) throw new IllegalArgumentException("Flink pipelines must use STREAMING or CDC mode");
+        control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.CREATE);
+        Object sourceObject=request.get("source");
+        if(!(sourceObject instanceof Map<?,?> sourceRaw)) throw new IllegalArgumentException("source object is required");
+        Map<String,Object> source=new LinkedHashMap<>();
+        sourceRaw.forEach((k,v)->{ if(k instanceof String key) {
+            String lower=key.toLowerCase(Locale.ROOT);
+            if(lower.contains("password") || lower.contains("secret") || lower.contains("token") || lower.contains("credential"))
+                throw new IllegalArgumentException("Store credentials in the secret provider; pipeline configuration accepts secretRef only");
+            source.put(key,v);
+        }});
+        String secretRef=Objects.toString(request.get("secretRef"),"");
+        if("JDBC".equals(sourceType) && secretRef.isBlank()) throw new IllegalArgumentException("JDBC source requires secretRef");
+        Map<String,Object> config=request.get("configuration") instanceof Map<?,?> m ? stringMap(m) : Map.of();
+        if("FLINK".equals(engine) && Objects.toString(config.get("flinkJarId"),"").isBlank())
+            throw new IllegalArgumentException("Flink streaming requires configuration.flinkJarId");
+        UUID sourceId=UUID.randomUUID(),pipelineId=UUID.randomUUID();
+        Map<String,Object> definition=new LinkedHashMap<>();
+        definition.put("sourceType",sourceType);definition.put("source",source);definition.put("secretRef",secretRef);
+        definition.put("targetCatalog","sbase");definition.put("targetNamespace",namespace);definition.put("targetTable",table);
+        definition.put("engine",engine);definition.put("mode",mode);definition.put("configuration",config);
+        definition.put("checkpointUri",Objects.toString(request.getOrDefault("checkpointUri","")));
+        try {
+            String sourceJson=JSON.writeValueAsString(source);
+            String definitionJson=JSON.writeValueAsString(definition);
+            String checksum=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(definitionJson.getBytes(StandardCharsets.UTF_8)));
+            try(Connection c=dataSource.getConnection()) {
+                c.setAutoCommit(false);
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO lakehouse_data_source(id,workspace_id,name,source_type,configuration,secret_ref,created_by) VALUES(?,?,?,?,?::jsonb,?,?)")) {
+                    p.setObject(1,sourceId);p.setObject(2,s.principal().workspaceId());p.setString(3,name+" source");
+                    p.setString(4,sourceType);p.setString(5,sourceJson);p.setString(6,secretRef.isBlank()?null:secretRef);p.setString(7,s.subject());p.executeUpdate();
+                }
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO lakehouse_ingestion_pipeline(id,workspace_id,name,source_id,target_catalog,target_namespace,target_table,engine,mode,configuration,checkpoint_uri,max_retries,created_by) VALUES(?,?,?,?, 'sbase',?,?,?,?,?::jsonb,?,?,?)")) {
+                    p.setObject(1,pipelineId);p.setObject(2,s.principal().workspaceId());p.setString(3,name);p.setObject(4,sourceId);
+                    p.setString(5,namespace);p.setString(6,table);p.setString(7,engine);p.setString(8,mode);
+                    p.setString(9,JSON.writeValueAsString(config));p.setString(10,Objects.toString(request.get("checkpointUri"),null));
+                    p.setInt(11,Math.max(0,Math.min(100,((Number)request.getOrDefault("maxRetries",5)).intValue())));p.setString(12,s.subject());p.executeUpdate();
+                }
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO lakehouse_pipeline_version(pipeline_id,version,definition,checksum,created_by) VALUES(?,1,?::jsonb,?,?,?)")) {
+                    p.setObject(1,pipelineId);p.setString(2,definitionJson);p.setString(3,checksum);p.setString(4,s.subject());p.executeUpdate();
+                }
+                c.commit();
+            }
+            return Map.of("pipelineId",pipelineId.toString(),"sourceId",sourceId.toString(),"name",name,
+                    "target","sbase."+namespace+"."+table,"engine",engine,"mode",mode,"version",1,"status","ENABLED");
+        } catch(Exception e) { throw failure("Unable to create ingestion pipeline",e); }
+    }
+
+    public List<Map<String,Object>> pipelines(Session s) {
+        String sql="SELECT id,name,source_id,engine,mode,target_namespace,target_table,enabled,active_version,created_at,updated_at FROM lakehouse_ingestion_pipeline WHERE workspace_id=? ORDER BY updated_at DESC";
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(sql)) {
+            p.setObject(1,s.principal().workspaceId());
+            try(ResultSet r=p.executeQuery()) {
+                List<Map<String,Object>> out=new ArrayList<>();
+                while(r.next()) out.add(Map.of("id",r.getObject(1).toString(),"name",r.getString(2),"sourceId",r.getObject(3).toString(),
+                        "engine",r.getString(4),"mode",r.getString(5),"targetNamespace",r.getString(6),"targetTable",r.getString(7),
+                        "enabled",r.getBoolean(8),"version",r.getInt(9),"createdAt",r.getTimestamp(10).toInstant().toString(),
+                        "updatedAt",r.getTimestamp(11).toInstant().toString()));
+                return out;
+            }
+        } catch(Exception e) { throw failure("Unable to list ingestion pipelines",e); }
+    }
+
+    public Map<String,Object> runPipeline(Session s,UUID pipelineId,String idempotencyKey) {
+        if(idempotencyKey==null || idempotencyKey.isBlank() || idempotencyKey.length()>240)
+            throw new IllegalArgumentException("idempotencyKey is required (max 240 chars)");
+        try(Connection c=dataSource.getConnection()) {
+            c.setAutoCommit(false);
+            UUID workspace=s.principal().workspaceId();
+            String select="SELECT active_version,max_retries FROM lakehouse_ingestion_pipeline WHERE id=? AND workspace_id=? AND enabled=true FOR UPDATE";
+            int version,maxAttempts;
+            try(PreparedStatement p=c.prepareStatement(select)) {
+                p.setObject(1,pipelineId);p.setObject(2,workspace);
+                try(ResultSet r=p.executeQuery()) { if(!r.next()) throw new NoSuchElementException("Pipeline not found");version=r.getInt(1);maxAttempts=r.getInt(2)+1; }
+            }
+            UUID attempt=UUID.randomUUID();
+            try(PreparedStatement p=c.prepareStatement("INSERT INTO lakehouse_pipeline_attempt(id,pipeline_id,pipeline_version,attempt,status,idempotency_key) VALUES(?,?,?,0,'QUEUED',?) ON CONFLICT(pipeline_id,idempotency_key) DO NOTHING")) {
+                p.setObject(1,attempt);p.setObject(2,pipelineId);p.setInt(3,version);p.setString(4,idempotencyKey);
+                if(p.executeUpdate()==0) {
+                    try(PreparedStatement q=c.prepareStatement("SELECT id,status FROM lakehouse_pipeline_attempt WHERE pipeline_id=? AND idempotency_key=?")) {
+                        q.setObject(1,pipelineId);q.setString(2,idempotencyKey);
+                        try(ResultSet r=q.executeQuery()) { r.next();UUID existing=r.getObject(1,UUID.class);String status=r.getString(2);c.commit();return Map.of("attemptId",existing.toString(),"status",status,"idempotentReplay",true); }
+                    }
+                }
+            }
+            UUID runId=UUID.randomUUID();
+            try(PreparedStatement p=c.prepareStatement("INSERT INTO lakehouse_ingestion_run(id,workspace_id,pipeline_id,pipeline_attempt_id,target_namespace,target_table,engine,status) SELECT ?,workspace_id,id,?,?,target_namespace,target_table,engine,'QUEUED' FROM lakehouse_ingestion_pipeline WHERE id=?")) {
+                p.setObject(1,runId);p.setObject(2,attempt);p.setObject(3,pipelineId);p.setObject(4,pipelineId);p.executeUpdate();
+            }
+            try(PreparedStatement p=c.prepareStatement("UPDATE lakehouse_pipeline_attempt SET ingestion_run_id=? WHERE id=?")) {
+                p.setObject(1,runId);p.setObject(2,attempt);p.executeUpdate();
+            }
+            c.commit();
+            return Map.of("attemptId",attempt.toString(),"ingestionRunId",runId.toString(),"status","QUEUED","idempotentReplay",false);
+        } catch(NoSuchElementException e) { throw e; }
+        catch(Exception e) { throw failure("Unable to queue ingestion run",e); }
+    }
+
+    public List<Map<String,Object>> pipelineRuns(Session s,UUID pipelineId,int requestedLimit) {
+        int limit=Math.max(1,Math.min(requestedLimit,200));
+        String sql="SELECT a.id,a.pipeline_version,a.attempt,a.status,a.submitted_at,a.started_at,a.finished_at,a.error_class,a.error_message FROM lakehouse_pipeline_attempt a JOIN lakehouse_ingestion_pipeline p ON p.id=a.pipeline_id WHERE p.workspace_id=? AND p.id=? ORDER BY a.submitted_at DESC LIMIT ?";
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(sql)) {
+            p.setObject(1,s.principal().workspaceId());p.setObject(2,pipelineId);p.setInt(3,limit);
+            try(ResultSet r=p.executeQuery()) {
+                List<Map<String,Object>> out=new ArrayList<>();
+                while(r.next()) {
+                    Map<String,Object> item=new LinkedHashMap<>();item.put("id",r.getObject(1).toString());item.put("version",r.getInt(2));item.put("attempt",r.getInt(3));
+                    item.put("status",r.getString(4));item.put("submittedAt",r.getTimestamp(5).toInstant().toString());
+                    item.put("startedAt",r.getTimestamp(6)==null?null:r.getTimestamp(6).toInstant().toString());
+                    item.put("finishedAt",r.getTimestamp(7)==null?null:r.getTimestamp(7).toInstant().toString());
+                    item.put("errorClass",r.getString(8));item.put("errorMessage",r.getString(9));out.add(item);
+                }
+                return out;
+            }
+        } catch(Exception e) { throw failure("Unable to list pipeline runs",e); }
+    }
+
+    private static Map<String,Object> stringMap(Map<?,?> raw) {
+        Map<String,Object> out=new LinkedHashMap<>();raw.forEach((k,v)->{if(k instanceof String key)out.put(key,v);});return out;
+    }
+
     private static byte[] decode(String v) { return Base64.getUrlDecoder().decode(v); }
     private static long number(Object v,long fallback) { return v instanceof Number n?n.longValue():fallback; }
     private static String identifier(String v) {
