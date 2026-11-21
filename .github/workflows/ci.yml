@@ -190,8 +190,7 @@ jobs:
           EOF
           nohup /opt/flink/bin/sql-client.sh -f /tmp/sbase-kafka-iceberg.sql >/tmp/sbase-kafka-iceberg.log 2>&1 </dev/null &"
           for attempt in {1..30}; do
-            if docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager \
-              sh -c 'grep -q -E "Job has been submitted|JobID|Job ID" /tmp/sbase-kafka-iceberg.log'; then break; fi
+            if curl --fail --silent http://localhost:8082/jobs/overview | python3 -c 'import json,sys; d=json.load(sys.stdin); assert any(j.get("state") == "RUNNING" for j in d.get("jobs", []))' 2>/dev/null; then break; fi
             if [ "$attempt" -eq 30 ]; then
               docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager cat /tmp/sbase-kafka-iceberg.log
               exit 1
@@ -222,6 +221,13 @@ jobs:
           set -euo pipefail
           curl --fail --silent http://localhost:8081/json/ | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d.get("workers", [])) >= 1, "Spark has no registered workers"'
           curl --fail --silent http://localhost:8082/taskmanagers | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d.get("taskmanagers", [])) >= 1, "Flink has no registered TaskManagers"'
+          for service in flink-jobmanager flink-taskmanager; do
+            docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T "$service" sh -ec '
+              test -n "$(find /opt/flink/lib -maxdepth 1 -name "flink-sql-connector-kafka-*.jar" -print -quit)"
+              test -n "$(find /opt/flink/lib -maxdepth 1 -name "iceberg-flink-runtime-1.20-*.jar" -print -quit)"
+              test -n "$(find /opt/flink/plugins/s3-fs-hadoop -maxdepth 1 -name "flink-s3-fs-hadoop-*.jar" -print -quit)"
+            '
+          done
       - name: Show full platform logs on failure
         if: failure()
         run: docker compose -f compose.yaml -f compose.full.yaml --profile full logs --no-color
