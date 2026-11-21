@@ -62,6 +62,20 @@ class LakehouseControlPlanePostgresTest {
         assertThrows(SecurityException.class,()->control.requireTable(analyst,"sbase",namespace,"orders",LakehouseControl.Privilege.SELECT));
     }
 
+    @Test void userGrantCanBeRevokedWithoutAffectingAnotherWorkspace() {
+        control.grantNamespace("sbase",namespace,LakehouseControlPlane.PrincipalType.USER,"reader",
+                LakehouseControlPlane.Privilege.USE,"owner",null);
+        control.grantTable("sbase",namespace,"events",LakehouseControlPlane.PrincipalType.USER,"reader",
+                LakehouseControlPlane.Privilege.SELECT,"owner",null);
+        var reader=new LakehouseControlPlane.Principal("reader",workspace,Set.of(),null);
+        assertDoesNotThrow(()->control.requireTable(reader,"sbase",namespace,"events",LakehouseControlPlane.Privilege.SELECT));
+        var otherWorkspace=new LakehouseControlPlane.Principal("reader",UUID.randomUUID(),Set.of(),null);
+        assertThrows(SecurityException.class,()->control.requireTable(otherWorkspace,"sbase",namespace,"events",LakehouseControlPlane.Privilege.SELECT));
+        assertTrue(control.revokeNamespace("sbase",namespace,LakehouseControlPlane.PrincipalType.USER,"reader",
+                LakehouseControlPlane.Privilege.USE));
+        assertThrows(SecurityException.class,()->control.requireTable(reader,"sbase",namespace,"events",LakehouseControlPlane.Privilege.SELECT));
+    }
+
     @Test void expiredGrantAndCrossWorkspaceAccessAreDenied() {
         control.grantNamespace("sbase",namespace,LakehouseControlPlane.PrincipalType.USER,"expired-user",
                 LakehouseControl.Privilege.USE,"owner",Instant.now().minusSeconds(30));
