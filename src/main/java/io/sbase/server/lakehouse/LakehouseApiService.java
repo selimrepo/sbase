@@ -336,7 +336,7 @@ public final class LakehouseApiService implements AutoCloseable {
         definition.put("sourceType",sourceType);definition.put("source",source);definition.put("secretRef",secretRef);
         definition.put("targetCatalog","sbase");definition.put("targetNamespace",namespace);definition.put("targetTable",table);
         definition.put("engine",engine);definition.put("mode",mode);definition.put("configuration",config);
-        definition.put("createdBy",s.subject());definition.put("creatorGroups",new ArrayList<>(s.principal().groups()));
+        definition.put("createdBy",s.subject());
         definition.put("checkpointUri",Objects.toString(request.getOrDefault("checkpointUri","")));
         try {
             String sourceJson=JSON.writeValueAsString(source);
