@@ -25,7 +25,7 @@ public final class LakehouseControlPlane {
 
     public record DeadLetter(UUID id, UUID ingestionRunId, String partition, String offsetJson,
                              String recordKey, String payloadJson, String errorClass,
-                             String errorMessage, int attempts) {}
+                             String errorMessage, int attempts, UUID leaseToken) {}
 
     private final DataSource dataSource;
 
@@ -259,13 +259,17 @@ public final class LakehouseControlPlane {
         String sql = """
             WITH picked AS (
               SELECT id FROM lakehouse_dead_letter
-              WHERE workspace_id=? AND ingestion_run_id=? AND status='PENDING'
+              WHERE workspace_id=? AND ingestion_run_id=?
+                AND attempts<10
+                AND (status='PENDING' OR (status='REPLAYING' AND lease_until<now()))
               ORDER BY first_seen_at LIMIT ? FOR UPDATE SKIP LOCKED
             )
-            UPDATE lakehouse_dead_letter d SET status='REPLAYING', attempts=attempts+1, last_seen_at=now()
+            UPDATE lakehouse_dead_letter d
+            SET status='REPLAYING', attempts=attempts+1, last_seen_at=now(),
+                lease_token=gen_random_uuid(), lease_until=now()+interval '5 minutes'
             FROM picked WHERE d.id=picked.id
             RETURNING d.id,d.ingestion_run_id,d.source_partition,d.source_offset::text,d.record_key,
-                      d.payload::text,d.error_class,d.error_message,d.attempts
+                      d.payload::text,d.error_class,d.error_message,d.attempts,d.lease_token
             """;
         try (Connection c=dataSource.getConnection()) {
             c.setAutoCommit(false);
@@ -274,18 +278,19 @@ public final class LakehouseControlPlane {
                 List<DeadLetter> result=new ArrayList<>();
                 try(ResultSet r=s.executeQuery()) {
                     while(r.next()) result.add(new DeadLetter(r.getObject(1,UUID.class),r.getObject(2,UUID.class),
-                        r.getString(3),r.getString(4),r.getString(5),r.getString(6),r.getString(7),r.getString(8),r.getInt(9)));
+                        r.getString(3),r.getString(4),r.getString(5),r.getString(6),r.getString(7),r.getString(8),r.getInt(9),r.getObject(10,UUID.class)));
                 }
                 c.commit(); return List.copyOf(result);
             } catch(Exception e) { c.rollback(); throw e; }
         } catch(SQLException e) { throw new IllegalStateException("Unable to claim dead-letter batch",e); }
     }
 
-    public void finishDeadLetter(UUID id, boolean resolved) {
-        String sql = "UPDATE lakehouse_dead_letter SET status=?,resolved_at=CASE WHEN ? THEN now() ELSE NULL END WHERE id=? AND status='REPLAYING'";
+    public void finishDeadLetter(UUID id, UUID leaseToken, boolean resolved) {
+        Objects.requireNonNull(leaseToken,"leaseToken");
+        String sql = "UPDATE lakehouse_dead_letter SET status=?,resolved_at=CASE WHEN ? THEN now() ELSE NULL END,lease_token=NULL,lease_until=NULL WHERE id=? AND status='REPLAYING' AND lease_token=? AND lease_until>now()";
         try(Connection c=dataSource.getConnection();PreparedStatement s=c.prepareStatement(sql)) {
-            s.setString(1,resolved?"RESOLVED":"PENDING"); s.setBoolean(2,resolved); s.setObject(3,id);
-            if(s.executeUpdate()!=1) throw new IllegalStateException("Dead-letter record is not claimed");
+            s.setString(1,resolved?"RESOLVED":"PENDING"); s.setBoolean(2,resolved); s.setObject(3,id); s.setObject(4,leaseToken);
+            if(s.executeUpdate()!=1) throw new IllegalStateException("Dead-letter replay lease expired or was superseded");
         } catch(SQLException e) { throw new IllegalStateException("Unable to finish dead-letter replay",e); }
     }
 }
