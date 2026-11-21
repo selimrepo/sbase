@@ -91,6 +91,9 @@ object LakehouseApiRoutes extends Directives {
       path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "snapshots") { (namespace,table) =>
         optionalHeaderValueByName("Authorization") { auth => get { run(auth)(s => service.get.snapshots(s,namespace,table)) } }
       } ~
+      path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "snapshots" / LongNumber / "rollback") { (namespace,table,snapshotId) =>
+        optionalHeaderValueByName("Authorization") { auth => post { run(auth)(s => service.get.rollbackSnapshot(s,namespace,table,snapshotId)) } }
+      } ~
       path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "compact") { (namespace,table) =>
         optionalHeaderValueByName("Authorization") { auth => post { run(auth)(s => service.get.compact(s,namespace,table)) } }
       } ~
