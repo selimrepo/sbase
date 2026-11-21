@@ -26,7 +26,8 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
     private final HikariDataSource ds;
     private final SparkSession spark;
     private final LakehouseControlPlane control;
-    private final ScheduledExecutorService executor;\n    private final ScheduledExecutorService heartbeatExecutor;
+    private final ScheduledExecutorService executor;
+    private final ScheduledExecutorService heartbeatExecutor;
     private final UUID owner=UUID.randomUUID();
     private final AtomicBoolean started=new AtomicBoolean();
 
