@@ -156,7 +156,7 @@ jobs:
           docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka \
             /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
             --topic sbase-ci-orders --partitions 3 --replication-factor 1
-          docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager sh -c 'cat > /tmp/sbase-kafka-iceberg.sql <<EOF
+          docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager sh -c "cat > /tmp/sbase-kafka-iceberg.sql <<'EOF'
           SET execution.checkpointing.interval = 10s;
           SET execution.checkpointing.mode = EXACTLY_ONCE;
           CREATE CATALOG sbase_iceberg WITH (
@@ -188,7 +188,7 @@ jobs:
           INSERT INTO sbase_iceberg.ci_lakehouse.orders
           SELECT order_id, region, amount FROM kafka_ci_orders;
           EOF
-          nohup /opt/flink/bin/sql-client.sh -f /tmp/sbase-kafka-iceberg.sql >/tmp/sbase-kafka-iceberg.log 2>&1 </dev/null &'
+          nohup /opt/flink/bin/sql-client.sh -f /tmp/sbase-kafka-iceberg.sql >/tmp/sbase-kafka-iceberg.log 2>&1 </dev/null &"
           for attempt in {1..30}; do
             if docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager \
               sh -c 'grep -q -E "Job has been submitted|JobID|Job ID" /tmp/sbase-kafka-iceberg.log'; then break; fi
