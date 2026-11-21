@@ -25,6 +25,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
                        int attempt,int maxRetries,UUID owner,long fence,String definition) {}
     private final HikariDataSource ds;
     private final SparkSession spark;
+    private final LakehouseControlPlane control;
     private final ScheduledExecutorService executor;
     private final UUID owner=UUID.randomUUID();
     private final AtomicBoolean started=new AtomicBoolean();
@@ -35,7 +36,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         c.setJdbcUrl(env("SBASE_POSTGRES_URL","jdbc:postgresql://localhost:5432/sbase"));
         c.setUsername(env("SBASE_POSTGRES_USER","sbase"));c.setPassword(env("SBASE_POSTGRES_PASSWORD","change-me"));
         c.setMaximumPoolSize(4);c.setMinimumIdle(1);c.setPoolName("sbase-lakehouse-pipeline-dispatcher");
-        ds=new HikariDataSource(c);
+        ds=new HikariDataSource(c);control=new LakehouseControlPlane(ds);
         executor=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"sbase-lakehouse-pipeline-dispatcher");t.setDaemon(true);return t;});
     }
 
@@ -86,6 +87,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         boolean longRunning=false;
         try {
             Map<String,Object> definition=JSON.readValue(job.definition(),MAP);
+            authorizeTarget(job,definition);
             String engine=Objects.toString(definition.get("engine"),"SPARK");
             if("FLINK".equalsIgnoreCase(engine)) {
                 submitFlink(definition);
@@ -97,6 +99,22 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         } catch(Throwable e) {
             fail(job,e);
         }
+    }
+
+    private void authorizeTarget(Job job,Map<String,Object> definition) {
+        String namespace=required(definition,"targetNamespace");
+        String table=required(definition,"targetTable");
+        String creator=required(definition,"createdBy");
+        Set<String> groups=new HashSet<>();
+        if(definition.get("creatorGroups") instanceof Collection<?> values)
+            values.forEach(v->{if(v instanceof String group)groups.add(group);});
+        var principal=new LakehouseControlPlane.Principal(creator,job.workspaceId(),groups,null);
+        control.requireNamespace(principal,"sbase",namespace,LakehouseControlPlane.Privilege.USE);
+        String target="sbase."+namespace+"."+table;
+        if(spark.catalog().tableExists(target))
+            control.requireTable(principal,"sbase",namespace,table,LakehouseControlPlane.Privilege.INSERT);
+        else
+            control.requireNamespace(principal,"sbase",namespace,LakehouseControlPlane.Privilege.CREATE);
     }
 
     @SuppressWarnings("unchecked")
@@ -121,10 +139,16 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         String jarId=required(config,"flinkJarId");
         String sourceDdl=required(config,"sourceDdl");
         String insertSql=required(config,"insertSql");
+        String namespace=required(definition,"targetNamespace");
+        String table=required(definition,"targetTable");
+        String expectedTarget=("sbase_iceberg."+namespace+"."+table).toLowerCase(Locale.ROOT);
+        String normalizedInsert=insertSql.replace("`","").trim().toLowerCase(Locale.ROOT);
         if(!sourceDdl.stripLeading().toUpperCase(Locale.ROOT).startsWith("CREATE TABLE") ||
-           !insertSql.stripLeading().toUpperCase(Locale.ROOT).startsWith("INSERT INTO"))
-            throw new IllegalArgumentException("Flink pipeline requires CREATE TABLE sourceDdl and INSERT INTO insertSql");
+           !normalizedInsert.matches("(?s)^insert\\\\s+into\\\\s+"+java.util.regex.Pattern.quote(expectedTarget)+"(?:\\\\s|\\\\().*"))
+            throw new IllegalArgumentException("Flink sink must INSERT INTO the pipeline's exact Iceberg target");
         String checkpoint=required(definition,"checkpointUri");
+        if(!checkpoint.startsWith("s3://") && !checkpoint.startsWith("s3a://"))
+            throw new IllegalArgumentException("Flink checkpointUri must use durable S3-compatible storage");
         Map<String,Object> args=Map.of("checkpointUri",checkpoint,"sourceDdl",sourceDdl,"insertSql",insertSql);
         Map<String,Object> submit=Map.of("entryClass","io.sbase.server.lakehouse.FlinkIcebergStreamingJob",
                 "parallelism",config.getOrDefault("parallelism",1),"programArgs",JSON.writeValueAsString(args));
