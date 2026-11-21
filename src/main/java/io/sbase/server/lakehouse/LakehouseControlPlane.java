@@ -58,7 +58,7 @@ public final class LakehouseControlPlane {
 
     public void requireTable(Principal principal, String catalog, String namespace,
                              String table, Privilege privilege) {
-        requireNamespaceExistsInWorkspace(principal, catalog, namespace);
+        requireNamespace(principal, catalog, namespace, Privilege.USE);
         String tablePrivilege = switch (privilege) {
             case SELECT -> "SELECT";
             case INSERT -> "INSERT";
@@ -95,6 +95,7 @@ public final class LakehouseControlPlane {
             s.setString(1,catalog); s.setString(2,namespace); s.setObject(3,p.workspaceId());
             s.setString(4,p.userId()); s.setString(5,privilege.name()); s.setString(6,p.userId());
             s.setString(7,p.workspaceId().toString()); s.setString(8,Objects.toString(p.serviceId(),""));
+            Array groups=c.createArrayOf("text",p.groups().toArray(String[]::new)); s.setArray(9,groups);
             try (ResultSet r=s.executeQuery()) { return r.next() && r.getBoolean(1); }
         } catch (SQLException e) { throw new IllegalStateException("Unable to evaluate namespace grants",e); }
     }
