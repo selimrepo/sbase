@@ -99,7 +99,16 @@ function LakehouseBrowser() {
       setPreview(p); setSchema(s);
     } catch (e) { setError(e.message); }
   }
-  async function compactTable() {\n    try { await request("/lakehouse/namespaces/" + encodeURIComponent(namespace) + "/tables/" + encodeURIComponent(selected) + "/compact", { method: "POST" }); await inspect(selected); }\n    catch (e) { setError(e.message); }\n  }\n  async function rollback(snapshotId) {\n    if (!window.confirm("Roll back this table to snapshot " + snapshotId + "?")) return;\n    try { await request("/lakehouse/namespaces/" + encodeURIComponent(namespace) + "/tables/" + encodeURIComponent(selected) + "/snapshots/" + encodeURIComponent(snapshotId) + "/rollback", { method: "POST" }); await inspect(selected); }\n    catch (e) { setError(e.message); }\n  }\n  async function createNamespace() {
+  async function compactTable() {
+    try { await request("/lakehouse/namespaces/" + encodeURIComponent(namespace) + "/tables/" + encodeURIComponent(selected) + "/compact", { method: "POST" }); await inspect(selected); }
+    catch (e) { setError(e.message); }
+  }
+  async function rollback(snapshotId) {
+    if (!window.confirm("Roll back this table to snapshot " + snapshotId + "?")) return;
+    try { await request("/lakehouse/namespaces/" + encodeURIComponent(namespace) + "/tables/" + encodeURIComponent(selected) + "/snapshots/" + encodeURIComponent(snapshotId) + "/rollback", { method: "POST" }); await inspect(selected); }
+    catch (e) { setError(e.message); }
+  }
+  async function createNamespace() {
     if (!newNamespace.trim()) return;
     try { await request("/lakehouse/namespaces", { method: "POST", body: JSON.stringify({ namespace: newNamespace.trim() }) }); setNewNamespace(""); await load(); }
     catch (e) { setError(e.message); }
@@ -115,10 +124,7 @@ function LakehouseBrowser() {
 }
 
 function Notebook() {
-  const [cells, setCells] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("sbase.notebook.cells") || "null") || [{ id: 1, type: "sql", source: "SELECT current_timestamp() AS now;", output: null }, { id: 2, type: "markdown", source: "# Lakehouse analysis\nDescribe your analysis here.", output: null }]; }
-    catch { return [{ id: 1, type: "sql", source: "SELECT current_timestamp() AS now;", output: null }]; }
-  });
+  const [cells, setCells] = useState(() => readLocalJson("sbase.notebook.cells", null) || [{ id: 1, type: "sql", source: "SELECT current_timestamp() AS now;", output: null }, { id: 2, type: "markdown", source: "# Lakehouse analysis\\nDescribe your analysis here.", output: null }]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => { localStorage.setItem("sbase.notebook.cells", JSON.stringify(cells)); }, [cells]);
