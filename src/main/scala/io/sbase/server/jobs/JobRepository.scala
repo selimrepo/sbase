@@ -562,14 +562,14 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
    val a=rs.getString("actor");val permission=rs.getString("permission")
    if(ownerOnly && a!="OWNER"){rs.close();p.close();throw new SecurityException("Notebook owner permission required")}
    if(write && permission!="WRITE"){rs.close();p.close();throw new SecurityException("Notebook write permission required")}
-   if(a=="OWNER") "OWNER" else "SHARE"
+   if(a=="OWNER") "OWNER" else permission
   } else {rs.close();p.close();throw new SecurityException("Notebook not found or access denied")}
   rs.close();p.close();actor
  }
 
  private def notebookEvent(c:Connection,id:UUID,event:String,actor:String,details:String):Unit = {
   val p=c.prepareStatement("INSERT INTO lakehouse_notebook_event(notebook_id,event_type,actor_kind,details) VALUES (?,?,?,?::jsonb)")
-  p.setObject(1,id);p.setString(2,event);p.setString(3,actor);p.setString(4,details);p.executeUpdate();p.close()
+  p.setObject(1,id);p.setString(2,event);p.setString(3,if(actor=="OWNER") "OWNER" else "SHARE");p.setString(4,details);p.executeUpdate();p.close()
  }
 
  def createNotebook(title:String,description:String,cellsJson:String):(Map[String,Object],String) = {
