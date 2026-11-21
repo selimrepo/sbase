@@ -193,6 +193,11 @@ object LakehouseApiRoutes extends Directives {
           }}
         }
       } ~
+      path("lakehouse" / "pipelines" / JavaUUID / "runs" / JavaUUID / "cancel") { (pipelineId,attemptId) =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          post { run(auth)(s => service.get.cancelPipelineRun(s,pipelineId,attemptId)) }
+        }
+      } ~
       path("lakehouse" / "pipelines" / JavaUUID / "runs") { pipelineId =>
         optionalHeaderValueByName("Authorization") { auth =>
           get { parameter("limit".as[Int].withDefault(50)) { limit =>
