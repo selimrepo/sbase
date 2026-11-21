@@ -675,8 +675,8 @@ public final class LakehouseApiService implements AutoCloseable {
             try(ResultSet r=p.executeQuery()) { if(!r.next()) throw new SecurityException("Dead-letter record is outside the active workspace"); }
         } catch(SecurityException e) { throw e; }
         catch(Exception e) { throw failure("Unable to authorize dead-letter update",e); }
-        control.finishDeadLetter(deadLetterId,leaseToken,resolved);
-        return Map.of("id",deadLetterId.toString(),"status",resolved?"RESOLVED":"PENDING");
+        String status=control.finishDeadLetter(deadLetterId,leaseToken,resolved);
+        return Map.of("id",deadLetterId.toString(),"status",status);
     }
 
     private void requireRunWorkspace(Session s,UUID runId) {
