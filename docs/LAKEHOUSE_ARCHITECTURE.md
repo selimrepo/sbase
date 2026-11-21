@@ -99,6 +99,33 @@ The runtime includes the Iceberg Spark runtime, AWS bundle and JDBC catalog modu
 - Namespace/table identifier validation is present, but full row/column governance, tenant-scoped catalog authorization and audited grants are still separate platform work.
 - Flink is deployed as a compute engine, but a production-grade Flink-to-Iceberg streaming sink with checkpointed exactly-once commits is not claimed by this release.
 
+## Persistent and shared notebooks
+
+Notebook persistence is backed by PostgreSQL and migrated by Flyway (`V13__lakehouse_notebooks.sql`).
+
+### API
+
+All routes are under `/api/v1`.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/notebooks` | Create notebook; returns one-time owner access token |
+| GET | `/notebooks` | List notebooks accessible with supplied token |
+| GET | `/notebooks/{id}` | Read notebook and current version |
+| PUT | `/notebooks/{id}` | Save notebook with optimistic version check |
+| DELETE | `/notebooks/{id}` | Soft-delete notebook (owner only) |
+| GET | `/notebooks/{id}/revisions` | List immutable revisions |
+| GET/POST | `/notebooks/{id}/shares` | List or create read/write shares (owner only) |
+| POST | `/notebooks/{id}/shares/{shareId}/revoke` | Revoke a share (owner only) |
+
+Send the owner or share capability in the `X-Notebook-Token` header. Tokens are random high-entropy values; PostgreSQL stores only SHA-256 hashes. The plaintext owner token is returned once when creating a notebook, and a share token is returned once when creating that share. Store them in a secret manager or password manager and transmit them over HTTPS. Browser storage is only a convenience for the Studio; clearing it does not remove the server-side notebook, but losing the owner token means owner-only operations cannot be performed.
+
+Share permissions are `READ` or `WRITE`. Share links can be revoked and can optionally have an expiry timestamp. Owner-only operations include creating/revoking shares and deleting the notebook. Writes use an expected version number; stale saves return HTTP 409 with `NOTEBOOK_VERSION_CONFLICT` so clients can reload instead of silently overwriting another collaborator's changes. Each successful save creates an immutable revision. Revision restore UI and live co-editing/presence are not implemented yet.
+
+### Security boundary
+
+These notebook endpoints use capability-token authorization rather than SBase account/tenant identity. Treat access tokens as passwords, use HTTPS, avoid putting tokens in query strings, and configure an API gateway/rate limiting before exposing notebook creation publicly. Tenant-bound RBAC, SSO identity mapping, audit export and server-side execution quotas remain follow-up work. SQL execution still uses the separate Spark SQL endpoint and does not inherit notebook share permissions; do not treat a notebook share as a SQL engine credential.
+
 ## Next lakehouse stages
 
 1. Add catalog authorization, ownership, tags, grants and lineage integrated with workspace boundaries.
