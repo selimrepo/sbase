@@ -136,7 +136,7 @@ services:
     restart: unless-stopped
 
   flink-jobmanager:
-    image: sbase-flink:2.1.0
+    image: sbase-flink:1.20.2
     build: ./flink
     profiles: ["full"]
     command: ["jobmanager"]
@@ -194,7 +194,7 @@ services:
     restart: "no"
 
   flink-taskmanager:
-    image: sbase-flink:2.1.0
+    image: sbase-flink:1.20.2
     build: ./flink
     profiles: ["full"]
     command: ["taskmanager"]
