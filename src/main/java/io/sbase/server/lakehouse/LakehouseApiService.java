@@ -384,6 +384,41 @@ public final class LakehouseApiService implements AutoCloseable {
         catch(Exception e) { throw failure("Unable to queue ingestion run",e); }
     }
 
+    public Map<String,Object> cancelPipelineRun(Session s,UUID pipelineId,UUID attemptId) {
+        String status,flinkJobId;
+        UUID runId;
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
+                "SELECT a.status,a.runtime_job_id,a.ingestion_run_id FROM lakehouse_pipeline_attempt a JOIN lakehouse_ingestion_pipeline i ON i.id=a.pipeline_id WHERE a.id=? AND a.pipeline_id=? AND i.workspace_id=?")) {
+            p.setObject(1,attemptId);p.setObject(2,pipelineId);p.setObject(3,s.principal().workspaceId());
+            try(ResultSet r=p.executeQuery()) {
+                if(!r.next()) throw new NoSuchElementException("Pipeline run not found");
+                status=r.getString(1);flinkJobId=r.getString(2);runId=r.getObject(3,UUID.class);
+            }
+        } catch(NoSuchElementException e) { throw e; }
+        catch(Exception e) { throw failure("Unable to inspect pipeline run",e); }
+        if(Set.of("SUCCEEDED","FAILED","CANCELLED").contains(status))
+            return Map.of("attemptId",attemptId.toString(),"status",status,"cancelRequested",false);
+        if(flinkJobId!=null && !flinkJobId.isBlank()) {
+            try {
+                new io.sbase.server.runtime.PlatformRuntimeService(spark).flinkCancel(flinkJobId);
+                return Map.of("attemptId",attemptId.toString(),"flinkJobId",flinkJobId,"status","CANCEL_REQUESTED","cancelRequested",true);
+            } catch(Exception e) { throw failure("Unable to cancel Flink job",e); }
+        }
+        if(!"QUEUED".equals(status) && !"RETRY_WAIT".equals(status))
+            throw new IllegalStateException("A running Spark batch job cannot be cancelled through this endpoint");
+        try(Connection c=dataSource.getConnection()) {
+            c.setAutoCommit(false);
+            try(PreparedStatement p=c.prepareStatement("UPDATE lakehouse_pipeline_attempt SET status='CANCELLED',finished_at=now() WHERE id=? AND status IN ('QUEUED','RETRY_WAIT')")) {
+                p.setObject(1,attemptId);if(p.executeUpdate()==0) { c.rollback();throw new IllegalStateException("Pipeline run was claimed while cancellation was requested"); }
+            }
+            try(PreparedStatement p=c.prepareStatement("UPDATE lakehouse_ingestion_run SET status='CANCELLED',finished_at=now() WHERE id=? AND workspace_id=?")) {
+                p.setObject(1,runId);p.setObject(2,s.principal().workspaceId());p.executeUpdate();
+            }
+            c.commit();
+            return Map.of("attemptId",attemptId.toString(),"status","CANCELLED","cancelRequested",true);
+        } catch(Exception e) { throw failure("Unable to cancel queued pipeline run",e); }
+    }
+
     public List<Map<String,Object>> pipelineRuns(Session s,UUID pipelineId,int requestedLimit) {
         int limit=Math.max(1,Math.min(requestedLimit,200));
         String sql="SELECT a.id,a.pipeline_version,a.attempt,a.status,a.submitted_at,a.started_at,a.finished_at,a.error_class,a.error_message,a.runtime_job_id,a.result::text FROM lakehouse_pipeline_attempt a JOIN lakehouse_ingestion_pipeline p ON p.id=a.pipeline_id WHERE p.workspace_id=? AND p.id=? ORDER BY a.submitted_at DESC LIMIT ?";
