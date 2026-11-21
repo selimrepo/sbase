@@ -374,7 +374,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
     | d.max_concurrent_runs,d.max_attempts,d.invocation_count,d.last_invoked_at,d.created_at,d.updated_at,
     | (SELECT COUNT(*) FROM job_execution j WHERE j.deployment_id=d.id
     |  AND j.status IN ('QUEUED','RUNNING','RETRY_WAIT')) AS active_runs
-    | FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id """+
+    | FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id """.stripMargin+
     (if(workflowId.isDefined)"WHERE d.workflow_id=? " else "")+"ORDER BY d.updated_at DESC LIMIT ?"
    val p=c.prepareStatement(sql);var i=1;workflowId.foreach{id=>p.setObject(i,id);i+=1};p.setInt(i,math.max(1,math.min(limit,500)))
    val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
@@ -569,7 +569,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
 
  private def notebookEvent(c:Connection,id:UUID,event:String,actor:String,details:String):Unit = {
   val p=c.prepareStatement("INSERT INTO lakehouse_notebook_event(notebook_id,event_type,actor_kind,details) VALUES (?,?,?,?::jsonb)")
-  p.setObject(1,id);p.setString(2,event);p.setString(3,actor);p.setString(4,details);p.executeUpdate();p.close()
+  p.setObject(1,id);p.setString(2,event);p.setString(3,if(actor=="OWNER") "OWNER" else "SHARE");p.setString(4,details);p.executeUpdate();p.close()
  }
 
  def createNotebook(title:String,description:String,cellsJson:String):(Map[String,Object],String) = {
@@ -596,7 +596,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
     | FROM lakehouse_notebook n LEFT JOIN lakehouse_notebook_share s
     | ON s.notebook_id=n.id AND s.token_hash=? AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at>now())
     | WHERE n.deleted_at IS NULL AND (n.owner_token_hash=? OR s.id IS NOT NULL)
-    | ORDER BY n.updated_at DESC""")
+    | ORDER BY n.updated_at DESC""".stripMargin)
    (1 to 4).foreach(i=>p.setString(i,hash));val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
    while(rs.next())out+=Map[String,Object]("id"->rs.getString("id"),"title"->rs.getString("title"),
     "description"->Option(rs.getString("description")).orNull,"version"->Long.box(rs.getLong("version")),

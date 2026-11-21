@@ -91,32 +91,43 @@ class JobRepositoryPostgresTest {
     @Test
     void notebooksPersistRevisionsAndEnforceRevocableSharePermissions() {
         var created = repository.createNotebook("shared-analysis", "team notebook",
-            "[{\\"id\\":1,\\"type\\":\\"sql\\",\\"source\\":\\"SELECT 1\\"}]");
+            "[{\"id\":1,\"type\":\"sql\",\"source\":\"SELECT 1\"}]");
         String ownerToken = created._2();
-        UUID notebookId = UUID.fromString(String.valueOf(created._1().get("id")));
+        UUID notebookId = UUID.fromString(String.valueOf(created._1().apply("id")));
         assertEquals(1, repository.listNotebooks(ownerToken).size());
-        assertEquals("shared-analysis", repository.getNotebook(notebookId, ownerToken).get("title"));
+        assertEquals("shared-analysis", repository.getNotebook(notebookId, ownerToken).apply("title"));
 
         var writeShare = repository.createNotebookShare(notebookId, ownerToken, "WRITE", "Analyst",
             scala.Option.apply(null));
-        String writeToken = String.valueOf(writeShare.get("token"));
+        String writeToken = String.valueOf(writeShare.apply("token"));
         assertEquals(1, repository.listNotebooks(writeToken).size());
         long updated = repository.updateNotebook(notebookId, writeToken, 1L, "shared-analysis",
-            "edited by collaborator", "[{\\"id\\":1,\\"type\\":\\"sql\\",\\"source\\":\\"SELECT 2\\"}]",
+            "edited by collaborator", "[{\"id\":1,\"type\":\"sql\",\"source\":\"SELECT 2\"}]",
             "Collaborator edit");
         assertEquals(2L, updated);
-        assertEquals("WRITE", repository.getNotebook(notebookId, writeToken).get("actor"));
+        assertEquals("WRITE", repository.getNotebook(notebookId, writeToken).apply("actor"));
+        try (var connection=dataSource.getConnection();
+             var statement=connection.prepareStatement(
+                 "SELECT actor_kind FROM lakehouse_notebook_event WHERE notebook_id=? AND event_type='UPDATED' ORDER BY id DESC LIMIT 1")) {
+            statement.setObject(1,notebookId);
+            try(var rows=statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals("SHARE",rows.getString(1),"event actor kind is distinct from share permission");
+            }
+        } catch (java.sql.SQLException e) {
+            throw new AssertionError("Unable to verify notebook event actor kind",e);
+        }
         assertEquals(2, repository.notebookRevisions(notebookId, ownerToken).size());
         assertThrows(IllegalStateException.class, () -> repository.updateNotebook(notebookId, ownerToken,
             1L, "stale edit", "", "[]", "stale save"));
 
         var readShare = repository.createNotebookShare(notebookId, ownerToken, "READ", "Viewer",
             scala.Option.apply(null));
-        String readToken = String.valueOf(readShare.get("token"));
+        String readToken = String.valueOf(readShare.apply("token"));
         assertThrows(SecurityException.class, () -> repository.updateNotebook(notebookId, readToken,
             2L, "forbidden", "", "[]", "read-only token"));
         assertTrue(repository.revokeNotebookShare(notebookId,
-            UUID.fromString(String.valueOf(readShare.get("shareId"))), ownerToken));
+            UUID.fromString(String.valueOf(readShare.apply("shareId"))), ownerToken));
         assertThrows(SecurityException.class, () -> repository.getNotebook(notebookId, readToken));
         assertTrue(repository.deleteNotebook(notebookId, ownerToken));
         assertThrows(SecurityException.class, () -> repository.getNotebook(notebookId, ownerToken));

@@ -2,8 +2,8 @@
 # Start with:
 # docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d
 #
-# Tune *_MEMORY / *_CORES values in .env for the host. Values below are
-# deliberately conservative defaults, not hard caps on the host machine.
+# The profile includes a three-node Kafka KRaft quorum and a Flink cluster.
+# Tune *_MEMORY / *_CORES values in .env for the host.
 
 services:
   app:
@@ -14,6 +14,7 @@ services:
       SPARK_DRIVER_PORT: "7078"
       SPARK_BLOCKMANAGER_PORT: "7079"
       FLINK_REST_URL: http://flink-jobmanager:8081
+      SBASE_JWT_SECRET: ${SBASE_JWT_SECRET:-dev-only-sbase-jwt-secret-change-me-please}
       SBASE_ICEBERG_ENABLED: "true"
       SBASE_ICEBERG_WAREHOUSE: ${SBASE_ICEBERG_WAREHOUSE:-s3://sbase-warehouse/}
       SBASE_ICEBERG_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
@@ -48,6 +49,12 @@ services:
         condition: service_started
       minio-init:
         condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
     restart: unless-stopped
 
   postgres:
@@ -134,19 +141,178 @@ services:
       - spark-master
     restart: unless-stopped
 
+  kafka:
+    image: apache/kafka:3.9.1
+    profiles: ["full"]
+    hostname: kafka
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      CLUSTER_ID: "${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}"
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093,2@kafka-2:9093,3@kafka-3:9093"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
+      KAFKA_MIN_INSYNC_REPLICAS: "2"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx384m"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_1_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: ${KAFKA_MEMORY_LIMIT:-768m}
+    restart: unless-stopped
+
+  kafka-2:
+    image: apache/kafka:3.9.1
+    profiles: ["full"]
+    hostname: kafka-2
+    environment:
+      CLUSTER_ID: "${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}"
+      KAFKA_NODE_ID: "2"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka-2:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093,2@kafka-2:9093,3@kafka-3:9093"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
+      KAFKA_MIN_INSYNC_REPLICAS: "2"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx384m"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_2_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: ${KAFKA_MEMORY_LIMIT:-768m}
+    restart: unless-stopped
+
+  kafka-3:
+    image: apache/kafka:3.9.1
+    profiles: ["full"]
+    hostname: kafka-3
+    environment:
+      CLUSTER_ID: "${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}"
+      KAFKA_NODE_ID: "3"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka-3:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093,2@kafka-2:9093,3@kafka-3:9093"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
+      KAFKA_MIN_INSYNC_REPLICAS: "2"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx384m"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_3_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: ${KAFKA_MEMORY_LIMIT:-768m}
+    restart: unless-stopped
+
   flink-jobmanager:
+    image: sbase-flink:1.20.2
+    build: ./flink
     profiles: ["full"]
     command: ["jobmanager"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         jobmanager.memory.process.size: ${FLINK_JOBMANAGER_MEMORY:-1600m}
         rest.address: flink-jobmanager
+      SBASE_ICEBERG_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
+      SBASE_ICEBERG_JDBC_USER: ${POSTGRES_USER:-sbase}
+      SBASE_ICEBERG_JDBC_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      SBASE_ICEBERG_WAREHOUSE: ${SBASE_ICEBERG_WAREHOUSE:-s3://sbase-warehouse/}
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_PATH_STYLE_ACCESS: "true"
+      SBASE_FLINK_CHECKPOINT_INTERVAL_MS: ${SBASE_FLINK_CHECKPOINT_INTERVAL_MS:-30000}
+      SBASE_FLINK_CHECKPOINT_TIMEOUT_MS: ${SBASE_FLINK_CHECKPOINT_TIMEOUT_MS:-120000}
     mem_limit: ${FLINK_JOBMANAGER_MEMORY_LIMIT:-2g}
     restart: unless-stopped
 
+  flink-taskmanager:
+    image: sbase-flink:1.20.2
+    build: ./flink
+    profiles: ["full"]
+    command: ["taskmanager"]
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS:-4}
+        taskmanager.memory.process.size: ${FLINK_TASKMANAGER_MEMORY:-4g}
+      SBASE_ICEBERG_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
+      SBASE_ICEBERG_JDBC_USER: ${POSTGRES_USER:-sbase}
+      SBASE_ICEBERG_JDBC_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      SBASE_ICEBERG_WAREHOUSE: ${SBASE_ICEBERG_WAREHOUSE:-s3://sbase-warehouse/}
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_PATH_STYLE_ACCESS: "true"
+      SBASE_FLINK_CHECKPOINT_INTERVAL_MS: ${SBASE_FLINK_CHECKPOINT_INTERVAL_MS:-30000}
+      SBASE_FLINK_CHECKPOINT_TIMEOUT_MS: ${SBASE_FLINK_CHECKPOINT_TIMEOUT_MS:-120000}
+    mem_limit: ${FLINK_TASKMANAGER_MEMORY_LIMIT:-5g}
+    restart: unless-stopped
 
-  # S3-compatible object storage for Iceberg table data and metadata files.
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     profiles: ["full"]
@@ -179,22 +345,8 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     restart: "no"
 
-  flink-taskmanager:
-    profiles: ["full"]
-    command: ["taskmanager"]
-    environment:
-      FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS:-4}
-        taskmanager.memory.process.size: ${FLINK_TASKMANAGER_MEMORY:-4g}
-    mem_limit: ${FLINK_TASKMANAGER_MEMORY_LIMIT:-5g}
-    depends_on:
-      - flink-jobmanager
-    restart: unless-stopped
-
-# Persist engine state and Spark spill across restarts. The application model
-# registry, PostgreSQL, Cassandra, Solr and Spark scratch volumes are declared
-# by compose.yaml and reused by this overlay.
-
 volumes:
   minio_data:
+  kafka_1_data:
+  kafka_2_data:
+  kafka_3_data:
