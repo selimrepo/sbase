@@ -344,10 +344,13 @@ public final class LakehouseApiService implements AutoCloseable {
             p.setObject(1,s.principal().workspaceId());
             try(ResultSet r=p.executeQuery()) {
                 List<Map<String,Object>> out=new ArrayList<>();
-                while(r.next()) out.add(Map.of("id",r.getObject(1).toString(),"name",r.getString(2),"sourceId",r.getObject(3).toString(),
-                        "engine",r.getString(4),"mode",r.getString(5),"targetNamespace",r.getString(6),"targetTable",r.getString(7),
-                        "enabled",r.getBoolean(8),"version",r.getInt(9),"createdAt",r.getTimestamp(10).toInstant().toString(),
-                        "updatedAt",r.getTimestamp(11).toInstant().toString()));
+                while(r.next()) {
+                    Map<String,Object> item=new LinkedHashMap<>();
+                    item.put("id",r.getObject(1).toString());item.put("name",r.getString(2));item.put("sourceId",r.getObject(3).toString());
+                    item.put("engine",r.getString(4));item.put("mode",r.getString(5));item.put("targetNamespace",r.getString(6));item.put("targetTable",r.getString(7));
+                    item.put("enabled",r.getBoolean(8));item.put("version",r.getInt(9));item.put("createdAt",r.getTimestamp(10).toInstant().toString());
+                    item.put("updatedAt",r.getTimestamp(11).toInstant().toString());out.add(item);
+                }
                 return out;
             }
         } catch(Exception e) { throw failure("Unable to list ingestion pipelines",e); }
