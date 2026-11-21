@@ -64,6 +64,11 @@ application {
 }
 
 tasks.withType(ScalaCompile).configureEach {
+    // Run Zinc/Scala in a dedicated compiler JVM with a larger stack. Deep
+    // generic signatures from Spark/Pekko/Flink trigger recursive erasure on CI.
+    scalaCompileOptions.fork = true
+    scalaCompileOptions.forkOptions.jvmArgs = ['-Xss16m', '-XX:+UseG1GC']
+    scalaCompileOptions.forkOptions.memoryMaximumSize = '2g'
     scalaCompileOptions.additionalParameters = ['-deprecation', '-feature', '-unchecked']
 }
 tasks.withType(Test).configureEach {
