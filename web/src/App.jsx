@@ -53,7 +53,9 @@ export default function App() {
   }
 
   return <main className="shell">
-    <header><div><div className="eyebrow">DISTRIBUTED DATA SCIENCE PLATFORM</div><h1>SBase <span>Workflow Studio</span></h1></div><div className="runtime"><i /> Pekko cluster runtime</div></header>
+    <header><div><div className="eyebrow">DISTRIBUTED DATA SCIENCE PLATFORM</div><h1>SBase <span>{workspace === "workflow" ? "Workflow Studio" : "Lakehouse Studio"}</span></h1></div><div className="runtime"><i /> Pekko cluster runtime</div></header>
+    <nav className="workspace-switch"><button className={workspace === "workflow" ? "active" : ""} onClick={() => setWorkspace("workflow")}>Workflow Studio</button><button className={workspace === "lakehouse" ? "active" : ""} onClick={() => setWorkspace("lakehouse")}>Lakehouse Studio <span>NEW</span></button></nav>
+    {workspace === "lakehouse" ? <LakehouseStudio /> : <>
     <section className="toolbar">
       <input aria-label="Workflow name" value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} />
       <input aria-label="API endpoint" value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
@@ -77,5 +79,6 @@ export default function App() {
     </section>
     <section className="results"><div><div className="section-title">RUN OUTPUT / DIAGNOSTICS</div><pre>{output || "Execution output and error details will appear here."}</pre></div><div><div className="section-title">WORKFLOW DEFINITION</div><pre>{JSON.stringify(definition, null, 2)}</pre></div></section>
     <footer>PostgreSQL durable queue · Pekko Cluster Sharding · Spark · Mahout · Flink REST</footer>
+    </>}
   </main>;
 }
