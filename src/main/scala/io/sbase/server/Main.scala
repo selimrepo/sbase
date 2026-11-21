@@ -231,6 +231,119 @@ path("deployments"/Segment/"runs"){slug=>post{
        case Failure(error)=>system.log.warn("Spark SQL request rejected/failed: {}",error.getMessage);complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Spark SQL failed"))))
       }
     }}} ~
+    path("notebooks"){ 
+     post{entity(as[JsObject]){request=>
+      try {
+       val title=request.fields.get("title").map(_.convertTo[String]).getOrElse("Untitled notebook")
+       val description=request.fields.get("description").filter(_!=JsNull).map(_.convertTo[String]).orNull
+       val cells=request.fields.get("cells").map(_.compactPrint).getOrElse("[]")
+       onComplete(Future(scala.concurrent.blocking(repository.createNotebook(title,description,cells)))) {
+        case Success((notebook,token))=>complete(StatusCodes.Created->JsObject("notebook"->mapper.writeValueAsString(notebook).parseJson,"accessToken"->JsString(token)))
+        case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Notebook creation failed"))))
+       }
+      } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Invalid notebook"))))}
+     }} ~
+     optionalHeaderValueByName("X-Notebook-Token"){token=>
+      get{
+       token match {
+        case None=>complete(StatusCodes.Unauthorized->JsObject("error"->JsString("X-Notebook-Token header required")))
+        case Some(value)=>onComplete(Future(scala.concurrent.blocking(repository.listNotebooks(value)))) {
+         case Success(items)=>complete(mapper.writeValueAsString(items).parseJson)
+         case Failure(error)=>complete(StatusCodes.Unauthorized->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Notebook listing failed"))))
+        }
+       }
+      }
+     }
+    } ~
+    path("notebooks"/JavaUUID){notebookId=>
+     optionalHeaderValueByName("X-Notebook-Token"){token=>
+      get{
+       token match {
+        case None=>complete(StatusCodes.Unauthorized->JsObject("error"->JsString("X-Notebook-Token header required")))
+        case Some(value)=>onComplete(Future(scala.concurrent.blocking(repository.getNotebook(notebookId,value)))) {
+         case Success(item)=>complete(mapper.writeValueAsString(item).parseJson)
+         case Failure(error)=>complete(StatusCodes.Forbidden->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Notebook access denied"))))
+        }
+       }
+      } ~
+      put{entity(as[JsObject]){request=>
+       try {
+        val expected=request.fields.get("expectedVersion").map(_.convertTo[Long]).getOrElse(0L)
+        val title=request.fields.get("title").map(_.convertTo[String]).getOrElse("Untitled notebook")
+        val description=request.fields.get("description").filter(_!=JsNull).map(_.convertTo[String]).orNull
+        val cells=request.fields.get("cells").map(v=>if(v.isInstanceOf[JsString])v.convertTo[String] else v.compactPrint).getOrElse("[]")
+        val summary=request.fields.get("changeSummary").map(_.convertTo[String]).orNull
+        token match {
+         case None=>complete(StatusCodes.Unauthorized->JsObject("error"->JsString("X-Notebook-Token header required")))
+         case Some(value)=>onComplete(Future(scala.concurrent.blocking(repository.updateNotebook(notebookId,value,expected,title,description,cells,summary)))) {
+          case Success(version)=>complete(JsObject("id"->JsString(notebookId.toString),"version"->JsNumber(version)))
+          case Failure(error) if Option(error.getMessage).exists(_.contains("NOTEBOOK_VERSION_CONFLICT"))=>complete(StatusCodes.Conflict->JsObject("error"->JsString(error.getMessage)))
+          case Failure(error) if error.isInstanceOf[SecurityException]=>complete(StatusCodes.Forbidden->JsObject("error"->JsString(error.getMessage)))
+          case Failure(error)=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Notebook update failed"))))
+         }
+        }
+       } catch {case error:Exception=>complete(StatusCodes.BadRequest->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Invalid notebook update"))))}
+      }} ~
+      delete{
+       token match {
+        case None=>complete(StatusCodes.Unauthorized->JsObject("error"->JsString("X-Notebook-Token header required")))
+        case Some(value)=>onComplete(Future(scala.concurrent.blocking(repository.deleteNotebook(notebookId,value)))) {
+         case Success(true)=>complete(StatusCodes.NoContent)
+         case Success(false)=>complete(StatusCodes.NotFound)
+         case Failure(error)=>complete(StatusCodes.Forbidden->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Notebook delete failed"))))
+        }
+       }
+      }
+     }
+    } ~
+    path("notebooks"/JavaUUID/"shares"){notebookId=>
+     optionalHeaderValueByName("X-Notebook-Token"){token=>
+      get{
+       token match {
+        case None=>complete(StatusCodes.Unauthorized)
+        case Some(value)=>onComplete(Future(scala.concurrent.blocking(repository.listNotebookShares(notebookId,value)))) {
+         case Success(items)=>complete(mapper.writeValueAsString(items).parseJson)
+         case Failure(error)=>complete(StatusCodes.Forbidden->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Share listing failed"))))
+        }
+       }
+      } ~
+      post{entity(as[JsObject]){request=>
+       val permission=request.fields.get("permission").map(_.convertTo[String]).getOrElse("READ")
+       val label=request.fields.get("label").filter(_!=JsNull).map(_.convertTo[String]).orNull
+       val expires=request.fields.get("expiresAt").filter(_!=JsNull).map(_.convertTo[String])
+       token match {
+        case None=>complete(StatusCodes.Unauthorized)
+        case Some(value)=>onComplete(Future(scala.concurrent.blocking(repository.createNotebookShare(notebookId,value,permission,label,expires)))) {
+         case Success(share)=>complete(StatusCodes.Created->mapper.writeValueAsString(share).parseJson)
+         case Failure(error)=>complete(StatusCodes.Forbidden->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Share creation failed"))))
+        }
+       }
+      }}
+     }
+    } ~
+    path("notebooks"/JavaUUID/"shares"/JavaUUID/"revoke"){(notebookId,shareId)=>
+     post{optionalHeaderValueByName("X-Notebook-Token"){token=>
+      token match {
+       case None=>complete(StatusCodes.Unauthorized)
+       case Some(value)=>onComplete(Future(scala.concurrent.blocking(repository.revokeNotebookShare(notebookId,shareId,value)))) {
+        case Success(true)=>complete(JsObject("revoked"->JsBoolean(true)))
+        case Success(false)=>complete(StatusCodes.NotFound)
+        case Failure(error)=>complete(StatusCodes.Forbidden->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Share revocation failed"))))
+       }
+      }
+     }}
+    } ~
+    path("notebooks"/JavaUUID/"revisions"){notebookId=>
+     get{optionalHeaderValueByName("X-Notebook-Token"){token=>
+      token match {
+       case None=>complete(StatusCodes.Unauthorized)
+       case Some(value)=>onComplete(Future(scala.concurrent.blocking(repository.notebookRevisions(notebookId,value)))) {
+        case Success(items)=>complete(mapper.writeValueAsString(items).parseJson)
+        case Failure(error)=>complete(StatusCodes.Forbidden->JsObject("error"->JsString(Option(error.getMessage).getOrElse("Revision listing failed"))))
+       }
+      }
+     }}
+    } ~
     path("lakehouse"){get{
       onComplete(Future(scala.concurrent.blocking(mapper.writeValueAsString(runtime.lakehouseStatus()).parseJson))){
        case Success(value)=>complete(value)
