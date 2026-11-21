@@ -386,7 +386,7 @@ public final class LakehouseApiService implements AutoCloseable {
 
     public List<Map<String,Object>> pipelineRuns(Session s,UUID pipelineId,int requestedLimit) {
         int limit=Math.max(1,Math.min(requestedLimit,200));
-        String sql="SELECT a.id,a.pipeline_version,a.attempt,a.status,a.submitted_at,a.started_at,a.finished_at,a.error_class,a.error_message FROM lakehouse_pipeline_attempt a JOIN lakehouse_ingestion_pipeline p ON p.id=a.pipeline_id WHERE p.workspace_id=? AND p.id=? ORDER BY a.submitted_at DESC LIMIT ?";
+        String sql="SELECT a.id,a.pipeline_version,a.attempt,a.status,a.submitted_at,a.started_at,a.finished_at,a.error_class,a.error_message,a.runtime_job_id,a.result::text FROM lakehouse_pipeline_attempt a JOIN lakehouse_ingestion_pipeline p ON p.id=a.pipeline_id WHERE p.workspace_id=? AND p.id=? ORDER BY a.submitted_at DESC LIMIT ?";
         try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(sql)) {
             p.setObject(1,s.principal().workspaceId());p.setObject(2,pipelineId);p.setInt(3,limit);
             try(ResultSet r=p.executeQuery()) {
@@ -396,7 +396,9 @@ public final class LakehouseApiService implements AutoCloseable {
                     item.put("status",r.getString(4));item.put("submittedAt",r.getTimestamp(5).toInstant().toString());
                     item.put("startedAt",r.getTimestamp(6)==null?null:r.getTimestamp(6).toInstant().toString());
                     item.put("finishedAt",r.getTimestamp(7)==null?null:r.getTimestamp(7).toInstant().toString());
-                    item.put("errorClass",r.getString(8));item.put("errorMessage",r.getString(9));out.add(item);
+                    item.put("errorClass",r.getString(8));item.put("errorMessage",r.getString(9));item.put("runtimeJobId",r.getString(10));
+                    try { item.put("result",JSON.readTree(r.getString(11))); } catch(Exception ignored) { item.put("result",Map.of()); }
+                    out.add(item);
                 }
                 return out;
             }
