@@ -150,6 +150,11 @@ public final class LakehouseApiService implements AutoCloseable {
         if(!normalized.matches("(?is)^(SELECT|WITH)\\b.*") ||
            normalized.matches("(?is).*\\b(INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|TRUNCATE|CALL|SET|USE|CACHE|UNCACHE)\\b.*"))
             throw new SecurityException("SQL workspace accepts read-only SELECT/WITH statements only");
+        var fromClause=java.util.regex.Pattern.compile("(?is)\\bFROM\\b(.*?)(?=\\bWHERE\\b|\\bGROUP\\s+BY\\b|\\bHAVING\\b|\\bORDER\\s+BY\\b|\\bLIMIT\\b|\\bQUALIFY\\b|\\bUNION\\b|\\bEXCEPT\\b|\\bINTERSECT\\b|$)").matcher(normalized);
+        while(fromClause.find()) {
+            if(fromClause.group(1).contains(","))
+                throw new SecurityException("Comma-separated FROM relations are not accepted; use explicit JOIN clauses");
+        }
         Set<String> ctes=new HashSet<>();
         var cteMatcher=java.util.regex.Pattern.compile("(?i)(?:WITH|,)\\s*([A-Za-z_][\\w]*)\\s+AS\\s*\\(").matcher(normalized);
         while(cteMatcher.find()) ctes.add(cteMatcher.group(1).toLowerCase(Locale.ROOT));
