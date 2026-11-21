@@ -14,6 +14,7 @@ services:
       SPARK_DRIVER_PORT: "7078"
       SPARK_BLOCKMANAGER_PORT: "7079"
       FLINK_REST_URL: http://flink-jobmanager:8081
+      SBASE_JWT_SECRET: ${SBASE_JWT_SECRET:-dev-only-sbase-jwt-secret-change-me-please}
       SBASE_ICEBERG_ENABLED: "true"
       SBASE_ICEBERG_WAREHOUSE: ${SBASE_ICEBERG_WAREHOUSE:-s3://sbase-warehouse/}
       SBASE_ICEBERG_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sbase}
