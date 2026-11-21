@@ -346,7 +346,7 @@ function PipelineStudio() {
     finally { setBusy(false); }
   }
   async function loadRuns(item) {
-    try { setRuns(current => ({ ...current, [item.id]: await request("/lakehouse/pipelines/" + encodeURIComponent(item.id) + "/runs") })); }
+    try { const history = await request("/lakehouse/pipelines/" + encodeURIComponent(item.id) + "/runs"); setRuns(current => ({ ...current, [item.id]: history })); }
     catch (e) { setError(e.message); }
   }
 
