@@ -80,6 +80,14 @@ object LakehouseApiRoutes extends Directives {
       path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "schema") { (namespace,table) =>
         optionalHeaderValueByName("Authorization") { auth => get { run(auth)(s => service.get.schema(s,namespace,table)) } }
       } ~
+      path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "schema" / "evolve") { (namespace,table) =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          post { entity(as[JsObject]) { body =>
+            val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
+            run(auth)(s => service.get.evolveSchema(s,namespace,table,request))
+          }}
+        }
+      } ~
       path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "snapshots") { (namespace,table) =>
         optionalHeaderValueByName("Authorization") { auth => get { run(auth)(s => service.get.snapshots(s,namespace,table)) } }
       } ~
