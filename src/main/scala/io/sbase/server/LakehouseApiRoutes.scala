@@ -7,6 +7,7 @@ import org.apache.pekko.http.scaladsl.server.{Directives,Route}
 import org.apache.pekko.http.scaladsl.model.StatusCodes
 import org.apache.pekko.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import spray.json._
+import spray.json.DefaultJsonProtocol._
 import scala.concurrent.{ExecutionContext,Future}
 import scala.util.{Failure,Success}
 import java.util.UUID
