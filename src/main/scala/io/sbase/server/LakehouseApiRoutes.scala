@@ -76,6 +76,28 @@ object LakehouseApiRoutes extends Directives {
           }
         }
       } ~
+      path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "schema") { (namespace,table) =>
+        optionalHeaderValueByName("Authorization") { auth => get { run(auth)(s => service.get.schema(s,namespace,table)) } }
+      } ~
+      path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "snapshots") { (namespace,table) =>
+        optionalHeaderValueByName("Authorization") { auth => get { run(auth)(s => service.get.snapshots(s,namespace,table)) } }
+      } ~
+      path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "compact") { (namespace,table) =>
+        optionalHeaderValueByName("Authorization") { auth => post { run(auth)(s => service.get.compact(s,namespace,table)) } }
+      } ~
+      path("lakehouse" / "namespaces" / Segment / "maintenance") { namespace =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          get { run(auth)(s => service.get.maintenancePolicies(s,namespace)) } ~
+          post { entity(as[JsObject]) { body =>
+            val table=body.fields.get("table").map(_.convertTo[String]).getOrElse("")
+            val operation=body.fields.get("operation").map(_.convertTo[String]).getOrElse("COMPACT")
+            val interval=body.fields.get("intervalSeconds").map(_.convertTo[Int]).getOrElse(86400)
+            val retention=body.fields.get("retentionDays").map(_.convertTo[Int]).getOrElse(7)
+            val orphan=body.fields.get("orphanOlderThanHours").map(_.convertTo[Int]).getOrElse(72)
+            run(auth)(s => service.get.createMaintenancePolicy(s,namespace,table,operation,interval,retention,orphan))
+          }}
+        }
+      } ~
       path("engines" / "spark" / "sql") {
         optionalHeaderValueByName("Authorization") { auth =>
           post {
@@ -84,6 +106,16 @@ object LakehouseApiRoutes extends Directives {
               val limit=body.fields.get("limit").map(_.convertTo[Int]).getOrElse(1000)
               run(auth)(s => service.get.query(s,sql,limit))
             }
+          }
+        }
+      } ~
+      pathPrefix("lakehouse") {
+        optionalHeaderValueByName("Authorization") { auth =>
+          service match {
+            case None => unavailable
+            case Some(api) =>
+              try { api.authenticate(auth.orNull); complete(StatusCodes.NotFound -> JsObject("error" -> JsString("Unknown Lakehouse endpoint"))) }
+              catch { case e: SecurityException => complete(StatusCodes.Unauthorized -> JsObject("error" -> JsString(Option(e.getMessage).getOrElse("Authentication failed")))) }
           }
         }
       }
