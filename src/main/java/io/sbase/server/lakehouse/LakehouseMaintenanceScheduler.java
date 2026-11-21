@@ -21,6 +21,7 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
     private final IcebergMaintenanceService maintenance;
     private final LakehouseControlPlane control;
     private final ScheduledExecutorService executor;
+    private final ScheduledExecutorService heartbeatExecutor;
     private final UUID owner=UUID.randomUUID();
     private final AtomicBoolean started=new AtomicBoolean();
 
@@ -32,6 +33,7 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
         c.setMaximumPoolSize(3);c.setMinimumIdle(1);c.setPoolName("sbase-lakehouse-maintenance");
         ds=new HikariDataSource(c);maintenance=new IcebergMaintenanceService(spark);control=new LakehouseControlPlane(ds);
         executor=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"sbase-lakehouse-maintenance");t.setDaemon(true);return t;});
+        heartbeatExecutor=Executors.newScheduledThreadPool(2,r->{Thread t=new Thread(r,"sbase-lakehouse-maintenance-heartbeat");t.setDaemon(true);return t;});
     }
 
     public void start() {
@@ -78,6 +80,20 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
     }
 
     private void execute(Policy p) {
+        ScheduledFuture<?> heartbeat=heartbeatExecutor.scheduleAtFixedRate(()->renewLease(p),30,30,TimeUnit.SECONDS);
+        try { executeWithHeartbeat(p); }
+        finally { heartbeat.cancel(false); }
+    }
+
+    private void renewLease(Policy p) {
+        try(Connection c=ds.getConnection();PreparedStatement s=c.prepareStatement(
+                "UPDATE lakehouse_maintenance_policy SET lease_until=now()+interval '5 minutes' WHERE id=? AND lease_owner=? AND fencing_token=? AND lease_until>now()")) {
+            s.setObject(1,p.id());s.setObject(2,p.owner());s.setLong(3,p.fence());
+            if(s.executeUpdate()==0) System.err.println("Lakehouse maintenance lease lost for policy "+p.id());
+        } catch(SQLException e) { System.err.println("Lakehouse maintenance heartbeat failed for "+p.id()+": "+e); }
+    }
+
+    private void executeWithHeartbeat(Policy p) {
         UUID run=UUID.randomUUID();
         try(Connection c=ds.getConnection()) {
             try(PreparedStatement s=c.prepareStatement(
@@ -137,5 +153,5 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
     }
 
     private static String env(String k,String d) { return Optional.ofNullable(System.getenv(k)).filter(v->!v.isBlank()).orElse(d); }
-    @Override public void close() { executor.shutdownNow();ds.close(); }
+    @Override public void close() { executor.shutdownNow();heartbeatExecutor.shutdownNow();ds.close(); }
 }
