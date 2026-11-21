@@ -267,6 +267,27 @@ public final class LakehouseApiService implements AutoCloseable {
         } catch(Exception e) { throw failure("Unable to create maintenance policy",e); }
     }
 
+    public List<Map<String,Object>> maintenanceHistory(Session s,String namespace,int requestedLimit) {
+        control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.USE);
+        int limit=Math.max(1,Math.min(requestedLimit,500));
+        String sql="SELECT r.id,r.policy_id,r.status,r.started_at,r.finished_at,r.summary::text,r.error_message,p.table_name,p.operation FROM lakehouse_maintenance_run r JOIN lakehouse_maintenance_policy p ON p.id=r.policy_id WHERE p.workspace_id=? AND p.namespace_name=? ORDER BY r.started_at DESC LIMIT ?";
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(sql)) {
+            p.setObject(1,s.principal().workspaceId());p.setString(2,namespace);p.setInt(3,limit);
+            try(ResultSet r=p.executeQuery()) {
+                List<Map<String,Object>> out=new ArrayList<>();
+                while(r.next()) {
+                    Map<String,Object> row=new LinkedHashMap<>();
+                    row.put("id",r.getObject(1).toString());row.put("policyId",r.getObject(2).toString());row.put("status",r.getString(3));
+                    row.put("startedAt",r.getTimestamp(4).toInstant().toString());
+                    row.put("finishedAt",r.getTimestamp(5)==null?null:r.getTimestamp(5).toInstant().toString());
+                    row.put("summary",JSON.readTree(r.getString(6)));row.put("error",r.getString(7));
+                    row.put("table",r.getString(8));row.put("operation",r.getString(9));out.add(row);
+                }
+                return out;
+            }
+        } catch(Exception e) { throw failure("Unable to list maintenance history",e); }
+    }
+
     public Map<String,Object> setMaintenancePolicyEnabled(Session s,UUID policyId,boolean enabled) {
         String namespace;String table;
         try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
