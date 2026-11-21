@@ -125,7 +125,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
             String insertSql=required(config,"insertSql");
             if(sourceDdl.toLowerCase(Locale.ROOT).contains("sbase_iceberg."))
                 throw new SecurityException("Flink source DDL cannot access the shared Iceberg catalog directly");
-            var refs=java.util.regex.Pattern.compile("(?i)\\\\b(?:FROM|JOIN)\\\\s+sbase_iceberg\\\\.([A-Za-z_][\\\\w]*)\\\\.([A-Za-z_][\\\\w]*)").matcher(insertSql);
+            var refs=java.util.regex.Pattern.compile("(?i)\\b(?:FROM|JOIN)\\s+sbase_iceberg\\.([A-Za-z_][\\w]*)\\.([A-Za-z_][\\w]*)").matcher(insertSql);
             while(refs.find())
                 control.requireTable(principal,"sbase",refs.group(1),refs.group(2),LakehouseControlPlane.Privilege.SELECT);
         }
