@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-const DEFAULT_SQL = "SELECT * FROM sbase.default.sample_table LIMIT 100;";
+function readLocalJson(key, fallback) {
+  try { const value = localStorage.getItem(key); return value ? JSON.parse(value) : fallback; }
+  catch { return fallback; }
+}
 const API = "/api/v1";
 
 async function request(path, options) {
