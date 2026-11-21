@@ -16,9 +16,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class LakehouseMaintenanceScheduler implements AutoCloseable {
     private record Policy(UUID id,UUID workspace,String catalog,String namespace,String table,
-                          String operation,int retentionDays,int orphanHours,UUID owner,long fence) {}
+                          String operation,int retentionDays,int orphanHours,String createdBy,UUID owner,long fence) {}
     private final HikariDataSource ds;
     private final IcebergMaintenanceService maintenance;
+    private final LakehouseControlPlane control;
     private final ScheduledExecutorService executor;
     private final UUID owner=UUID.randomUUID();
     private final AtomicBoolean started=new AtomicBoolean();
@@ -29,7 +30,7 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
         c.setUsername(env("SBASE_POSTGRES_USER","sbase"));
         c.setPassword(env("SBASE_POSTGRES_PASSWORD","change-me"));
         c.setMaximumPoolSize(3);c.setMinimumIdle(1);c.setPoolName("sbase-lakehouse-maintenance");
-        ds=new HikariDataSource(c);maintenance=new IcebergMaintenanceService(spark);
+        ds=new HikariDataSource(c);maintenance=new IcebergMaintenanceService(spark);control=new LakehouseControlPlane(ds);
         executor=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"sbase-lakehouse-maintenance");t.setDaemon(true);return t;});
     }
 
@@ -59,7 +60,7 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
               next_run_at=now()+(p.interval_seconds * interval '1 second')
           FROM due WHERE p.id=due.id
           RETURNING p.id,p.workspace_id,p.catalog_name,p.namespace_name,p.table_name,
-                    p.operation,p.retention_days,p.orphan_older_than_hours,p.lease_owner,p.fencing_token
+                    p.operation,p.retention_days,p.orphan_older_than_hours,p.created_by,p.lease_owner,p.fencing_token
         """;
         try(Connection c=ds.getConnection()) {
             c.setAutoCommit(false);
@@ -69,7 +70,7 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
                 try(ResultSet r=s.executeQuery()) {
                     while(r.next()) result.add(new Policy(r.getObject(1,UUID.class),r.getObject(2,UUID.class),
                             r.getString(3),r.getString(4),r.getString(5),r.getString(6),
-                            r.getInt(7),r.getInt(8),r.getObject(9,UUID.class),r.getLong(10)));
+                            r.getInt(7),r.getInt(8),r.getString(9),r.getObject(10,UUID.class),r.getLong(11)));
                 }
                 c.commit();return result;
             } catch(SQLException e) { c.rollback();throw e; }
@@ -88,6 +89,9 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
         String failure=null;
         try {
             if(p.table()==null || p.table().isBlank()) throw new IllegalArgumentException("Maintenance policy must target a table");
+            if(p.createdBy()==null || p.createdBy().isBlank()) throw new SecurityException("Maintenance policy creator is missing");
+            control.requireTable(new LakehouseControlPlane.Principal(p.createdBy(),p.workspace(),Set.of(),null),
+                    p.catalog(),p.namespace(),p.table(),LakehouseControlPlane.Privilege.MODIFY);
             switch(p.operation()) {
                 case "COMPACT" -> maintenance.compact(p.catalog(),p.namespace(),p.table(),128);
                 case "REWRITE_MANIFESTS" -> maintenance.rewriteManifests(p.catalog(),p.namespace(),p.table());
