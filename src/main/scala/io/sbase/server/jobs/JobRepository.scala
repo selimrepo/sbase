@@ -562,7 +562,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
    val a=rs.getString("actor");val permission=rs.getString("permission")
    if(ownerOnly && a!="OWNER"){rs.close();p.close();throw new SecurityException("Notebook owner permission required")}
    if(write && permission!="WRITE"){rs.close();p.close();throw new SecurityException("Notebook write permission required")}
-   if(a=="OWNER") "OWNER" else permission
+   if(a=="OWNER") "OWNER" else "SHARE"
   } else {rs.close();p.close();throw new SecurityException("Notebook not found or access denied")}
   rs.close();p.close();actor
  }
