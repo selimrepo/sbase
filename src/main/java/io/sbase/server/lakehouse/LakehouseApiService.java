@@ -454,6 +454,58 @@ public final class LakehouseApiService implements AutoCloseable {
         return value;
     }
 
+    public List<Map<String,Object>> deadLetters(Session s,UUID runId,int requestedLimit) {
+        requireRunWorkspace(s,runId);
+        int limit=Math.max(1,Math.min(requestedLimit,1000));
+        String sql="SELECT id,source_partition,source_offset::text,record_key,payload::text,error_class,error_message,attempts,status,first_seen_at FROM lakehouse_dead_letter WHERE workspace_id=? AND ingestion_run_id=? ORDER BY first_seen_at LIMIT ?";
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(sql)) {
+            p.setObject(1,s.principal().workspaceId());p.setObject(2,runId);p.setInt(3,limit);
+            try(ResultSet r=p.executeQuery()) {
+                List<Map<String,Object>> out=new ArrayList<>();
+                while(r.next()) {
+                    Map<String,Object> item=new LinkedHashMap<>();item.put("id",r.getObject(1).toString());item.put("partition",r.getString(2));
+                    item.put("offset",JSON.readTree(r.getString(3)));item.put("recordKey",r.getString(4));item.put("payload",JSON.readTree(r.getString(5)));
+                    item.put("errorClass",r.getString(6));item.put("errorMessage",r.getString(7));item.put("attempts",r.getInt(8));
+                    item.put("status",r.getString(9));item.put("firstSeenAt",r.getTimestamp(10).toInstant().toString());out.add(item);
+                }
+                return out;
+            }
+        } catch(Exception e) { throw failure("Unable to list dead-letter records",e); }
+    }
+
+    public List<Map<String,Object>> claimDeadLetters(Session s,UUID runId,int limit) {
+        requireRunWorkspace(s,runId);
+        List<Map<String,Object>> out=new ArrayList<>();
+        for(LakehouseControlPlane.DeadLetter d:control.claimDeadLetters(s.principal().workspaceId(),runId,Math.max(1,Math.min(limit,1000)))) {
+            Map<String,Object> item=new LinkedHashMap<>();item.put("id",d.id().toString());item.put("partition",d.partition());
+            try { item.put("offset",JSON.readTree(d.offsetJson()));item.put("payload",JSON.readTree(d.payloadJson())); }
+            catch(Exception e) { throw failure("Dead-letter payload is invalid JSON",e); }
+            item.put("recordKey",d.recordKey());item.put("errorClass",d.errorClass());item.put("errorMessage",d.errorMessage());
+            item.put("attempts",d.attempts());out.add(item);
+        }
+        return out;
+    }
+
+    public Map<String,Object> finishDeadLetter(Session s,UUID deadLetterId,boolean resolved) {
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
+                "SELECT 1 FROM lakehouse_dead_letter WHERE id=? AND workspace_id=?")) {
+            p.setObject(1,deadLetterId);p.setObject(2,s.principal().workspaceId());
+            try(ResultSet r=p.executeQuery()) { if(!r.next()) throw new SecurityException("Dead-letter record is outside the active workspace"); }
+        } catch(SecurityException e) { throw e; }
+        catch(Exception e) { throw failure("Unable to authorize dead-letter update",e); }
+        control.finishDeadLetter(deadLetterId,resolved);
+        return Map.of("id",deadLetterId.toString(),"status",resolved?"RESOLVED":"PENDING");
+    }
+
+    private void requireRunWorkspace(Session s,UUID runId) {
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
+                "SELECT 1 FROM lakehouse_ingestion_run WHERE id=? AND workspace_id=?")) {
+            p.setObject(1,runId);p.setObject(2,s.principal().workspaceId());
+            try(ResultSet r=p.executeQuery()) { if(!r.next()) throw new SecurityException("Ingestion run is outside the active workspace"); }
+        } catch(SecurityException e) { throw e; }
+        catch(Exception e) { throw failure("Unable to authorize ingestion run",e); }
+    }
+
     private static byte[] decode(String v) { return Base64.getUrlDecoder().decode(v); }
     private static long number(Object v,long fallback) { return v instanceof Number n?n.longValue():fallback; }
     private static String identifier(String v) {
