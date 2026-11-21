@@ -267,6 +267,27 @@ public final class LakehouseApiService implements AutoCloseable {
         } catch(Exception e) { throw failure("Unable to create maintenance policy",e); }
     }
 
+    public Map<String,Object> setMaintenancePolicyEnabled(Session s,UUID policyId,boolean enabled) {
+        String namespace;String table;
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
+                "SELECT namespace_name,table_name FROM lakehouse_maintenance_policy WHERE id=? AND workspace_id=?")) {
+            p.setObject(1,policyId);p.setObject(2,s.principal().workspaceId());
+            try(ResultSet r=p.executeQuery()) {
+                if(!r.next()) throw new NoSuchElementException("Maintenance policy not found in active workspace");
+                namespace=r.getString(1);table=r.getString(2);
+            }
+        } catch(NoSuchElementException e) { throw e; }
+        catch(Exception e) { throw failure("Unable to authorize maintenance policy update",e); }
+        control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.MODIFY);
+        try(Connection c=dataSource.getConnection();PreparedStatement p=c.prepareStatement(
+                "UPDATE lakehouse_maintenance_policy SET enabled=?,next_run_at=CASE WHEN ? THEN now() ELSE next_run_at END,lease_owner=NULL,lease_until=NULL WHERE id=? AND workspace_id=?")) {
+            p.setBoolean(1,enabled);p.setBoolean(2,enabled);p.setObject(3,policyId);p.setObject(4,s.principal().workspaceId());
+            if(p.executeUpdate()!=1) throw new NoSuchElementException("Maintenance policy not found");
+            return Map.of("policyId",policyId.toString(),"enabled",enabled);
+        } catch(NoSuchElementException e) { throw e; }
+        catch(Exception e) { throw failure("Unable to update maintenance policy",e); }
+    }
+
     public List<Map<String,Object>> maintenancePolicies(Session s,String namespace) {
         control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.USE);
         String sql="SELECT id,table_name,operation,interval_seconds,retention_days,orphan_older_than_hours,enabled,next_run_at FROM lakehouse_maintenance_policy WHERE workspace_id=? AND namespace_name=? ORDER BY created_at DESC";
