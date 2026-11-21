@@ -119,10 +119,9 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
         String namespace=required(definition,"targetNamespace");
         String table=required(definition,"targetTable");
         String creator=required(definition,"createdBy");
-        Set<String> groups=new HashSet<>();
-        if(definition.get("creatorGroups") instanceof Collection<?> values)
-            values.forEach(v->{if(v instanceof String group)groups.add(group);});
-        var principal=new LakehouseControlPlane.Principal(creator,job.workspaceId(),groups,null);
+        // Re-authorize with the creator's direct grants at execution time.
+        // Group claims are intentionally not snapshotted into durable job definitions.
+        var principal=new LakehouseControlPlane.Principal(creator,job.workspaceId(),Set.of(),null);
         control.requireNamespace(principal,"sbase",namespace,LakehouseControlPlane.Privilege.USE);
         String target="sbase."+namespace+"."+table;
         boolean targetExists=spark.catalog().tableExists(target);
