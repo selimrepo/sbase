@@ -42,7 +42,7 @@ function SqlWorkspace() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [history, setHistory] = useState(() => JSON.parse(localStorage.getItem("sbase.sql.history") || "[]"));
+  const [history, setHistory] = useState(() => readLocalJson("sbase.sql.history", []));
   async function run(query = sql) {
     setBusy(true); setError(""); setResult(null);
     const started = performance.now();
