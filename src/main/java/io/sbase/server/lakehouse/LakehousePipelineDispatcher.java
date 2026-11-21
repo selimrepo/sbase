@@ -133,7 +133,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
     }
 
     @SuppressWarnings("unchecked")
-    private void runSpark(Job job,Map<String,Object> definition) {
+    private void runSpark(Job job,Map<String,Object> definition) throws Exception {
         try(LakehouseExecutionContext context=LakehouseExecutionContext.enter(job.workspaceId(),"pipeline:"+job.pipelineId())) {
         String sourceType=Objects.toString(definition.get("sourceType"),"");
         Map<String,String> source=stringOptions((Map<?,?>)definition.get("source"));
