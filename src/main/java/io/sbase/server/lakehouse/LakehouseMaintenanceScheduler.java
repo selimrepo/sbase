@@ -72,7 +72,7 @@ public final class LakehouseMaintenanceScheduler implements AutoCloseable {
                             r.getInt(7),r.getInt(8),r.getObject(9,UUID.class),r.getLong(10)));
                 }
                 c.commit();return result;
-            } catch(Exception e) { c.rollback();throw e; }
+            } catch(SQLException e) { c.rollback();throw e; }
         }
     }
 
