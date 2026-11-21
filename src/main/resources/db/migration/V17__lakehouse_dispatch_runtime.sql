@@ -50,3 +50,5 @@ ALTER TABLE lakehouse_maintenance_policy
 CREATE INDEX IF NOT EXISTS ix_lakehouse_maintenance_due_v2
  ON lakehouse_maintenance_policy(next_run_at,lease_until)
  WHERE enabled=true;
+
+UPDATE lakehouse_maintenance_policy SET next_run_at=now() WHERE enabled=true AND next_run_at IS NULL;
