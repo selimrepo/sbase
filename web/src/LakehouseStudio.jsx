@@ -78,7 +78,9 @@ function LakehouseBrowser() {
   const [schema, setSchema] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
   const [error, setError] = useState("");
-  const [newNamespace, setNewNamespace] = useState("");\n  const [maintenance, setMaintenance] = useState([]);\n  const [maintenanceNotice, setMaintenanceNotice] = useState("");
+  const [newNamespace, setNewNamespace] = useState("");
+  const [maintenance, setMaintenance] = useState([]);
+  const [maintenanceNotice, setMaintenanceNotice] = useState("");
   async function load() {
     setError("");
     try {
