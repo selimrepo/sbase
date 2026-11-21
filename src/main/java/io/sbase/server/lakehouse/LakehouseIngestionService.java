@@ -48,7 +48,8 @@ public final class LakehouseIngestionService {
 
     public void appendIceberg(Dataset<Row> data, String catalog, String namespace, String table) {
         String identifier=identifier(catalog,namespace,table);
-        data.writeTo(identifier).append();
+        if(spark.catalog().tableExists(identifier)) data.writeTo(identifier).append();
+        else data.writeTo(identifier).using("iceberg").create();
     }
 
     public void createIcebergTable(Dataset<Row> data, String catalog, String namespace, String table,
