@@ -139,6 +139,29 @@ object LakehouseApiRoutes extends Directives {
           }}
         }
       } ~
+      path("lakehouse" / "runs" / JavaUUID / "dead-letter") { runId =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          get { parameter("limit".as[Int].withDefault(200)) { limit =>
+            run(auth)(s => service.get.deadLetters(s,runId,limit))
+          }}
+        }
+      } ~
+      path("lakehouse" / "runs" / JavaUUID / "dead-letter" / "claim") { runId =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          post { entity(as[JsObject]) { body =>
+            val limit=body.fields.get("limit").map(_.convertTo[Int]).getOrElse(100)
+            run(auth)(s => service.get.claimDeadLetters(s,runId,limit))
+          }}
+        }
+      } ~
+      path("lakehouse" / "dead-letter" / JavaUUID / "finish") { deadLetterId =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          post { entity(as[JsObject]) { body =>
+            val resolved=body.fields.get("resolved").exists(_.convertTo[Boolean])
+            run(auth)(s => service.get.finishDeadLetter(s,deadLetterId,resolved))
+          }}
+        }
+      } ~
       path("lakehouse" / "sources" / JavaUUID / "cdc" / "offsets") { sourceId =>
         optionalHeaderValueByName("Authorization") { auth =>
           post { entity(as[JsObject]) { body =>
