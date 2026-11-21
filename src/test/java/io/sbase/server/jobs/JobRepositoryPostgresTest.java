@@ -106,6 +106,17 @@ class JobRepositoryPostgresTest {
             "Collaborator edit");
         assertEquals(2L, updated);
         assertEquals("WRITE", repository.getNotebook(notebookId, writeToken).apply("actor"));
+        try (var connection=dataSource.getConnection();
+             var statement=connection.prepareStatement(
+                 "SELECT actor_kind FROM lakehouse_notebook_event WHERE notebook_id=? AND event_type='UPDATED' ORDER BY id DESC LIMIT 1")) {
+            statement.setObject(1,notebookId);
+            try(var rows=statement.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals("SHARE",rows.getString(1),"event actor kind is distinct from share permission");
+            }
+        } catch (java.sql.SQLException e) {
+            throw new AssertionError("Unable to verify notebook event actor kind",e);
+        }
         assertEquals(2, repository.notebookRevisions(notebookId, ownerToken).size());
         assertThrows(IllegalStateException.class, () -> repository.updateNotebook(notebookId, ownerToken,
             1L, "stale edit", "", "[]", "stale save"));
