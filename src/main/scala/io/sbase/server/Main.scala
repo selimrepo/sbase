@@ -82,6 +82,8 @@ object Main {
   val host=sys.env.getOrElse("SBASE_HTTP_HOST","0.0.0.0")
   val port=sys.env.get("SBASE_HTTP_PORT").flatMap(_.toIntOption).getOrElse(8080)
   val lakehouseApi = try { Some(new io.sbase.server.lakehouse.LakehouseApiService(operators.sparkSession)) } catch { case error:Throwable => system.log.error("Authenticated Lakehouse API disabled: {}",error.getMessage); None }
+  val lakehouseMaintenance = new io.sbase.server.lakehouse.LakehouseMaintenanceScheduler(operators.sparkSession)
+  lakehouseMaintenance.start()
 
   val deploymentRoutes =
   optionalHeaderValueByName("X-SBase-Admin-Token"){provided=>
