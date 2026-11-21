@@ -91,7 +91,7 @@ class JobRepositoryPostgresTest {
     @Test
     void notebooksPersistRevisionsAndEnforceRevocableSharePermissions() {
         var created = repository.createNotebook("shared-analysis", "team notebook",
-            "[{\\"id\\":1,\\"type\\":\\"sql\\",\\"source\\":\\"SELECT 1\\"}]");
+            "[{\"id\":1,\"type\":\"sql\",\"source\":\"SELECT 1\"}]");
         String ownerToken = created._2();
         UUID notebookId = UUID.fromString(String.valueOf(created._1().get("id")));
         assertEquals(1, repository.listNotebooks(ownerToken).size());
@@ -102,7 +102,7 @@ class JobRepositoryPostgresTest {
         String writeToken = String.valueOf(writeShare.get("token"));
         assertEquals(1, repository.listNotebooks(writeToken).size());
         long updated = repository.updateNotebook(notebookId, writeToken, 1L, "shared-analysis",
-            "edited by collaborator", "[{\\"id\\":1,\\"type\\":\\"sql\\",\\"source\\":\\"SELECT 2\\"}]",
+            "edited by collaborator", "[{\"id\":1,\"type\":\"sql\",\"source\":\"SELECT 2\"}]",
             "Collaborator edit");
         assertEquals(2L, updated);
         assertEquals("WRITE", repository.getNotebook(notebookId, writeToken).get("actor"));
