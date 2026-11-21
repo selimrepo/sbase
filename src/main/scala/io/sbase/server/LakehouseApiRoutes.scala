@@ -99,6 +99,57 @@ object LakehouseApiRoutes extends Directives {
           }}
         }
       } ~
+      path("lakehouse" / "namespaces" / Segment / "grants") { namespace =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          get { run(auth)(s => service.get.grants(s,namespace)) } ~
+          post { entity(as[JsObject]) { body =>
+            val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
+            run(auth)(s => service.get.grantNamespace(s,namespace,request))
+          }}
+        }
+      } ~
+      path("lakehouse" / "namespaces" / Segment / "grants" / "revoke") { namespace =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          post { entity(as[JsObject]) { body =>
+            val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
+            run(auth)(s => service.get.revokeGrant(s,namespace,null,request))
+          }}
+        }
+      } ~
+      path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "grants") { (namespace,table) =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          post { entity(as[JsObject]) { body =>
+            val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
+            run(auth)(s => service.get.grantTable(s,namespace,table,request))
+          }}
+        }
+      } ~
+      path("lakehouse" / "namespaces" / Segment / "tables" / Segment / "grants" / "revoke") { (namespace,table) =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          post { entity(as[JsObject]) { body =>
+            val request=mapper.readValue(body.compactPrint,new TypeReference[java.util.Map[String,Object]]() {})
+            run(auth)(s => service.get.revokeGrant(s,namespace,table,request))
+          }}
+        }
+      } ~
+      path("lakehouse" / "namespaces" / Segment / "lineage") { namespace =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          get { parameter("limit".as[Int].withDefault(200)) { limit =>
+            run(auth)(s => service.get.lineage(s,namespace,limit))
+          }}
+        }
+      } ~
+      path("lakehouse" / "sources" / JavaUUID / "cdc" / "offsets") { sourceId =>
+        optionalHeaderValueByName("Authorization") { auth =>
+          post { entity(as[JsObject]) { body =>
+            val stream=body.fields.get("stream").map(_.convertTo[String]).getOrElse("")
+            val partition=body.fields.get("partition").map(_.convertTo[String]).getOrElse("")
+            val offset=body.fields.get("offset").map(_.compactPrint).getOrElse("{}")
+            val generation=body.fields.get("expectedGeneration").map(_.convertTo[Long]).getOrElse(0L)
+            run(auth)(s => service.get.commitCdcOffset(s,sourceId,stream,partition,offset,generation))
+          }}
+        }
+      } ~
       path("lakehouse" / "pipelines") {
         optionalHeaderValueByName("Authorization") { auth =>
           get { run(auth)(s => service.get.pipelines(s)) } ~
