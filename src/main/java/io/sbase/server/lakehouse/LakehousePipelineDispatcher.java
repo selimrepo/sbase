@@ -92,13 +92,16 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
             Map<String,Object> result=Map.of("engine","SPARK");
             try {
                 Map<String,Object> definition=JSON.readValue(job.definition(),MAP);
-                authorizeTarget(job,definition);
-                String engine=Objects.toString(definition.get("engine"),"SPARK");
-                if("FLINK".equalsIgnoreCase(engine)) {
-                    result=submitFlink(definition);
-                    longRunning=true;
-                } else {
-                    runSpark(job,definition);
+                try(LakehouseExecutionContext context=LakehouseExecutionContext.enter(
+                        job.workspaceId(),Objects.toString(definition.get("createdBy"),"lakehouse-dispatcher"))) {
+                    authorizeTarget(job,definition);
+                    String engine=Objects.toString(definition.get("engine"),"SPARK");
+                    if("FLINK".equalsIgnoreCase(engine)) {
+                        result=submitFlink(definition);
+                        longRunning=true;
+                    } else {
+                        runSpark(job,definition);
+                    }
                 }
                 finish(job,longRunning? "RUNNING":"SUCCEEDED",null,longRunning,result);
             } catch(Throwable e) {
