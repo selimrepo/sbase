@@ -165,6 +165,66 @@ public final class LakehouseApiService implements AutoCloseable {
         } catch(Exception e) { throw failure("Lakehouse SQL query failed",e); }
     }
 
+    public Map<String,Object> schema(Session s,String namespace,String table) {
+        identifier(namespace);identifier(table);
+        control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.SELECT);
+        Dataset<Row> frame=spark.table("sbase."+namespace+"."+table);
+        return Map.of("catalog","sbase","namespace",namespace,"table",table,
+                "schema",JSON.valueToTree(frame.schema()),"columns",Arrays.asList(frame.schema().fieldNames()));
+    }
+
+    public List<Map<String,Object>> snapshots(Session s,String namespace,String table) {
+        identifier(namespace);identifier(table);
+        control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.SELECT);
+        try {
+            List<Map<String,Object>> out=new ArrayList<>();
+            for(String json:spark.sql("SELECT * FROM sbase."+namespace+"."+table+".snapshots ORDER BY committed_at DESC LIMIT 100").toJSON().collectAsList())
+                out.add(JSON.readValue(json,MAP));
+            return out;
+        } catch(Exception e) { throw failure("Unable to read Iceberg snapshots",e); }
+    }
+
+    public Map<String,Object> compact(Session s,String namespace,String table) {
+        identifier(namespace);identifier(table);
+        control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.MODIFY);
+        new IcebergMaintenanceService(spark).compact("sbase",namespace,table,128);
+        return Map.of("namespace",namespace,"table",table,"status","COMPACTION_COMPLETED");
+    }
+
+    public Map<String,Object> createMaintenancePolicy(Session s,String namespace,String table,String operation,int intervalSeconds,
+                                                        int retentionDays,int orphanHours) {
+        identifier(namespace);identifier(table);
+        control.requireTable(s.principal(),"sbase",namespace,table,LakehouseControlPlane.Privilege.MODIFY);
+        Set<String> allowed=Set.of("COMPACT","REWRITE_MANIFESTS","EXPIRE_SNAPSHOTS","REMOVE_ORPHAN_FILES");
+        if(!allowed.contains(operation)) throw new IllegalArgumentException("Unsupported maintenance operation");
+        if(intervalSeconds<60 || intervalSeconds>31536000 || retentionDays<1 || orphanHours<24)
+            throw new IllegalArgumentException("Invalid maintenance schedule or retention");
+        UUID id=UUID.randomUUID();
+        String sql="INSERT INTO lakehouse_maintenance_policy(id,workspace_id,catalog_name,namespace_name,table_name,operation,cron_expression,interval_seconds,retention_days,orphan_older_than_hours,next_run_at,created_by) VALUES(?,?,'sbase',?,?,?,'interval',?,?,?,?,?)";
+        try(var c=dataSource.getConnection();var p=c.prepareStatement(sql)) {
+            p.setObject(1,id);p.setObject(2,s.principal().workspaceId());p.setString(3,namespace);p.setString(4,table);
+            p.setString(5,operation);p.setInt(6,intervalSeconds);p.setInt(7,retentionDays);p.setInt(8,orphanHours);
+            p.setTimestamp(9,java.sql.Timestamp.from(Instant.now()));p.setString(10,s.subject());p.executeUpdate();
+            return Map.of("policyId",id.toString(),"namespace",namespace,"table",table,"operation",operation,
+                    "intervalSeconds",intervalSeconds,"status","ENABLED");
+        } catch(Exception e) { throw failure("Unable to create maintenance policy",e); }
+    }
+
+    public List<Map<String,Object>> maintenancePolicies(Session s,String namespace) {
+        control.requireNamespace(s.principal(),"sbase",namespace,LakehouseControlPlane.Privilege.USE);
+        String sql="SELECT id,table_name,operation,interval_seconds,retention_days,orphan_older_than_hours,enabled,next_run_at FROM lakehouse_maintenance_policy WHERE workspace_id=? AND namespace_name=? ORDER BY created_at DESC";
+        try(var c=dataSource.getConnection();var p=c.prepareStatement(sql)) {
+            p.setObject(1,s.principal().workspaceId());p.setString(2,namespace);
+            try(var r=p.executeQuery()) {
+                List<Map<String,Object>> out=new ArrayList<>();
+                while(r.next()) out.add(Map.of("id",r.getObject(1).toString(),"table",Objects.toString(r.getString(2),""),"operation",r.getString(3),
+                        "intervalSeconds",r.getInt(4),"retentionDays",r.getInt(5),"orphanOlderThanHours",r.getInt(6),
+                        "enabled",r.getBoolean(7),"nextRunAt",Objects.toString(r.getTimestamp(8),"")));
+                return out;
+            }
+        } catch(Exception e) { throw failure("Unable to list maintenance policies",e); }
+    }
+
     private static byte[] decode(String v) { return Base64.getUrlDecoder().decode(v); }
     private static long number(Object v,long fallback) { return v instanceof Number n?n.longValue():fallback; }
     private static String identifier(String v) {
