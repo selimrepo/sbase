@@ -91,7 +91,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
                 submitFlink(definition);
                 longRunning=true;
             } else {
-                runSpark(definition);
+                runSpark(job,definition);
             }
             finish(job,longRunning? "RUNNING":"SUCCEEDED",null,longRunning);
         } catch(Throwable e) {
@@ -100,7 +100,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
     }
 
     @SuppressWarnings("unchecked")
-    private void runSpark(Map<String,Object> definition) {
+    private void runSpark(Job job,Map<String,Object> definition) {\n        try(LakehouseExecutionContext context=LakehouseExecutionContext.enter(job.workspaceId(),"pipeline:"+job.pipelineId())) {
         String sourceType=Objects.toString(definition.get("sourceType"),"");
         Map<String,String> source=stringOptions((Map<?,?>)definition.get("source"));
         String secretRef=Objects.toString(definition.get("secretRef"),"");
@@ -116,10 +116,7 @@ public final class LakehousePipelineDispatcher implements AutoCloseable {
                     source.getOrDefault("startingOffsets","earliest"),options);
             default -> throw new IllegalArgumentException("Unsupported Spark ingestion source "+sourceType);
         }
-        ingestion.appendIceberg(data,"sbase",required(definition,"targetNamespace"),required(definition,"targetTable"));
-    }
-
-    private void submitFlink(Map<String,Object> definition) throws Exception {
+        ingestion.appendIceberg(data,"sbase",required(definition,"targetNamespace"),required(definition,"targetTable"));\n        }\n    }\n\n    private void submitFlink(Map<String,Object> definition) throws Exception {
         Map<String,Object> config=definition.get("configuration") instanceof Map<?,?> m ? objectMap(m) : new LinkedHashMap<>();
         String jarId=required(config,"flinkJarId");
         String sourceDdl=required(config,"sourceDdl");
