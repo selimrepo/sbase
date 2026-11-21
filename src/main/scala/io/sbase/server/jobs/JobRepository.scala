@@ -635,7 +635,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
    val version=rs.getLong(1);rs.close();p.close()
    val rev=c.prepareStatement("INSERT INTO lakehouse_notebook_revision(notebook_id,version,title,description,cells,change_summary) VALUES (?,?,?,?,?::jsonb,?)")
    rev.setObject(1,id);rev.setLong(2,version);rev.setString(3,title.trim);rev.setString(4,Option(description).orNull);rev.setString(5,cells);rev.setString(6,Option(summary).filter(_.trim.nonEmpty).getOrElse("Notebook updated"));rev.executeUpdate();rev.close()
-   notebookEvent(c,id,"UPDATED",actor,"{""version"":"+version+"}");c.commit();version
+   notebookEvent(c,id,"UPDATED",actor,s"""{"version":$version}""");c.commit();version
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
  }
 
@@ -658,7 +658,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
    c.setAutoCommit(false);notebookAccess(c,id,ownerToken,true,true)
    val p=c.prepareStatement("INSERT INTO lakehouse_notebook_share(id,notebook_id,token_hash,permission,label,expires_at) VALUES (?,?,?,?,?,?::timestamptz)")
    p.setObject(1,shareId);p.setObject(2,id);p.setString(3,notebookTokenHash(token));p.setString(4,role);p.setString(5,Option(label).orNull);p.setString(6,expiresAt.orNull);p.executeUpdate();p.close()
-   notebookEvent(c,id,"SHARE_CREATED","OWNER","{""shareId"":"""+shareId+""",""permission"":"""+role+"""}");c.commit()
+   notebookEvent(c,id,"SHARE_CREATED","OWNER",s"""{"shareId":"$shareId","permission":"$role"}""");c.commit()
    Map[String,Object]("shareId"->shareId.toString,"permission"->role,"label"->Option(label).orNull,"token"->token)
   } catch {case e:Throwable=>c.rollback();throw e} finally c.close()
  }
