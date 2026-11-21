@@ -87,7 +87,7 @@ jobs:
       - name: Validate full platform Compose configuration
         run: docker compose -f compose.yaml -f compose.full.yaml --profile full config --quiet
       - name: Build and start every platform service
-        run: docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d
+        run: docker compose -f compose.yaml -f compose.full.yaml --profile full up --build -d --scale flink-taskmanager=2
       - name: Wait for API, Studio, PostgreSQL and all engines
         shell: bash
         run: |
@@ -109,8 +109,10 @@ jobs:
               && curl --fail --silent http://localhost:8081/json/ >/dev/null \
               && curl --fail --silent http://localhost:8082/overview >/dev/null \
               && curl --fail --silent http://localhost:9000/minio/health/ready >/dev/null \
-              && docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 >/dev/null 2>&1; then
-              echo "API, Studio, PostgreSQL, Cassandra, Solr, Spark, Flink, Kafka and MinIO are ready."
+              && docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 >/dev/null 2>&1 \
+              && docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka-2 /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka-2:9092 >/dev/null 2>&1 \
+              && docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka-3 /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka-3:9092 >/dev/null 2>&1; then
+              echo "API, Studio, PostgreSQL, Cassandra, Solr, Spark, two Flink TaskManagers, three Kafka brokers and MinIO are ready."
               break
             fi
             if [ "$attempt" -eq 90 ]; then
@@ -155,7 +157,7 @@ jobs:
           # Exercise the real Kafka -> Flink SQL -> Iceberg -> MinIO path.
           docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka \
             /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
-            --topic sbase-ci-orders --partitions 3 --replication-factor 1
+            --topic sbase-ci-orders --partitions 3 --replication-factor 3
           docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T flink-jobmanager sh -c "cat > /tmp/sbase-kafka-iceberg.sql <<'EOF'
           SET execution.checkpointing.interval = 10s;
           SET execution.checkpointing.mode = EXACTLY_ONCE;
@@ -180,7 +182,7 @@ jobs:
           ) WITH (
             'connector'='kafka',
             'topic'='sbase-ci-orders',
-            'properties.bootstrap.servers'='kafka:9092',
+            'properties.bootstrap.servers'='kafka:9092,kafka-2:9092,kafka-3:9092',
             'properties.group.id'='sbase-ci-flink-iceberg',
             'scan.startup.mode'='earliest-offset',
             'format'='json'
@@ -201,7 +203,7 @@ jobs:
             '{"order_id":900001,"region":"EU","amount":41.25}' \
             '{"order_id":900002,"region":"APAC","amount":99.5}' | \
             docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T kafka \
-              /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 --topic sbase-ci-orders
+              /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092,kafka-2:9092,kafka-3:9092 --topic sbase-ci-orders
           for attempt in {1..60}; do
             COUNT="$(curl --fail --silent "http://localhost:8080/api/v1/lakehouse/namespaces/ci_lakehouse/tables/orders?limit=100" \
               "${AUTH[@]}" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("rowCount",0))')"
@@ -220,7 +222,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent http://localhost:8081/json/ | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d.get("workers", [])) >= 1, "Spark has no registered workers"'
-          curl --fail --silent http://localhost:8082/taskmanagers | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d.get("taskmanagers", [])) >= 1, "Flink has no registered TaskManagers"'
+          curl --fail --silent http://localhost:8082/taskmanagers | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d.get("taskmanagers", [])) >= 2, "Flink has fewer than two registered TaskManagers"'
           for service in flink-jobmanager flink-taskmanager; do
             docker compose -f compose.yaml -f compose.full.yaml --profile full exec -T "$service" sh -ec '
               test -n "$(find /opt/flink/lib -maxdepth 1 -name "flink-sql-connector-kafka-*.jar" -print -quit)"
