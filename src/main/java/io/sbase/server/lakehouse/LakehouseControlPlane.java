@@ -203,19 +203,38 @@ public final class LakehouseControlPlane {
     /** Compare-and-set CDC checkpoint: offsets cannot move backwards by racing writers. */
     public boolean commitCdcOffset(UUID workspaceId, UUID sourceId, String stream, String partition,
                                    String offsetJson, long expectedGeneration) {
-        String sql = """
-            INSERT INTO lakehouse_cdc_offset(workspace_id,source_id,stream_name,partition_key,committed_offset,generation)
-            SELECT ?,?,?,?,CAST(? AS jsonb),1 WHERE ?=0
-            ON CONFLICT (workspace_id,source_id,stream_name,partition_key)
-            DO UPDATE SET committed_offset=EXCLUDED.committed_offset,
-              generation=lakehouse_cdc_offset.generation+1, updated_at=now()
-            WHERE lakehouse_cdc_offset.generation=?
-            """;
-        try (Connection c=dataSource.getConnection(); PreparedStatement s=c.prepareStatement(sql)) {
-            s.setObject(1,workspaceId); s.setObject(2,sourceId); s.setString(3,stream);
-            s.setString(4,partition); s.setString(5,offsetJson); s.setLong(6,expectedGeneration); s.setLong(7,expectedGeneration);
-            return s.executeUpdate()==1;
-        } catch (SQLException e) { throw new IllegalStateException("Unable to commit CDC offset",e); }
+        String select = "SELECT generation FROM lakehouse_cdc_offset WHERE workspace_id=? AND source_id=? AND stream_name=? AND partition_key=? FOR UPDATE";
+        String insert = "INSERT INTO lakehouse_cdc_offset(workspace_id,source_id,stream_name,partition_key,committed_offset,generation) VALUES (?,?,?,?,CAST(? AS jsonb),1)";
+        String update = "UPDATE lakehouse_cdc_offset SET committed_offset=CAST(? AS jsonb),generation=generation+1,updated_at=now() WHERE workspace_id=? AND source_id=? AND stream_name=? AND partition_key=? AND generation=?";
+        try (Connection c=dataSource.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                Long current=null;
+                try (PreparedStatement q=c.prepareStatement(select)) {
+                    q.setObject(1,workspaceId); q.setObject(2,sourceId); q.setString(3,stream); q.setString(4,partition);
+                    try (ResultSet r=q.executeQuery()) { if(r.next()) current=r.getLong(1); }
+                }
+                if(current==null && expectedGeneration!=0) { c.rollback(); return false; }
+                if(current!=null && current!=expectedGeneration) { c.rollback(); return false; }
+                if(current==null) {
+                    try (PreparedStatement s=c.prepareStatement(insert)) {
+                        s.setObject(1,workspaceId); s.setObject(2,sourceId); s.setString(3,stream);
+                        s.setString(4,partition); s.setString(5,offsetJson); s.executeUpdate();
+                    }
+                } else {
+                    try (PreparedStatement s=c.prepareStatement(update)) {
+                        s.setString(1,offsetJson); s.setObject(2,workspaceId); s.setObject(3,sourceId);
+                        s.setString(4,stream); s.setString(5,partition); s.setLong(6,expectedGeneration);
+                        if(s.executeUpdate()!=1) { c.rollback(); return false; }
+                    }
+                }
+                c.commit(); return true;
+            } catch(SQLException e) {
+                c.rollback();
+                if("23505".equals(e.getSQLState())) return false;
+                throw e;
+            }
+        } catch(SQLException e) { throw new IllegalStateException("Unable to commit CDC offset",e); }
     }
 
     public UUID enqueueDeadLetter(UUID workspaceId, UUID runId, String partition, String offsetJson,
