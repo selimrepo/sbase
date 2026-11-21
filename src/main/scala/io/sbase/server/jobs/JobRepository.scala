@@ -374,7 +374,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
     | d.max_concurrent_runs,d.max_attempts,d.invocation_count,d.last_invoked_at,d.created_at,d.updated_at,
     | (SELECT COUNT(*) FROM job_execution j WHERE j.deployment_id=d.id
     |  AND j.status IN ('QUEUED','RUNNING','RETRY_WAIT')) AS active_runs
-    | FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id """+
+    | FROM workflow_deployment d JOIN workflow w ON w.id=d.workflow_id """.stripMargin+
     (if(workflowId.isDefined)"WHERE d.workflow_id=? " else "")+"ORDER BY d.updated_at DESC LIMIT ?"
    val p=c.prepareStatement(sql);var i=1;workflowId.foreach{id=>p.setObject(i,id);i+=1};p.setInt(i,math.max(1,math.min(limit,500)))
    val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
