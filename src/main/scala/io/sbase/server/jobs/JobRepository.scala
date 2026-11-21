@@ -596,7 +596,7 @@ final class JobRepository(dataSource: HikariDataSource, leaseSeconds: Int) {
     | FROM lakehouse_notebook n LEFT JOIN lakehouse_notebook_share s
     | ON s.notebook_id=n.id AND s.token_hash=? AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at>now())
     | WHERE n.deleted_at IS NULL AND (n.owner_token_hash=? OR s.id IS NOT NULL)
-    | ORDER BY n.updated_at DESC""")
+    | ORDER BY n.updated_at DESC""".stripMargin)
    (1 to 4).foreach(i=>p.setString(i,hash));val rs=p.executeQuery();val out=ArrayBuffer.empty[Map[String,Object]]
    while(rs.next())out+=Map[String,Object]("id"->rs.getString("id"),"title"->rs.getString("title"),
     "description"->Option(rs.getString("description")).orNull,"version"->Long.box(rs.getLong("version")),
